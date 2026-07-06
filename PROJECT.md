@@ -2,7 +2,7 @@
 
 > Working title, name TBD. A local-first, agent-agnostic coding-agent orchestrator built around a "software factory" loop: human authors the spec, an agent builds autonomously in an isolated worktree, a dedicated verification gate validates, and the human reviews and merges.
 
-Status: draft / pre-M0. Last updated: 2026-07-02.
+Status: draft / pre-M0. Last updated: 2026-07-06.
 
 ---
 
@@ -36,6 +36,8 @@ Owns:
 - State — SQLite (tasks, sessions, run history, gate results).
 - API — HTTP + WebSocket. This is the contract every client shares.
 
+The daemon ships as a single binary installed independently of any repo (cargo install / brew / curl-install). State is per-repo: the daemon manages a `.marshal/` directory in the repo root, and global config lives in `~/.marshal/`. State is discovered via cwd, same model as git — "one daemon per project" still composes on a VPS (run N daemons for N projects).
+
 ### 3.2 Clients (thin, all talk to the daemon API)
 
 - Web board — primary control surface. Kanban view, diff review with inline comments, merge.
@@ -49,6 +51,17 @@ Owns:
 - Starting agents: opencode as builder, pi as validator. Both have clean programmatic surfaces and ACPX adapters, and using two different lineages gives the decorrelated builder/validator split for free.
 - Later agents (near-free via ACP): claude, codex, gemini, kimi. Note Claude Code and Codex are adapter-wrapped rather than native ACP, so expect occasional adapter lag;
 that is a reason to prove the loop on opencode/pi first.
+
+### 3.4 Data and source of truth
+
+Where content lives depends on its lifecycle phase:
+
+- Project context (architecture, conventions, business case) — plain markdown in the repo (`AGENTS.md`, `PROJECT.md`, etc.). Version-controlled with the code, readable by any agent including standalone ones not in the marshal loop. Marshal does not own this; the repo does.
+- Working spec (during authoring) — in SQLite. The spec-authoring surface is a grill-me chat UI where the human and an agent iterate conversationally before finalizing (see 7). Concurrent editing and WebSocket broadcast make SQLite the right home. A markdown render may exist but is a generated view, not source.
+- Frozen spec (build contract) — committed markdown in the repo (`specs/NNNN-slug.md`, ADR-style). At the Ready transition the daemon renders the working spec to a file and commits it to the task branch. The builder's worktree is a checkout of that branch, so it sees the spec via git with no copying. Specs persist in main as institutional memory after merge.
+- Kanban state, run history, gate results — SQLite. Pure state machine data and append-only logs.
+
+The split maps to the board: authoring is collaborative and mutable (SQLite); the build run is contractual and immutable (committed file). The freeze at Ready is the only bridge between them.
 
 ## 4. Anti-corruption layer around ACPX
 
@@ -70,10 +83,10 @@ copy
 
 Backlog / Spec  ->  Ready  ->  Building  ->  Validating  ->  Review  ->  Done
 
-- Backlog / Spec — human drafts the task; may iterate with an agent, but human owns the final acceptance criteria.
-- Ready — marked by the human. Signals the orchestrator to pick it up.
-- Building — orchestrator spins a worktree, runs the builder agent (opencode) headless until the fast in-loop gates pass or a step budget is hit.
-- Validating — the boundary gate runs in a separate worktree with a different model (pi). Hidden acceptance tests the builder never saw.
+- Backlog / Spec — human drafts the task in a grill-me chat UI with an agent (see 7). Human owns the final acceptance criteria. Working spec lives in SQLite during this phase.
+- Ready — human marks the spec frozen. Daemon renders it to a committed markdown file (see 3.4). Signals the orchestrator to pick it up.
+- Building — orchestrator spins a worktree, runs the builder agent (opencode) headless until the fast in-loop gates pass or a step budget is hit. The agent self-plans via its own todo tooling; there is no separate Plan board state — planning is internal to the build run, not a HITL checkpoint.
+- Validating — the boundary gate runs in a separate worktree with a different model (pi). Tests live in the repo; the builder can see them, but they are executed by the decorrelated validator.
 - Review — human reviews the diff, comments, merges.
 - Done — merged.
 
@@ -91,15 +104,17 @@ Concurrency capped at 1 initially.
 
 Two levels, borrowed from the mainstream software-factory framing:
 
-- In-loop (fast, cheap, deterministic): typecheck, lint, unit tests. Runs inside the builder's iteration. The builder can see these.
-- Boundary (comprehensive): integration and scenario tests. The builder must NOT see these. Store acceptance tests outside the agent's reachable codebase (the "hidden grader" pattern) so it optimizes toward the spec instead of gaming visible tests. Structurally similar to the no-mistakes model: validation runs in its own disposable worktree after the build, and forwards upstream only when everything passes.
+- In-loop (fast, cheap, deterministic): typecheck, lint, unit tests. Runs inside the builder's iteration. The builder can see and fix these.
+- Boundary (comprehensive): integration and scenario tests, run in a separate disposable worktree after the build. The tests live in the repo — the builder can see them — but they are executed by the decorrelated validator, not the builder.
 
-Decorrelated validator: the boundary gate uses a different model/agent than the build. This is the single highest-leverage design choice for "no mistakes."
+Decorrelated validator: the boundary gate uses a different model/agent than the build. This is the single highest-leverage design choice for "no mistakes" — a second model in a clean worktree, re-checking the builder's diff against the full test suite, catches what the builder's blind spots miss.
 
 ## 7. Spec authoring
 
+- The spec-authoring surface is a grill-me chat UI: the human and an agent iterate on the spec conversationally, bouncing ideas and exploring before finalizing. The working spec lives in SQLite during this phase (concurrent editing, WebSocket broadcast).
 - Human owns acceptance criteria. An agent may help draft the spec, but if the same agent writes and implements it, it will write a spec it already knows it can satisfy.
-- The spec should encode the checks: acceptance criteria map directly to the boundary gate's hidden tests.
+- At the Ready transition, the daemon freezes the working spec: renders it to `specs/NNNN-slug.md` and commits it to the task branch. This frozen file is the immutable contract for the build run. The builder reads it via git in its worktree. If the spec is wrong mid-build, that is a new build run — unfreeze, revise, re-freeze.
+- Acceptance criteria in the spec map to the boundary gate's test suite (visible to the builder, executed by the decorrelated validator).
 
 ## 8. Security and sandboxing
 
@@ -123,14 +138,13 @@ ecosystem) | swappable via ACP |
 
 - M0 — vertical slice / go-no-go. Daemon spawns opencode via the ACPX adapter on a Ready task, runs headless in a worktree to completion, hands the diff to pi as validator, and routes pass/fail through the state machine. No UI yet. This proves or kills the whole design.
 - M1 — control plane. Kanban board (web), task state in SQLite, worktree lifecycle, PR creation and merge.
-- M2 — the gate, first-class. Two-level verification, hidden acceptance tests, decorrelated validator, retry/escalation routing. This is the differentiator; invest here.
+- M2 — the gate, first-class. Two-level verification, decorrelated validator, retry/escalation routing. This is the differentiator; invest here.
 - M3 — more agents. claude, codex, gemini, kimi via ACP. Mostly config, not code.
 - M4 — clients. TUI, optional VS Code webview panel. Editor deep-links.
 
 ## 11. Open questions
 
 - Container vs VM for builder isolation on the VPS? (devcontainer is probably enough; VM if paranoid.)
-- Where do hidden acceptance tests live so the builder cannot reach them but the validator can? (separate repo? mounted read-only at validate time?)
 - Auto-merge change-class taxonomy: which classes graduate first (docs, tests, pure refactors)?
 - Do we adopt OpenClaw's gateway wholesale, or use ACPX standalone and build our own orchestration? (Leaning standalone ACPX to avoid coupling to a second large moving system.)
 - Naming.
