@@ -1,10 +1,10 @@
 {
   "name": "marshal",
   "version": "0.0.1",
-  "type": "module",
   "bin": {
     "marshal": "./bin/marshal"
   },
+  "type": "module",
   "scripts": {
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
     "test": "vitest run",
