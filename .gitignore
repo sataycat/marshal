@@ -6,6 +6,10 @@ node_modules
 dist
 *.tsbuildinfo
 
+# Marshal state
+.marshal
+.marshal-global
+
 # Logs
 *.log
 

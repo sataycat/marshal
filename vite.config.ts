@@ -1,9 +1,6 @@
-import { defineConfig } from "vite-plus";
-
-export default defineConfig({
+export default {
   staged: {
-    "*": "vp check --fix",
+    "*.{js,cjs,mjs,ts,cts,mts,md,yaml,yml}": "vp fmt --check",
+    "*.{js,cjs,mjs,ts,cts,mts}": "vp lint",
   },
-  fmt: {},
-  lint: { options: { typeAware: true, typeCheck: true } },
-});
+};

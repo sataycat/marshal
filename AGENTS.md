@@ -1,18 +1,17 @@
-# Toolchain: use `vp`, not npm/pnpm/vite
+# Toolchain
 
-This repo uses **Vite+**. The CLI is **`vp`**. You likely were not trained on it — **do not guess** familiar commands.
+Use standard package-manager commands for development. The repo pins `pnpm@11.10.0` via `packageManager`.
 
-**Do not run:** `npm`, `pnpm`, `yarn`, `npx`, `vite`, `vitest`, `eslint`, `prettier` directly.
+- Install: `pnpm install`
+- Build: `pnpm run build`
+- Test: `pnpm run test`
+- Type-check: `pnpm run check`
+- Custom `package.json` scripts: `pnpm run <script>`
 
-Use `vp` for everything:
+## Pre-commit hooks
 
-- Install: `vp install`
-- Dev: `vp dev`
-- Build: `vp build`
-- Test: `vp test`
-- Format, lint, type-check: `vp check`
-- Custom `package.json` scripts: `vp run <script>` (not `pnpm run`)
+Vite+ is still used only for staged pre-commit formatting and linting:
+
 - Staged pre-commit checks: `vp staged`
-- Help: `vp help` · `vp <command> --help` · `node_modules/vite-plus/docs`
 
-Before finishing: `vp install` (after pull) → `vp check && vp test` → any extra `vp run …` scripts. If env/setup looks wrong: `vp env doctor`.
+Run `pnpm install` (after pull) → `pnpm run check && pnpm run test` → any extra `pnpm run …` scripts before finishing.

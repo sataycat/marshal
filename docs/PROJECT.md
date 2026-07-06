@@ -29,6 +29,7 @@ Deployment target is a single box or a VPS. Models are accessed via API (frontie
 ### 3.1 Headless core daemon (runs on the VPS)
 
 Owns:
+
 - Orchestrator — task lifecycle, state machine, failure routing.
 - Worktree manager — one disposable git worktree/branch per task, cleaned up after.
 - Agent layer — ACP client, via ACPX behind our own adapter interface (see 4).
@@ -36,7 +37,7 @@ Owns:
 - State — SQLite (tasks, sessions, run history, gate results).
 - API — HTTP + WebSocket. This is the contract every client shares.
 
-The daemon ships as a single binary installed independently of any repo (cargo install / brew / curl-install). State is per-repo: the daemon manages a `.marshal/` directory in the repo root, and global config lives in `~/.marshal/`. State is discovered via cwd, same model as git — "one daemon per project" still composes on a VPS (run N daemons for N projects).
+The daemon ships as an npm package installed independently of any repo (`npm i -g sataycat/marshal`). State is per-repo: the daemon manages a `.marshal/` directory in the repo root, and global config lives in `~/.marshal/`. State is discovered via cwd, same model as git — "one daemon per project" still composes on a VPS (run N daemons for N projects).
 
 ### 3.2 Clients (thin, all talk to the daemon API)
 
@@ -50,7 +51,7 @@ The daemon ships as a single binary installed independently of any repo (cargo i
 - First client: ACPX (openclaw/acpx). Gives persistent + named sessions, prompt queueing, cancel, cwd sandboxing, permission modes, and structured typed output (thinking / tool calls / diffs). Alpha, so wrapped behind our interface (see 4).
 - Starting agents: opencode as builder, pi as validator. Both have clean programmatic surfaces and ACPX adapters, and using two different lineages gives the decorrelated builder/validator split for free.
 - Later agents (near-free via ACP): claude, codex, gemini, kimi. Note Claude Code and Codex are adapter-wrapped rather than native ACP, so expect occasional adapter lag;
-that is a reason to prove the loop on opencode/pi first.
+  that is a reason to prove the loop on opencode/pi first.
 
 ### 3.4 Data and source of truth
 
@@ -81,7 +82,7 @@ The risk is deliberately contained to one replaceable component sitting on top o
 copy
 
 
-Backlog / Spec  ->  Ready  ->  Building  ->  Validating  ->  Review  ->  Done
+Backlog / Spec -> Ready -> Building -> Validating -> Review -> Done
 
 - Backlog / Spec — human drafts the task in a grill-me chat UI with an agent (see 7). Human owns the final acceptance criteria. Working spec lives in SQLite during this phase.
 - Ready — human marks the spec frozen. Daemon renders it to a committed markdown file (see 3.4). Signals the orchestrator to pick it up.
@@ -124,15 +125,15 @@ Decorrelated validator: the boundary gate uses a different model/agent than the 
 
 ## 9. Dependencies and risk posture
 
-| Component | Role | Risk | Mitigation |
-|---|---|---|---|
-| ACP | agent protocol | low (durable, multi-vendor) | target directly as fallback |
-| ACPX | ACP client | high (alpha, changing) | anti-corruption adapter, pin version |
-| opencode | builder agent | low | swappable via ACP |
-| pi | validator agent | low-med (smaller
-ecosystem) | swappable via ACP |
-| git worktrees | isolation | low | standard |
-| SQLite | state | low | standard |
+| Component     | Role              | Risk                        | Mitigation                           |
+| ------------- | ----------------- | --------------------------- | ------------------------------------ |
+| ACP           | agent protocol    | low (durable, multi-vendor) | target directly as fallback          |
+| ACPX          | ACP client        | high (alpha, changing)      | anti-corruption adapter, pin version |
+| opencode      | builder agent     | low                         | swappable via ACP                    |
+| pi            | validator agent   | low-med (smaller            |
+| ecosystem)    | swappable via ACP |
+| git worktrees | isolation         | low                         | standard                             |
+| SQLite        | state             | low                         | standard                             |
 
 ## 10. Build sequencing
 
