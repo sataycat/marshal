@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getRepoStateDir, initGlobalConfig, initRepoState } from "./daemon/config.js";
 import { openDb } from "./db/index.js";
-import { listTasks } from "./tasks/store.js";
+import { registerTaskCommands } from "./tasks/commands.js";
 import { WorktreeManager } from "./worktree/manager.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -28,20 +28,7 @@ program
   });
 
 const task = program.command("task").description("Task management");
-
-task
-  .command("list")
-  .description("List all tasks")
-  .action(() => {
-    const tasks = listTasks();
-    if (tasks.length === 0) {
-      console.log("No tasks.");
-      return;
-    }
-    for (const t of tasks) {
-      console.log(`${t.slug}\t${t.status}\t${t.title}`);
-    }
-  });
+registerTaskCommands(task);
 
 const worktree = program.command("worktree").description("Worktree management");
 
