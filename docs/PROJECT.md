@@ -68,7 +68,7 @@ The split maps to the board: authoring is collaborative and mutable (SQLite); th
 
 ACPX is alpha and its CLI/runtime interfaces are expected to change. Do not couple the core to it.
 
-- Define an internal Agent interface: spawn(cwd, agentId), prompt(session, text), streamEvents(session), cancel(session), close(session).
+- Define an internal Agent interface: spawn(cwd, agentId, opts?), prompt(session, text, opts?) returns AsyncIterable<AgentEvent>, cancel(session), close(session).
 - ACPX sits behind one adapter implementing that interface.
 - If ACPX churns, fix the adapter. If ACPX dies, implement the same interface directly against ACP JSON-RPC (ACPX becomes reference, not dependency).
 - Pin the ACPX version. Review the npm postinstall hook (it fetches platform binaries) before trusting it on your box.
@@ -147,7 +147,7 @@ Decorrelated validator: the boundary gate uses a different model/agent than the 
 
 - Container vs VM for builder isolation on the VPS? (devcontainer is probably enough; VM if paranoid.)
 - Auto-merge change-class taxonomy: which classes graduate first (docs, tests, pure refactors)?
-- Do we adopt OpenClaw's gateway wholesale, or use ACPX standalone and build our own orchestration? (Leaning standalone ACPX to avoid coupling to a second large moving system.)
+- Use ACPX standalone and build our own orchestration. Decided in ADR-003; OpenClaw gateway is not adopted for M0.
 - Naming.
 
 ## 12. Prior art and references

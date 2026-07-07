@@ -13,6 +13,10 @@ export interface GlobalConfig {
   worktree?: {
     root?: string;
   };
+  acpx?: {
+    bin?: string;
+    version?: string;
+  };
 }
 
 export function loadMarshalJson(repoRoot: string): MarshalJson {

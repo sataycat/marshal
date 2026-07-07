@@ -79,19 +79,22 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 
 ---
 
-## Slice 4 — Agent Adapter & ACPX Stub
+## ✅ Slice 4 — Agent Adapter & ACPX Stub (COMPLETE)
 
 **Goal:** Marshal can spawn an agent in a worktree and exchange a prompt/response through a stable internal interface, with ACPX behind it.
 
 **Scope:**
 
-- Define internal `Agent` interface: `spawn(cwd, agentId)`, `prompt(session, text)`, `close(session)`.
-- ACPX adapter implementing the interface.
-- For M0, support `opencode` and `pi` agent IDs mapped to ACPX sessions.
-- Graceful handling of ACPX not being installed (clear error message).
-- Capture stdout/stderr or typed events to a run log.
+- Define internal `Agent` interface: `spawn(cwd, agentId, opts?)`, `prompt(session, text, opts?)` returns `AsyncIterable<AgentEvent>`, `cancel(session)`, `close(session)`.
+- ACPX adapter (`AcpxAgentAdapter`) implementing the interface by shelling out to the `acpx` CLI and parsing raw ACP JSON-RPC NDJSON.
+- For M0, support `opencode` and `pi` agent IDs mapped to ACPX named sessions scoped by the worktree directory.
+- Persistent ACPX sessions (`sessions ensure`/`-s`/`sessions close`) with stable names derived from the agent ID.
+- Default permission mode `--approve-all --non-interactive-permissions fail` for headless runs; configurable per role via `SpawnOptions`.
+- Configurable `acpx.bin` / `acpx.version` in `~/.marshal/config.json`, with a startup version check that warns on mismatch.
+- Clear error when `acpx` is missing or an unknown agent ID is requested.
+- Unit tests using a fake `acpx` shim on PATH.
 
-**ADR:** Update or extend [`docs/adr/ADR-001-node-backend-and-embedded-react.md`](adr/ADR-001-node-backend-and-embedded-react.md) if ACPX integration details differ from the current plan.
+**ADR:** [`docs/adr/ADR-003-agent-adapter-and-acpx.md`](adr/ADR-003-agent-adapter-and-acpx.md).
 
 ---
 
