@@ -11,7 +11,7 @@ This doc breaks the M0 milestone from `PROJECT.md` into small, vertical slices t
 1. **Vertical over horizontal.** Each slice is end-to-end, even if narrow.
 2. **Observable behavior.** Every slice has a concrete acceptance test a human can run from the terminal.
 3. **No premature UI.** M0 is headless; CLI commands and logs are the only interface.
-4. **ADR-first for architecture changes.** Any decision that changes `PROJECT.md` or ADR-001 starts as a new ADR under `docs/`.
+4. **ADR-first for architecture changes.** Any decision that changes `PROJECT.md` or an existing ADR starts as a new ADR under `docs/adr/`.
 5. **One task at a time.** Concurrency stays at 1 until the gate is proven.
 
 ## Dependency Map
@@ -51,28 +51,33 @@ pnpm run build
 
 ---
 
-## Slice 2 — Worktree Manager
+## ✅ Slice 2 — Worktree Manager (COMPLETE)
 
-**Goal:** Marshal can create and destroy isolated git worktrees for a task.
+**Goal:** Marshal can create and destroy isolated git worktrees for a task, following the isolation model in [`docs/adr/ADR-002-worktree-isolation.md`](adr/ADR-002-worktree-isolation.md).
 
 **Scope:**
 
 - `WorktreeManager` class wrapping `git worktree add` / `remove`.
-- Create a task branch named `marshal/task/<slug>-<shortid>` from `HEAD`.
+- Centralized worktree location under `~/.marshal/worktrees/<repo-hash>/<slug>-<descriptor>/`.
+- Create a task branch named `marshal/task/<slug>-<descriptor>` from `HEAD`, where `<descriptor>` is a memorable adjective-noun slug.
+- Copy allowed gitignored files from the source checkout using `.worktreeinclude` (Conductor/Codex style).
+- Run the optional setup script from `marshal.json` → `worktree.setup` after worktree creation.
 - Return absolute path to worktree.
-- Clean up worktree on demand.
+- Clean up worktree and branch on demand.
 - Handle idempotency and error cases (dirty repo, missing git, etc.).
 
 **Acceptance:**
 
 ```bash
 ./bin/marshal worktree create --task hello-world
-# creates ../marshal-hello-world-<id>/ worktree on a new branch
+# creates ~/.marshal/worktrees/<hash>/hello-world-<descriptor>/ worktree on a new branch
 ./bin/marshal worktree destroy --task hello-world
 # worktree and branch are gone
 ```
 
-**Files:** `src/worktree/manager.ts`, `src/worktree/manager.test.ts`.
+**Files:** `src/worktree/manager.ts`, `src/worktree/manager.test.ts`, `src/worktree/include.ts`.
+
+**ADR:** [`docs/adr/ADR-002-worktree-isolation.md`](adr/ADR-002-worktree-isolation.md).
 
 ---
 
@@ -128,7 +133,7 @@ pnpm run build
 
 **Files:** `src/agent/interface.ts`, `src/agent/acpx-adapter.ts`, `src/agent/run.ts`.
 
-**ADR:** Update or extend ADR-001 if ACPX integration details differ from the current plan.
+**ADR:** Update or extend [`docs/adr/ADR-001-node-backend-and-embedded-react.md`](adr/ADR-001-node-backend-and-embedded-react.md) if ACPX integration details differ from the current plan.
 
 ---
 
@@ -270,7 +275,7 @@ Record decisions for these in new ADRs before they block implementation:
 2. **Agent prompt templates.** How are builder and validator prompts composed from the spec?
 3. **Run log schema.** What events do we store and how do we query them?
 4. **Configuration.** What lives in `~/.marshal/config.json` vs env vars vs CLI flags?
-5. **Containerization revisit.** ADR-001 accepted bare-host isolation for M0. When do we revisit?
+5. **Containerization revisit.** [`docs/adr/ADR-001-node-backend-and-embedded-react.md`](adr/ADR-001-node-backend-and-embedded-react.md) accepted bare-host isolation for M0. When do we revisit?
 
 ## Suggested Order for Agents
 
