@@ -37,18 +37,6 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 - SQLite schema for tasks: `id`, `slug`, `title`, `status`, `spec_markdown`, `created_at`, `updated_at`.
 - Basic structured logging (`pino` or simple wrapper).
 
-**Acceptance:**
-
-```bash
-pnpm install
-pnpm run build
-./bin/marshal --version       # prints version
-./bin/marshal init            # creates .marshal/ and sqlite db in cwd
-./bin/marshal task list       # empty list, no crash
-```
-
-**Files:** `package.json`, `tsconfig.json`, `src/cli.ts`, `src/daemon/config.ts`, `src/db/index.ts`, `src/db/schema.sql`.
-
 ---
 
 ## ✅ Slice 2 — Worktree Manager (COMPLETE)
@@ -65,17 +53,6 @@ pnpm run build
 - Return absolute path to worktree.
 - Clean up worktree and branch on demand.
 - Handle idempotency and error cases (dirty repo, missing git, etc.).
-
-**Acceptance:**
-
-```bash
-./bin/marshal worktree create --task hello-world
-# creates ~/.marshal/worktrees/<hash>/hello-world-<descriptor>/ worktree on a new branch
-./bin/marshal worktree destroy --task hello-world
-# worktree and branch are gone
-```
-
-**Files:** `src/worktree/manager.ts`, `src/worktree/manager.test.ts`, `src/worktree/include.ts`.
 
 **ADR:** [`docs/adr/ADR-002-worktree-isolation.md`](adr/ADR-002-worktree-isolation.md).
 
@@ -98,17 +75,6 @@ pnpm run build
 - CLI: `task create`, `task show`, `task transition <state>`.
 - Persistence in SQLite.
 
-**Acceptance:**
-
-```bash
-./bin/marshal task create --title "Add greeting" --slug add-greeting
-./bin/marshal task transition add-greeting ready    # ok
-./bin/marshal task transition add-greeting done     # error: invalid transition
-./bin/marshal task show add-greeting                # status: ready
-```
-
-**Files:** `src/tasks/store.ts`, `src/tasks/state-machine.ts`, `src/tasks/commands.ts`.
-
 ---
 
 ## Slice 4 — Agent Adapter & ACPX Stub
@@ -122,16 +88,6 @@ pnpm run build
 - For M0, support `opencode` and `pi` agent IDs mapped to ACPX sessions.
 - Graceful handling of ACPX not being installed (clear error message).
 - Capture stdout/stderr or typed events to a run log.
-
-**Acceptance:**
-
-```bash
-# With ACPX + opencode installed
-./bin/marshal agent run opencode --worktree /path --prompt "Say hello and exit"
-# prints agent response and exits 0
-```
-
-**Files:** `src/agent/interface.ts`, `src/agent/acpx-adapter.ts`, `src/agent/run.ts`.
 
 **ADR:** Update or extend [`docs/adr/ADR-001-node-backend-and-embedded-react.md`](adr/ADR-001-node-backend-and-embedded-react.md) if ACPX integration details differ from the current plan.
 
@@ -150,19 +106,6 @@ pnpm run build
 - Transition to `validating`.
 - Run log stored in SQLite.
 
-**Acceptance:**
-
-```bash
-./bin/marshal task create --title "Add README section" --slug readme-section \
-  --spec "Add a 'Getting Started' section to README.md"
-./bin/marshal task transition readme-section ready
-./bin/marshal daemon run-once   # processes one ready task
-./bin/marshal task show readme-section
-# status: validating, branch has a new commit
-```
-
-**Files:** `src/orchestrator/builder-run.ts`, `src/orchestrator/index.ts`.
-
 ---
 
 ## Slice 6 — Validator Run & Gate
@@ -176,17 +119,6 @@ pnpm run build
 - Parse validator output into `pass` / `fail`.
 - On pass: transition `validating -> review`.
 - On fail: transition `validating -> building` and append failure context to the run log.
-
-**Acceptance:**
-
-```bash
-# After Slice 5 left a task in validating
-./bin/marshal daemon run-once
-./bin/marshal task show readme-section
-# status: review (if pi passes) or building (if pi fails)
-```
-
-**Files:** `src/orchestrator/validator-run.ts`, `src/orchestrator/gate.ts`.
 
 ---
 
@@ -203,21 +135,6 @@ pnpm run build
   - If cap reached: move to `review` with a failure summary.
 - CLI: `task show` displays retry count and last failure.
 
-**Acceptance:**
-
-```bash
-# Create a task with an impossible spec
-./bin/marshal task create --title "Break build" --slug break-build \
-  --spec "Delete package.json and make tests pass"
-./bin/marshal task transition break-build ready
-# Run enough cycles to exhaust retries
-for i in 1 2 3; do ./bin/marshal daemon run-once; done
-./bin/marshal task show break-build
-# status: review, retry_count: 2, last_failure_summary present
-```
-
-**Files:** `src/orchestrator/retry.ts`, `src/tasks/store.ts`.
-
 ---
 
 ## Slice 8 — Spec Freeze at Ready
@@ -231,17 +148,6 @@ for i in 1 2 3; do ./bin/marshal daemon run-once; done
 - The builder reads the spec from that file, not from SQLite.
 - CLI: `task create` accepts `--spec` or `--spec-file`.
 
-**Acceptance:**
-
-```bash
-./bin/marshal task create --title "Add docs" --slug add-docs \
-  --spec "Document the CLI in README.md"
-./bin/marshal task transition add-docs ready
-# branch marshal/task/add-docs-<id> now contains specs/0001-add-docs.md
-```
-
-**Files:** `src/specs/freeze.ts`, `src/specs/renderer.ts`.
-
 ---
 
 ## Slice 9 — M0 CLI Polish & Integration Test
@@ -254,16 +160,6 @@ for i in 1 2 3; do ./bin/marshal daemon run-once; done
 - `marshal daemon start` polls for ready tasks (single-threaded, simple interval).
 - Integration test using a temp git repo and stub agent responses.
 - Update README with M0 usage.
-
-**Acceptance:**
-
-```bash
-pnpm test
-./bin/marshal --help
-# Full manual demo: create -> ready -> daemon run-once -> review/done
-```
-
-**Files:** `tests/m0-smoke.test.ts`, `README.md`.
 
 ---
 
