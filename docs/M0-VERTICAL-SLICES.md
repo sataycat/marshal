@@ -58,9 +58,11 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 
 ---
 
-## Slice 3 — Task State Machine
+## ✅ Slice 3 — Task State Machine (COMPLETE)
 
 **Goal:** Tasks move through the M0 board states with valid transitions only.
+
+**Completed in commit:** `dfe3694`
 
 **Scope:**
 
