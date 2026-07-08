@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { logger } from "../logger.js";
+import type { AgentId } from "../agent/types.js";
 
 export interface MarshalJson {
   worktree?: {
@@ -16,6 +17,10 @@ export interface GlobalConfig {
   acpx?: {
     bin?: string;
     version?: string;
+  };
+  agents?: {
+    builder?: string;
+    validator?: string;
   };
 }
 
@@ -45,4 +50,31 @@ export function loadGlobalConfig(): GlobalConfig {
     logger.warn({ err, path }, "Failed to parse ~/.marshal/config.json");
     return {};
   }
+}
+
+const VALID_AGENT_IDS: readonly AgentId[] = ["opencode", "pi"] as const;
+
+const AGENT_ID_DEFAULTS: Record<AgentRole, AgentId> = {
+  builder: "opencode",
+  validator: "pi",
+};
+
+export type AgentRole = "builder" | "validator";
+
+export class InvalidAgentIdError extends Error {
+  constructor(role: AgentRole, value: string) {
+    super(`Invalid agent ID for ${role}: ${value}`);
+    this.name = "InvalidAgentIdError";
+  }
+}
+
+export function resolveAgentId(role: AgentRole, config: GlobalConfig = loadGlobalConfig()): AgentId {
+  const raw = config.agents?.[role];
+  if (raw === undefined) {
+    return AGENT_ID_DEFAULTS[role];
+  }
+  if ((VALID_AGENT_IDS as readonly string[]).includes(raw)) {
+    return raw as AgentId;
+  }
+  throw new InvalidAgentIdError(role, raw);
 }

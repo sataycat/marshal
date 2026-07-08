@@ -8,7 +8,16 @@ import { WorktreeManager } from "../worktree/manager.js";
 import { createTask, getTask, transitionTask } from "../tasks/store.js";
 import { freezeTask } from "../tasks/freeze.js";
 import { RunLog } from "./run-log.js";
-import { buildTask, renderBuilderPrompt, runOnce } from "./orchestrator.js";
+import {
+  buildTask,
+  detectTrunkRef,
+  NoTrunkRefError,
+  parseGateSentinel,
+  renderBuilderPrompt,
+  renderValidatorPrompt,
+  runOnce,
+  validateTask,
+} from "./orchestrator.js";
 
 function initGitRepo(root: string): void {
   execSync("git init -b main", { cwd: root, stdio: "ignore" });
@@ -379,5 +388,551 @@ describe("buildTask", () => {
 
     const worktree = manager.create("direct-build");
     expect(gitLogSubject(worktree.path)).toBe("build: direct-build");
+  });
+});
+
+describe("parseGateSentinel", () => {
+  it("returns pass on a MARSHAL_GATE: pass text event", () => {
+    const result = parseGateSentinel([{ type: "text", text: "All good.\nMARSHAL_GATE: pass\n" }]);
+    expect(result).toEqual({ result: "pass" });
+  });
+
+  it("returns fail with reason on MARSHAL_GATE: fail <reason>", () => {
+    const result = parseGateSentinel([
+      { type: "text", text: "Tests are broken.\nMARSHAL_GATE: fail tests are red\n" },
+    ]);
+    expect(result).toEqual({ result: "fail", reason: "tests are red" });
+  });
+
+  it("returns fail with a placeholder reason when none is given", () => {
+    const result = parseGateSentinel([{ type: "text", text: "MARSHAL_GATE: fail\n" }]);
+    expect(result).toEqual({ result: "fail", reason: "no reason given" });
+  });
+
+  it("returns absent when no sentinel is seen", () => {
+    const result = parseGateSentinel([
+      { type: "text", text: "I forgot to emit a gate." },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+    expect(result).toEqual({ result: "absent" });
+  });
+
+  it("ignores non-text events", () => {
+    const result = parseGateSentinel([
+      { type: "tool", title: "write" },
+      { type: "log", stream: "stdout", text: "MARSHAL_GATE: pass" },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+    expect(result).toEqual({ result: "absent" });
+  });
+
+  it("first well-formed line wins when both pass and fail appear", () => {
+    const result = parseGateSentinel([
+      { type: "text", text: "MARSHAL_GATE: pass\nNever mind.\nMARSHAL_GATE: fail too late\n" },
+    ]);
+    expect(result).toEqual({ result: "pass" });
+  });
+
+  it("is case-sensitive on the sentinel", () => {
+    const result = parseGateSentinel([{ type: "text", text: "marshal_gate: pass\n" }]);
+    expect(result).toEqual({ result: "absent" });
+  });
+});
+
+describe("renderValidatorPrompt", () => {
+  function makeTask() {
+    return createTask(
+      { slug: "v-task", title: "Validator Task", specMarkdown: "## Goal\nBe correct.\n" },
+      mkdtempSync(join(tmpdir(), "marshal-vprompt-")),
+    );
+  }
+
+  it("inlines the spec, diff, trunk ref, and sentinel instructions", () => {
+    const task = makeTask();
+    const prompt = renderValidatorPrompt(task, "+added line\n-old line\n", "main", 2);
+
+    expect(prompt).toContain('validating the implementation of task "Validator Task" (slug: v-task)');
+    expect(prompt).toContain("## Spec");
+    expect(prompt).toContain("Be correct.");
+    expect(prompt).toContain("## Diff");
+    expect(prompt).toContain("Base: main");
+    expect(prompt).toContain("`git diff main...HEAD`");
+    expect(prompt).toContain("+added line");
+    expect(prompt).toContain("-old line");
+    expect(prompt).toContain("MARSHAL_GATE: pass");
+    expect(prompt).toContain("MARSHAL_GATE: fail <one-sentence reason>");
+  });
+
+  it("annotates the diff when it is truncated", () => {
+    const task = makeTask();
+    const prompt = renderValidatorPrompt(task, "stub", "main", 5000, { diffMaxLines: 2000 });
+    expect(prompt).toContain("(truncated to 2000 of 5000 lines)");
+  });
+
+  it("omits the truncation note when the diff fits", () => {
+    const task = makeTask();
+    const prompt = renderValidatorPrompt(task, "stub", "main", 100, { diffMaxLines: 2000 });
+    expect(prompt).not.toMatch(/truncated/);
+  });
+});
+
+describe("detectTrunkRef", () => {
+  it("finds the local main branch in a fresh repo", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "marshal-trunk-"));
+    initGitRepo(repoRoot);
+    const worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-trunk-wt-"));
+    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const task = createTask(
+      { slug: "trunk-task", title: "T", specMarkdown: "x" },
+      repoRoot,
+    );
+    transitionTask("trunk-task", "ready", repoRoot);
+    freezeTask("trunk-task", repoRoot, manager);
+    transitionTask("trunk-task", "building", repoRoot);
+    transitionTask("trunk-task", "validating", repoRoot);
+    const worktree = manager.create("trunk-task");
+
+    expect(detectTrunkRef(worktree.path)).toBe("main");
+  });
+
+  it("throws NoTrunkRefError when no trunk ref exists", () => {
+    const empty = mkdtempSync(join(tmpdir(), "marshal-empty-"));
+    expect(() => detectTrunkRef(empty)).toThrow(NoTrunkRefError);
+  });
+});
+
+function createValidatedReadyTask(
+  slug: string,
+  specMarkdown: string,
+  repoRoot: string,
+  manager: WorktreeManager,
+) {
+  const task = createTask({ slug, title: `Task ${slug}`, specMarkdown }, repoRoot);
+  transitionTask(slug, "ready", repoRoot);
+  freezeTask(slug, repoRoot, manager);
+  transitionTask(slug, "building", repoRoot);
+  transitionTask(slug, "validating", repoRoot);
+  return task;
+}
+
+describe("validateTask", () => {
+  let repoRoot: string;
+  let worktreeRoot: string;
+  let manager: WorktreeManager;
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
+    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
+    initGitRepo(repoRoot);
+    initMarshalState(repoRoot);
+    manager = new WorktreeManager(repoRoot, { worktreeRoot });
+  });
+
+  afterEach(() => {
+    delete process.env.MARSHAL_GLOBAL_CONFIG;
+  });
+
+  it("validates a task in validating state, returns validated, leaves task in validating", async () => {
+    createValidatedReadyTask("gate-pass", "## Goal\nDo it.\n", repoRoot, manager);
+
+    const worktree = manager.create("gate-pass");
+    mkdirSync(join(worktree.path, "src"), { recursive: true });
+    writeFileSync(join(worktree.path, "src", "feature.ts"), "export const x = 1;\n");
+    execSync("git add -A && git commit -m 'build: gate-pass' --allow-empty", {
+      cwd: worktree.path,
+      stdio: "ignore",
+    });
+    const buildCommit = execSync("git rev-parse HEAD", {
+      cwd: worktree.path,
+      encoding: "utf8",
+    }).trim();
+    // Record the build run so validateTask can find the build commit.
+    const log = new RunLog(repoRoot);
+    const task = getTask("gate-pass", repoRoot);
+    const runId = log.startRun(task.id, "builder", "opencode", "build prompt");
+    log.finishRun(runId, "done", { commitSha: buildCommit });
+
+    const agent = new FakeAgent({
+      events: [
+        { type: "text", text: "Looking at the diff...\n" },
+        { type: "tool", title: "read", status: "completed" },
+        { type: "text", text: "Looks good.\nMARSHAL_GATE: pass\n" },
+        { type: "done", stopReason: "end_turn" },
+      ],
+    });
+
+    const result = await validateTask("gate-pass", {
+      root: repoRoot,
+      agent,
+      manager,
+      trunkRef: "main",
+    });
+
+    expect(result.status).toBe("validated");
+    expect(result.slug).toBe("gate-pass");
+    expect(result.commitSha).toBe(buildCommit);
+    expect(result.runId).toBeGreaterThan(0);
+    expect(result.reason).toBeUndefined();
+
+    expect(getTask("gate-pass", repoRoot).status).toBe("validating");
+
+    expect(agent.spawnCalls).toHaveLength(1);
+    expect(agent.spawnCalls[0].agentId).toBe("pi");
+    expect(agent.spawnCalls[0].opts.sessionName).toBe("marshal-gate-pass-validator");
+    expect(agent.spawnCalls[0].opts.permissionMode).toBe("approve-all");
+    expect(agent.spawnCalls[0].cwd).toBe(worktree.path);
+
+    expect(agent.promptCalls[0].text).toContain("## Spec");
+    expect(agent.promptCalls[0].text).toContain("## Diff");
+    expect(agent.promptCalls[0].text).toContain("Base: main");
+    expect(agent.promptCalls[0].text).toContain("src/feature.ts");
+    expect(agent.promptCalls[0].text).toContain("MARSHAL_GATE: pass");
+
+    expect(agent.closeCalls).toHaveLength(1);
+
+    const validatorLog = new RunLog(repoRoot);
+    const validatorRun = validatorLog.getRun(result.runId);
+    expect(validatorRun?.role).toBe("validator");
+    expect(validatorRun?.agentId).toBe("pi");
+    expect(validatorRun?.status).toBe("done");
+    expect(validatorRun?.commitSha).toBe(buildCommit);
+    expect(validatorRun?.endedAt).not.toBeNull();
+
+    const events = validatorLog.getEvents(result.runId);
+    expect(events.map((e) => e.type)).toEqual(["text", "tool", "text", "done"]);
+  });
+
+  it("uses the configured validator agent id", async () => {
+    createValidatedReadyTask("gate-custom", "## Goal\nDo it.\n", repoRoot, manager);
+    const worktree = manager.create("gate-custom");
+    execSync("git add -A && git commit -m 'build: gate-custom' --allow-empty", {
+      cwd: worktree.path,
+      stdio: "ignore",
+    });
+    const buildCommit = execSync("git rev-parse HEAD", {
+      cwd: worktree.path,
+      encoding: "utf8",
+    }).trim();
+    const log = new RunLog(repoRoot);
+    const task = getTask("gate-custom", repoRoot);
+    const runId = log.startRun(task.id, "builder", "opencode", "build prompt");
+    log.finishRun(runId, "done", { commitSha: buildCommit });
+
+    const agent = new FakeAgent({
+      events: [{ type: "text", text: "MARSHAL_GATE: pass\n" }, { type: "done", stopReason: "end_turn" }],
+    });
+
+    const result = await validateTask("gate-custom", {
+      root: repoRoot,
+      agent,
+      manager,
+      trunkRef: "main",
+      validatorAgentId: "opencode",
+    });
+
+    expect(result.status).toBe("validated");
+    expect(agent.spawnCalls[0].agentId).toBe("opencode");
+    expect(agent.spawnCalls[0].opts.sessionName).toBe("marshal-gate-custom-validator");
+
+    const validatorLog = new RunLog(repoRoot);
+    expect(validatorLog.getRun(result.runId)?.agentId).toBe("opencode");
+  });
+
+  it("returns validation_failed with reason on a fail sentinel", async () => {
+    createValidatedReadyTask("gate-fail", "## Goal\nDo it.\n", repoRoot, manager);
+    const worktree = manager.create("gate-fail");
+    execSync("git add -A && git commit -m 'build: gate-fail' --allow-empty", {
+      cwd: worktree.path,
+      stdio: "ignore",
+    });
+    const buildCommit = execSync("git rev-parse HEAD", {
+      cwd: worktree.path,
+      encoding: "utf8",
+    }).trim();
+    const log = new RunLog(repoRoot);
+    const task = getTask("gate-fail", repoRoot);
+    const runId = log.startRun(task.id, "builder", "opencode", "build prompt");
+    log.finishRun(runId, "done", { commitSha: buildCommit });
+
+    const agent = new FakeAgent({
+      events: [
+        { type: "text", text: "Test suite is broken.\nMARSHAL_GATE: fail tests are red\n" },
+        { type: "done", stopReason: "end_turn" },
+      ],
+    });
+
+    const result = await validateTask("gate-fail", {
+      root: repoRoot,
+      agent,
+      manager,
+      trunkRef: "main",
+    });
+
+    expect(result.status).toBe("validation_failed");
+    expect(result.reason).toBe("tests are red");
+    expect(result.commitSha).toBe(buildCommit);
+
+    expect(getTask("gate-fail", repoRoot).status).toBe("validating");
+
+    const validatorLog = new RunLog(repoRoot);
+    expect(validatorLog.getRun(result.runId)?.status).toBe("error");
+    expect(validatorLog.getRun(result.runId)?.error).toBe("tests are red");
+  });
+
+  it("returns validation_failed with 'no gate decision emitted' when the agent never emits a sentinel", async () => {
+    createValidatedReadyTask("gate-absent", "## Goal\nDo it.\n", repoRoot, manager);
+    const worktree = manager.create("gate-absent");
+    execSync("git add -A && git commit -m 'build: gate-absent' --allow-empty", {
+      cwd: worktree.path,
+      stdio: "ignore",
+    });
+    const buildCommit = execSync("git rev-parse HEAD", {
+      cwd: worktree.path,
+      encoding: "utf8",
+    }).trim();
+    const log = new RunLog(repoRoot);
+    const task = getTask("gate-absent", repoRoot);
+    const runId = log.startRun(task.id, "builder", "opencode", "build prompt");
+    log.finishRun(runId, "done", { commitSha: buildCommit });
+
+    const agent = new FakeAgent({
+      events: [
+        { type: "text", text: "I forgot to emit a gate line." },
+        { type: "done", stopReason: "end_turn" },
+      ],
+    });
+
+    const result = await validateTask("gate-absent", {
+      root: repoRoot,
+      agent,
+      manager,
+      trunkRef: "main",
+    });
+
+    expect(result.status).toBe("validation_failed");
+    expect(result.reason).toBe("no gate decision emitted");
+  });
+
+  it("returns validation_failed when the agent emits an error event", async () => {
+    createValidatedReadyTask("gate-error", "## Goal\nDo it.\n", repoRoot, manager);
+    const worktree = manager.create("gate-error");
+    execSync("git add -A && git commit -m 'build: gate-error' --allow-empty", {
+      cwd: worktree.path,
+      stdio: "ignore",
+    });
+    const buildCommit = execSync("git rev-parse HEAD", {
+      cwd: worktree.path,
+      encoding: "utf8",
+    }).trim();
+    const log = new RunLog(repoRoot);
+    const task = getTask("gate-error", repoRoot);
+    const runId = log.startRun(task.id, "builder", "opencode", "build prompt");
+    log.finishRun(runId, "done", { commitSha: buildCommit });
+
+    const agent = new FakeAgent({
+      events: [
+        { type: "text", text: "starting...\n" },
+        { type: "error", message: "validator crashed", code: 1 },
+      ],
+    });
+
+    const result = await validateTask("gate-error", {
+      root: repoRoot,
+      agent,
+      manager,
+      trunkRef: "main",
+    });
+
+    expect(result.status).toBe("validation_failed");
+    expect(result.reason).toBe("validator crashed");
+  });
+
+  it("returns validation_failed when the agent spawn throws", async () => {
+    createValidatedReadyTask("gate-spawn", "## Goal\nDo it.\n", repoRoot, manager);
+    const worktree = manager.create("gate-spawn");
+    execSync("git add -A && git commit -m 'build: gate-spawn' --allow-empty", {
+      cwd: worktree.path,
+      stdio: "ignore",
+    });
+    const buildCommit = execSync("git rev-parse HEAD", {
+      cwd: worktree.path,
+      encoding: "utf8",
+    }).trim();
+    const log = new RunLog(repoRoot);
+    const task = getTask("gate-spawn", repoRoot);
+    const runId = log.startRun(task.id, "builder", "opencode", "build prompt");
+    log.finishRun(runId, "done", { commitSha: buildCommit });
+
+    const agent = new FakeAgent({ spawnThrows: new Error("acpx not installed") });
+
+    const result = await validateTask("gate-spawn", {
+      root: repoRoot,
+      agent,
+      manager,
+      trunkRef: "main",
+    });
+
+    expect(result.status).toBe("validation_failed");
+    expect(result.reason).toMatch(/spawn failed: acpx not installed/);
+    expect(agent.closeCalls).toHaveLength(0);
+  });
+
+  it("skips when there is no successful builder run to validate", async () => {
+    createTask(
+      { slug: "no-build", title: "No build", specMarkdown: "## Goal\nx\n" },
+      repoRoot,
+    );
+    transitionTask("no-build", "ready", repoRoot);
+    freezeTask("no-build", repoRoot, manager);
+    transitionTask("no-build", "building", repoRoot);
+    transitionTask("no-build", "validating", repoRoot);
+
+    const agent = new FakeAgent();
+    const result = await validateTask("no-build", {
+      root: repoRoot,
+      agent,
+      manager,
+      trunkRef: "main",
+    });
+
+    expect(result.status).toBe("skipped");
+    expect(result.error).toMatch(/no build commit to validate/);
+    expect(agent.spawnCalls).toHaveLength(0);
+  });
+});
+
+describe("runOnce (validator dispatch)", () => {
+  let repoRoot: string;
+  let worktreeRoot: string;
+  let manager: WorktreeManager;
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
+    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
+    initGitRepo(repoRoot);
+    initMarshalState(repoRoot);
+    manager = new WorktreeManager(repoRoot, { worktreeRoot });
+  });
+
+  afterEach(() => {
+    delete process.env.MARSHAL_GLOBAL_CONFIG;
+  });
+
+  function seedValidatingTask(slug: string, specMarkdown: string, repoRoot: string, manager: WorktreeManager) {
+    const task = createTask({ slug, title: `Task ${slug}`, specMarkdown }, repoRoot);
+    transitionTask(slug, "ready", repoRoot);
+    freezeTask(slug, repoRoot, manager);
+    transitionTask(slug, "building", repoRoot);
+    transitionTask(slug, "validating", repoRoot);
+
+    const worktree = manager.create(slug);
+    execSync(`git add -A && git commit -m 'build: ${slug}' --allow-empty`, {
+      cwd: worktree.path,
+      stdio: "ignore",
+    });
+    const buildCommit = execSync("git rev-parse HEAD", {
+      cwd: worktree.path,
+      encoding: "utf8",
+    }).trim();
+
+    const log = new RunLog(repoRoot);
+    const runId = log.startRun(task.id, "builder", "opencode", "build prompt");
+    log.finishRun(runId, "done", { commitSha: buildCommit });
+    return task;
+  }
+
+  it("returns null when no ready or validating task exists", async () => {
+    const agent = new FakeAgent();
+    const result = await runOnce({ root: repoRoot, agent, manager });
+    expect(result).toBeNull();
+  });
+
+  it("picks the oldest validating task when no ready task exists, transitions pass -> review", async () => {
+    seedValidatingTask("v-only", "## Goal\nv.\n", repoRoot, manager);
+
+    const agent = new FakeAgent({
+      events: [
+        { type: "text", text: "MARSHAL_GATE: pass\n" },
+        { type: "done", stopReason: "end_turn" },
+      ],
+    });
+
+    const result = await runOnce({ root: repoRoot, agent, manager, validatorAgentId: "pi" });
+
+    expect(result?.status).toBe("validated");
+    expect(result?.slug).toBe("v-only");
+    expect(getTask("v-only", repoRoot).status).toBe("review");
+    expect(agent.spawnCalls[0].agentId).toBe("pi");
+  });
+
+  it("transitions validation_failed -> building on a fail sentinel", async () => {
+    seedValidatingTask("v-fail", "## Goal\nv.\n", repoRoot, manager);
+
+    const agent = new FakeAgent({
+      events: [
+        { type: "text", text: "MARSHAL_GATE: fail spec is not satisfied\n" },
+        { type: "done", stopReason: "end_turn" },
+      ],
+    });
+
+    const result = await runOnce({ root: repoRoot, agent, manager, validatorAgentId: "pi" });
+
+    expect(result?.status).toBe("validation_failed");
+    expect(result?.reason).toBe("spec is not satisfied");
+    expect(getTask("v-fail", repoRoot).status).toBe("building");
+  });
+
+  it("transitions validation_failed -> building when no sentinel is emitted", async () => {
+    seedValidatingTask("v-absent", "## Goal\nv.\n", repoRoot, manager);
+
+    const agent = new FakeAgent({
+      events: [{ type: "done", stopReason: "end_turn" }],
+    });
+
+    const result = await runOnce({ root: repoRoot, agent, manager, validatorAgentId: "pi" });
+
+    expect(result?.status).toBe("validation_failed");
+    expect(result?.reason).toBe("no gate decision emitted");
+    expect(getTask("v-absent", repoRoot).status).toBe("building");
+  });
+
+  it("leaves the task in validating when spawn throws and routes to building", async () => {
+    seedValidatingTask("v-spawn", "## Goal\nv.\n", repoRoot, manager);
+
+    const agent = new FakeAgent({ spawnThrows: new Error("acpx missing") });
+
+    const result = await runOnce({ root: repoRoot, agent, manager, validatorAgentId: "pi" });
+
+    expect(result?.status).toBe("validation_failed");
+    expect(result?.reason).toMatch(/spawn failed/);
+    expect(getTask("v-spawn", repoRoot).status).toBe("building");
+  });
+
+  it("picks ready over validating when both exist (FIFO across statuses)", async () => {
+    const ready = createTask(
+      { slug: "ready-first", title: "R", specMarkdown: "## Goal\nr.\n" },
+      repoRoot,
+    );
+    transitionTask("ready-first", "ready", repoRoot);
+    freezeTask("ready-first", repoRoot, manager);
+    seedValidatingTask("validating-second", "## Goal\nv.\n", repoRoot, manager);
+
+    const agent = new FakeAgent({
+      events: [
+        { type: "text", text: "Working on it" },
+        { type: "done", stopReason: "end_turn" },
+      ],
+      onSpawn: (session) => {
+        mkdirSync(join(session.cwd, "src"), { recursive: true });
+        writeFileSync(join(session.cwd, "src", "feature.ts"), "export const x = 1;\n");
+      },
+    });
+
+    const result = await runOnce({ root: repoRoot, agent, manager, validatorAgentId: "pi" });
+
+    expect(result?.slug).toBe("ready-first");
+    expect(result?.status).toBe("built");
+    expect(getTask("ready-first", repoRoot).status).toBe("validating");
+    expect(getTask("validating-second", repoRoot).status).toBe("validating");
   });
 });

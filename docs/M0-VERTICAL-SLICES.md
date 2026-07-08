@@ -102,7 +102,9 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 
 ---
 
-## Slice 5 — Builder Run (End-to-End)
+## ✅ Slice 5 — Builder Run (End-to-End) (COMPLETE)
+
+**Completed in commit:** `627552a` — `feat: implement Slice 5 — Builder run, run log, and ADR-006`
 
 **Goal:** A `ready` task is picked up by the orchestrator, a builder worktree is created, opencode runs against the frozen spec, and the task moves to `validating`.
 
@@ -115,20 +117,26 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 - Transition to `validating`.
 - Run log stored in SQLite.
 
+**ADR:** [`docs/adr/ADR-006-builder-run-and-run-log.md`](adr/ADR-006-builder-run-and-run-log.md) settles the builder prompt template (inlines the spec from SQLite), the `runOnce` / `buildTask` split, the `runs` / `run_events` schema, the `build:` commit, and leaves the task in `building` on failure (retry routing is Slice 7).
+
 ---
 
-## Slice 6 — Validator Run & Gate
+## ✅ Slice 6 — Validator Run & Gate (COMPLETE)
 
-**Goal:** A `validating` task is checked by the configured validator harness in a separate worktree; the task moves to `review` or back to `building` based on the result. The slice is harness-agnostic — which agent (e.g. `opencode-go`, `pi`) acts as validator is resolved from `~/.marshal/config.json` at runtime, set by the user during onboarding when they wire up their harness API keys. M0 development focuses on `opencode-go` and `pi` as the first supported harnesses via the ACPX adapter (Slice 4), but no slice-specific code should hard-code either one.
+**Completed in commit:** `feat: implement Slice 6 — validator run & gate` (pending)
+
+**Goal:** A `validating` task is checked by the configured validator harness; the task moves to `review` or back to `building` based on the result. The slice is harness-agnostic — which agent (e.g. `opencode-go`, `pi`) acts as validator is resolved from `~/.marshal/config.json` at runtime, set by the user during onboarding when they wire up their harness API keys. M0 development focuses on `opencode-go` and `pi` as the first supported harnesses via the ACPX adapter (Slice 4), but no slice-specific code should hard-code either one.
 
 **Scope:**
 
-- Resolve the validator agent ID from `~/.marshal/config.json` (e.g. `marshal.agents.validator`, defaulting to a configured fallback) at run time, rather than hard-coding a harness in the orchestrator.
-- Create a second worktree from the same task branch (validator worktree).
-- Run the configured validator harness via the ACPX `Agent` adapter (Slice 4) with a prompt that includes the diff and the spec. Builder and validator may use the same harness or different ones; the slice must work for either case.
-- Parse validator output into `pass` / `fail`.
+- Resolve the validator agent ID from `~/.marshal/config.json` (`agents.validator`, defaulting to `pi`) at run time, rather than hard-coding a harness in the orchestrator. A `resolveAgentId(role)` helper sits in `src/worktree/config.ts`; the same shape exists for `builder` (not yet read by the orchestrator, kept symmetric).
+- Reuse the builder's worktree for the validator (no second worktree). The builder's `--allow-empty` commit (ADR-006 Decision 5) leaves a clean tree; the validator's role is read + run tests, not modify the tree. Decorrelation comes from the different agent, not a different fs.
+- Run the configured validator harness via the ACPX `Agent` adapter (Slice 4) with a prompt that includes the diff (truncated to 2000 lines) and the spec. Builder and validator may use the same harness or different ones; the slice works for either case.
+- Parse validator output into `pass` / `fail` via a `MARSHAL_GATE: pass` / `MARSHAL_GATE: fail <reason>` sentinel scanned in the validator's text events. A missing sentinel is treated conservatively as fail.
 - On pass: transition `validating -> review`.
-- On fail: transition `validating -> building` and append failure context to the run log.
+- On fail (sentinel, missing sentinel, validator error, spawn failure): transition `validating -> building`. Failure reason stored in `runs.error`. Retry cap and escalation to human review on cap is Slice 7.
+
+**ADR:** [`docs/adr/ADR-007-validator-run-and-gate.md`](adr/ADR-007-validator-run-and-gate.md) settles the validator agent config schema, the sentinel-based pass/fail signal, the single-`runOnce` dispatch over `ready` + `validating`, the spec + truncated diff prompt composition, and the always-bounce-on-non-pass routing.
 
 ---
 
@@ -207,8 +215,8 @@ Record decisions for these in new ADRs before they block implementation:
 2. Slice 2 (worktree) and Slice 3 (state machine) — can be parallel
 3. Slice 4 (agent adapter)
 4. Slice 8 (spec freeze) — can be done once state machine exists
-5. Slice 5 (builder run)
-6. Slice 6 (validator run)
+5. ~~Slice 5 (builder run)~~ ✅
+6. ~~Slice 6 (validator run)~~ ✅
 7. Slice 7 (retry routing)
 8. Slice 9 (polish + integration test)
 9. Slice 10 (escape hatches) — can be done any time after Slice 3; does not block other slices
