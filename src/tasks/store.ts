@@ -1,5 +1,5 @@
 import { openDb } from "../db/index.js";
-import { asTaskStatus, assertTransition, type TaskStatus } from "./state-machine.js";
+import { asTaskStatus, assertTransition, isEscapeHatch, type TaskStatus } from "./state-machine.js";
 
 export interface Task {
   id: number;
@@ -99,6 +99,15 @@ export function transitionTask(slug: string, to: TaskStatus, root?: string): Tas
     }
     const from = asTaskStatus(row.status);
     assertTransition(from, to);
+
+    if (isEscapeHatch(from, to)) {
+      const updated = db
+        .prepare(
+          "UPDATE tasks SET status = ?, retry_count = 0, last_failure = NULL, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *",
+        )
+        .get(to, slug) as TaskRow | undefined;
+      return rowToTask(updated!);
+    }
 
     db.prepare("UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?").run(
       to,

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 const binPath = resolve(process.cwd(), "bin/marshal");
@@ -136,5 +137,54 @@ describe("CLI smoke tests", () => {
     } finally {
       delete process.env.MARSHAL_GLOBAL_CONFIG;
     }
+  });
+
+  it("supports escape-hatch transitions via `task transition`", () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-"));
+    run(["init"], root);
+    run(["task", "create", "--slug", "stuck", "--title", "Stuck"], root);
+
+    run(["task", "transition", "stuck", "ready"], root);
+    run(["task", "transition", "stuck", "building"], root);
+
+    run(["task", "transition", "stuck", "ready"], root);
+    expect(run(["task", "show", "stuck"], root).stdout).toContain("status: ready");
+
+    run(["task", "transition", "stuck", "building"], root);
+    run(["task", "transition", "stuck", "backlog"], root);
+    expect(run(["task", "show", "stuck"], root).stdout).toContain("status: backlog");
+  });
+
+  it("supports validating -> backlog escape hatch", () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-"));
+    run(["init"], root);
+    run(["task", "create", "--slug", "vstuck", "--title", "V Stuck"], root);
+    run(["task", "transition", "vstuck", "ready"], root);
+    run(["task", "transition", "vstuck", "building"], root);
+    run(["task", "transition", "vstuck", "validating"], root);
+    run(["task", "transition", "vstuck", "backlog"], root);
+    expect(run(["task", "show", "vstuck"], root).stdout).toContain("status: backlog");
+  });
+
+  it("shows the last run's error context in `task show` when stuck in building", () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-"));
+    run(["init"], root);
+    run(["task", "create", "--slug", "bricked", "--title", "Bricked"], root);
+    run(["task", "transition", "bricked", "ready"], root);
+    run(["task", "transition", "bricked", "building"], root);
+
+    const dbPath = join(root, ".marshal", "state.db");
+    const db = new Database(dbPath);
+    const taskId = db.prepare("SELECT id FROM tasks WHERE slug = ?").get("bricked") as { id: number };
+    db.prepare(
+      "INSERT INTO runs (task_id, role, agent_id, status, error) VALUES (?, 'builder', 'opencode', 'error', ?)",
+    ).run(taskId.id, "spawn failed: acpx missing");
+    db.close();
+
+    const showOut = run(["task", "show", "bricked"], root).stdout;
+    expect(showOut).toContain("status: building");
+    expect(showOut).toContain("last run: #");
+    expect(showOut).toContain("builder opencode error");
+    expect(showOut).toContain("run error: spawn failed: acpx missing");
   });
 });

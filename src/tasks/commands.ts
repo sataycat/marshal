@@ -8,8 +8,11 @@ import {
   getTask,
   listTasks,
   transitionTask,
+  type Task,
 } from "./store.js";
 import { freezeTask, FreezeError } from "./freeze.js";
+import type { RunRecord } from "../daemon/run-log.js";
+import { RunLog } from "../daemon/run-log.js";
 
 function fail(err: unknown): never {
   const message = err instanceof Error ? err.message : String(err);
@@ -25,6 +28,32 @@ function resolveSpec(spec?: string, specFile?: string): string | undefined {
     return readFileSync(specFile, "utf8");
   }
   return spec;
+}
+
+export function renderTaskShow(task: Task, lastRun?: RunRecord): string {
+  const lines: string[] = [
+    `slug:   ${task.slug}`,
+    `title:  ${task.title}`,
+    `status: ${task.status}`,
+    `id:     ${task.id}`,
+    `retries: ${task.retry_count}`,
+    `created: ${task.created_at}`,
+    `updated: ${task.updated_at}`,
+  ];
+  if (task.last_failure) {
+    lines.push(`last failure: ${task.last_failure}`);
+  }
+  if (lastRun && (task.status === "building" || task.status === "validating")) {
+    lines.push(`last run: #${lastRun.id} ${lastRun.role} ${lastRun.agentId} ${lastRun.status}`);
+    if (lastRun.error) {
+      lines.push(`run error: ${lastRun.error}`);
+    }
+  }
+  if (task.spec_markdown) {
+    lines.push("--- spec ---");
+    lines.push(task.spec_markdown);
+  }
+  return lines.join("\n");
 }
 
 export function registerTaskCommands(task: Command): void {
@@ -71,20 +100,11 @@ export function registerTaskCommands(task: Command): void {
     .action((slug: string) => {
       try {
         const t = getTask(slug);
-        console.log(`slug:   ${t.slug}`);
-        console.log(`title:  ${t.title}`);
-        console.log(`status: ${t.status}`);
-        console.log(`id:     ${t.id}`);
-        console.log(`retries: ${t.retry_count}`);
-        console.log(`created: ${t.created_at}`);
-        console.log(`updated: ${t.updated_at}`);
-        if (t.last_failure) {
-          console.log(`last failure: ${t.last_failure}`);
+        let lastRun: RunRecord | undefined;
+        if (t.status === "building" || t.status === "validating") {
+          lastRun = new RunLog().getLastRunForTask(t.id);
         }
-        if (t.spec_markdown) {
-          console.log("--- spec ---");
-          console.log(t.spec_markdown);
-        }
+        console.log(renderTaskShow(t, lastRun));
       } catch (err) {
         if (err instanceof TaskNotFoundError) fail(err);
         throw err;

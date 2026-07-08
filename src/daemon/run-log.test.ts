@@ -121,6 +121,35 @@ describe("RunLog", () => {
     expect(log.getRun(second)?.prompt).toBe("second");
   });
 
+  it("getLastRunForTask returns the most recent run for a task", () => {
+    const log = new RunLog(root);
+    const first = log.startRun(taskId, "builder", "opencode", "first");
+    log.finishRun(first, "error", { error: "boom" });
+    const second = log.startRun(taskId, "validator", "pi", "second");
+    log.finishRun(second, "done", { commitSha: "cafe" });
+
+    const last = log.getLastRunForTask(taskId);
+    expect(last?.id).toBe(second);
+    expect(last?.role).toBe("validator");
+    expect(last?.status).toBe("done");
+  });
+
+  it("getLastRunForTask returns a run with an error for a stuck task", () => {
+    const log = new RunLog(root);
+    const runId = log.startRun(taskId, "builder", "opencode", "build");
+    log.finishRun(runId, "error", { error: "spawn failed: acpx missing" });
+
+    const last = log.getLastRunForTask(taskId);
+    expect(last?.id).toBe(runId);
+    expect(last?.status).toBe("error");
+    expect(last?.error).toBe("spawn failed: acpx missing");
+  });
+
+  it("getLastRunForTask returns undefined when the task has no runs", () => {
+    const log = new RunLog(root);
+    expect(log.getLastRunForTask(taskId)).toBeUndefined();
+  });
+
   it("round-trips an error event payload with a numeric code", () => {
     const log = new RunLog(root);
     const runId = log.startRun(taskId, "builder", "opencode", "p");

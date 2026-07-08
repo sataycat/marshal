@@ -3,11 +3,21 @@ export type TaskStatus = "backlog" | "ready" | "building" | "validating" | "revi
 export const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   backlog: ["ready"],
   ready: ["building"],
-  building: ["validating"],
-  validating: ["building", "review"],
+  building: ["validating", "ready", "backlog"],
+  validating: ["building", "review", "backlog"],
   review: ["done"],
   done: [],
 };
+
+export const ESCAPE_HATCH_TRANSITIONS: ReadonlyArray<readonly [TaskStatus, TaskStatus]> = [
+  ["building", "ready"],
+  ["building", "backlog"],
+  ["validating", "backlog"],
+] as const;
+
+export function isEscapeHatch(from: TaskStatus, to: TaskStatus): boolean {
+  return ESCAPE_HATCH_TRANSITIONS.some(([f, t]) => f === from && t === to);
+}
 
 export function isValidTransition(from: TaskStatus, to: TaskStatus): boolean {
   return VALID_TRANSITIONS[from].includes(to);

@@ -183,7 +183,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 
 ---
 
-## Slice 10 — Escape-Hatch State Transitions
+## ✅ Slice 10 — Escape-Hatch State Transitions (COMPLETE)
 
 **Goal:** Failed or stuck tasks can be manually re-queued or cancelled without SQL surgery.
 
@@ -196,6 +196,8 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 - ADR: records the escape-hatch transitions and their intended use (manual recovery, not automated retry — Slice 7 owns automated retry routing).
 
 **Motivation:** ADR-006 Decision 7 leaves failed builds stuck in `building` with no valid transition out. A human who investigates and wants to re-queue must currently use SQL surgery. Slice 10 adds the manual escape hatches; Slice 7's automated retry routing is separate and builds on top.
+
+**ADR:** [`docs/adr/ADR-009-escape-hatch-transitions.md`](adr/ADR-009-escape-hatch-transitions.md) settles the three new edges (`building → ready`, `building → backlog`, `validating → backlog`), the manual-only policy, the retry-state reset on escape hatches (per ADR-008), and the `task show` last-run error context.
 
 ---
 

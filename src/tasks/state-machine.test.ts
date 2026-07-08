@@ -5,6 +5,8 @@ import {
   isTaskStatus,
   isValidTransition,
   InvalidTransitionError,
+  isEscapeHatch,
+  ESCAPE_HATCH_TRANSITIONS,
   VALID_TRANSITIONS,
 } from "./state-machine.js";
 
@@ -18,11 +20,18 @@ describe("state-machine", () => {
     expect(isValidTransition("review", "done")).toBe(true);
   });
 
+  it("allows the escape-hatch transitions (Slice 10)", () => {
+    expect(isValidTransition("building", "ready")).toBe(true);
+    expect(isValidTransition("building", "backlog")).toBe(true);
+    expect(isValidTransition("validating", "backlog")).toBe(true);
+  });
+
   it("rejects invalid transitions", () => {
     expect(isValidTransition("backlog", "done")).toBe(false);
     expect(isValidTransition("ready", "review")).toBe(false);
     expect(isValidTransition("done", "backlog")).toBe(false);
     expect(isValidTransition("building", "review")).toBe(false);
+    expect(isValidTransition("validating", "ready")).toBe(false);
   });
 
   it("has no outgoing transitions from done", () => {
@@ -31,6 +40,28 @@ describe("state-machine", () => {
 
   it("allows validating -> building (retry)", () => {
     expect(isValidTransition("validating", "building")).toBe(true);
+  });
+
+  it("identifies escape hatches", () => {
+    expect(isEscapeHatch("building", "ready")).toBe(true);
+    expect(isEscapeHatch("building", "backlog")).toBe(true);
+    expect(isEscapeHatch("validating", "backlog")).toBe(true);
+  });
+
+  it("does not treat automated transitions as escape hatches", () => {
+    expect(isEscapeHatch("validating", "building")).toBe(false);
+    expect(isEscapeHatch("validating", "review")).toBe(false);
+    expect(isEscapeHatch("building", "validating")).toBe(false);
+    expect(isEscapeHatch("backlog", "ready")).toBe(false);
+    expect(isEscapeHatch("ready", "building")).toBe(false);
+  });
+
+  it("exports exactly the three escape-hatch edges", () => {
+    expect(ESCAPE_HATCH_TRANSITIONS).toEqual([
+      ["building", "ready"],
+      ["building", "backlog"],
+      ["validating", "backlog"],
+    ]);
   });
 
   it("throws on invalid assertTransition", () => {

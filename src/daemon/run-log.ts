@@ -145,6 +145,13 @@ export class RunLog {
     return row ? rowToRun(row) : undefined;
   }
 
+  getLastRunForTask(taskId: number): RunRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM runs WHERE task_id = ? ORDER BY started_at DESC, id DESC LIMIT 1")
+      .get(taskId) as RunRow | undefined;
+    return row ? rowToRun(row) : undefined;
+  }
+
   getEvents(runId: number): RunEventRecord[] {
     const rows = this.db
       .prepare("SELECT * FROM run_events WHERE run_id = ? ORDER BY seq")
