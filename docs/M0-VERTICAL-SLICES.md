@@ -17,9 +17,13 @@ This doc breaks the M0 milestone from `PROJECT.md` into small, vertical slices t
 ## Dependency Map
 
 ```
-Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slice 6
-         │            │            │            │
-         └─> Slice 3 ─┘            └─> Slice 7 ─┘
+Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slice 6 ─┬─> Slice 9
+         │            │            │            │            │
+         └─> Slice 3 ─┘            └─> Slice 7 ─┘            │
+                    │                                         │
+                    └─> Slice 8 ──────────────────────────────┘
+                                                              │
+                    Slice 10 (escape hatches) ─────────────────┘
 ```
 
 ---
@@ -115,12 +119,13 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 
 ## Slice 6 — Validator Run & Gate
 
-**Goal:** A `validating` task is checked by pi in a separate worktree; the task moves to `review` or back to `building` based on the result.
+**Goal:** A `validating` task is checked by the configured validator harness in a separate worktree; the task moves to `review` or back to `building` based on the result. The slice is harness-agnostic — which agent (e.g. `opencode-go`, `pi`) acts as validator is resolved from `~/.marshal/config.json` at runtime, set by the user during onboarding when they wire up their harness API keys. M0 development focuses on `opencode-go` and `pi` as the first supported harnesses via the ACPX adapter (Slice 4), but no slice-specific code should hard-code either one.
 
 **Scope:**
 
+- Resolve the validator agent ID from `~/.marshal/config.json` (e.g. `marshal.agents.validator`, defaulting to a configured fallback) at run time, rather than hard-coding a harness in the orchestrator.
 - Create a second worktree from the same task branch (validator worktree).
-- Run `pi` with a prompt that includes the diff and the spec.
+- Run the configured validator harness via the ACPX `Agent` adapter (Slice 4) with a prompt that includes the diff and the spec. Builder and validator may use the same harness or different ones; the slice must work for either case.
 - Parse validator output into `pass` / `fail`.
 - On pass: transition `validating -> review`.
 - On fail: transition `validating -> building` and append failure context to the run log.
@@ -170,6 +175,22 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 
 ---
 
+## Slice 10 — Escape-Hatch State Transitions
+
+**Goal:** Failed or stuck tasks can be manually re-queued or cancelled without SQL surgery.
+
+**Scope:**
+
+- Add `building → ready` transition to the state machine for re-queuing a failed build after human inspection.
+- Add `building → backlog` (and possibly `validating → backlog`) for sending a task back to authoring.
+- CLI: `marshal task transition <slug> <state>` supports the new transitions.
+- `task show` displays the last run's error context when a task is stuck in `building` or `validating`.
+- ADR: records the escape-hatch transitions and their intended use (manual recovery, not automated retry — Slice 7 owns automated retry routing).
+
+**Motivation:** ADR-006 Decision 7 leaves failed builds stuck in `building` with no valid transition out. A human who investigates and wants to re-queue must currently use SQL surgery. Slice 10 adds the manual escape hatches; Slice 7's automated retry routing is separate and builds on top.
+
+---
+
 ## Open Questions to ADR
 
 Record decisions for these in new ADRs before they block implementation:
@@ -190,5 +211,6 @@ Record decisions for these in new ADRs before they block implementation:
 6. Slice 6 (validator run)
 7. Slice 7 (retry routing)
 8. Slice 9 (polish + integration test)
+9. Slice 10 (escape hatches) — can be done any time after Slice 3; does not block other slices
 
 After each slice: `pnpm run check && pnpm test`.
