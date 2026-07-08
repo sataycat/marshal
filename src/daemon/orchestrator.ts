@@ -6,10 +6,17 @@ import { AcpxAgentAdapter } from "../agent/acpx-adapter.js";
 import type { Agent, AgentEvent, AgentSession, SpawnOptions } from "../agent/types.js";
 import { logger } from "../logger.js";
 import { openDb } from "../db/index.js";
-import { getTask, transitionTask, type Task } from "../tasks/store.js";
+import {
+  getTask,
+  transitionTask,
+  incrementRetryCount,
+  setLastFailure,
+  clearRetryState,
+  type Task,
+} from "../tasks/store.js";
 import { specRelPathFor } from "../tasks/freeze.js";
 import { WorktreeManager } from "../worktree/manager.js";
-import { resolveAgentId } from "../worktree/config.js";
+import { resolveAgentId, resolveMaxRetries } from "../worktree/config.js";
 import { RunLog } from "./run-log.js";
 
 export interface RunOnceResult {
@@ -232,6 +239,7 @@ export interface RunOnceOptions {
   agent?: Agent;
   manager?: WorktreeManager;
   validatorAgentId?: ReturnType<typeof resolveAgentId>;
+  maxRetries?: number;
 }
 
 export interface ValidateTaskOptions {
@@ -520,9 +528,18 @@ export async function runOnce(
   });
 
   if (result.status === "validated") {
+    clearRetryState(slug, root);
     transitionTask(slug, "review", root);
   } else if (result.status === "validation_failed") {
-    transitionTask(slug, "building", root);
+    const maxRetries = options.maxRetries ?? resolveMaxRetries();
+    const reason = result.reason ?? result.error ?? "unknown validation failure";
+    if (task.retry_count < maxRetries) {
+      incrementRetryCount(slug, reason, root);
+      transitionTask(slug, "building", root);
+    } else {
+      setLastFailure(slug, reason, root);
+      transitionTask(slug, "review", root);
+    }
   }
 
   return result;

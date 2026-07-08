@@ -935,4 +935,74 @@ describe("runOnce (validator dispatch)", () => {
     expect(getTask("ready-first", repoRoot).status).toBe("validating");
     expect(getTask("validating-second", repoRoot).status).toBe("validating");
   });
+
+  it("retries a failed validation up to the default cap, then escalates to review", async () => {
+    seedValidatingTask("v-retry-cap", "## Goal\nv.\n", repoRoot, manager);
+
+    const failAgent = new FakeAgent({
+      events: [{ type: "text", text: "MARSHAL_GATE: fail attempt\n" }, { type: "done", stopReason: "end_turn" }],
+    });
+
+    const first = await runOnce({ root: repoRoot, agent: failAgent, manager, validatorAgentId: "pi" });
+    expect(first?.status).toBe("validation_failed");
+    expect(getTask("v-retry-cap", repoRoot).status).toBe("building");
+    expect(getTask("v-retry-cap", repoRoot).retry_count).toBe(1);
+    expect(getTask("v-retry-cap", repoRoot).last_failure).toBe("attempt");
+
+    transitionTask("v-retry-cap", "validating", repoRoot);
+    const second = await runOnce({ root: repoRoot, agent: failAgent, manager, validatorAgentId: "pi" });
+    expect(second?.status).toBe("validation_failed");
+    expect(getTask("v-retry-cap", repoRoot).status).toBe("building");
+    expect(getTask("v-retry-cap", repoRoot).retry_count).toBe(2);
+
+    transitionTask("v-retry-cap", "validating", repoRoot);
+    const third = await runOnce({ root: repoRoot, agent: failAgent, manager, validatorAgentId: "pi" });
+    expect(third?.status).toBe("validation_failed");
+    expect(getTask("v-retry-cap", repoRoot).status).toBe("review");
+    expect(getTask("v-retry-cap", repoRoot).retry_count).toBe(2);
+    expect(getTask("v-retry-cap", repoRoot).last_failure).toBe("attempt");
+  });
+
+  it("resets retry state when validation passes", async () => {
+    seedValidatingTask("v-pass-reset", "## Goal\nv.\n", repoRoot, manager);
+
+    const failAgent = new FakeAgent({
+      events: [{ type: "text", text: "MARSHAL_GATE: fail once\n" }, { type: "done", stopReason: "end_turn" }],
+    });
+
+    await runOnce({ root: repoRoot, agent: failAgent, manager, validatorAgentId: "pi" });
+    expect(getTask("v-pass-reset", repoRoot).retry_count).toBe(1);
+
+    transitionTask("v-pass-reset", "validating", repoRoot);
+    const passAgent = new FakeAgent({
+      events: [{ type: "text", text: "MARSHAL_GATE: pass\n" }, { type: "done", stopReason: "end_turn" }],
+    });
+    const result = await runOnce({ root: repoRoot, agent: passAgent, manager, validatorAgentId: "pi" });
+
+    expect(result?.status).toBe("validated");
+    expect(getTask("v-pass-reset", repoRoot).status).toBe("review");
+    expect(getTask("v-pass-reset", repoRoot).retry_count).toBe(0);
+    expect(getTask("v-pass-reset", repoRoot).last_failure).toBeNull();
+  });
+
+  it("escalates to review immediately when maxRetries is 0", async () => {
+    seedValidatingTask("v-zero-retries", "## Goal\nv.\n", repoRoot, manager);
+
+    const failAgent = new FakeAgent({
+      events: [{ type: "text", text: "MARSHAL_GATE: fail no retries\n" }, { type: "done", stopReason: "end_turn" }],
+    });
+
+    const result = await runOnce({
+      root: repoRoot,
+      agent: failAgent,
+      manager,
+      validatorAgentId: "pi",
+      maxRetries: 0,
+    });
+
+    expect(result?.status).toBe("validation_failed");
+    expect(getTask("v-zero-retries", repoRoot).status).toBe("review");
+    expect(getTask("v-zero-retries", repoRoot).retry_count).toBe(0);
+    expect(getTask("v-zero-retries", repoRoot).last_failure).toBe("no retries");
+  });
 });

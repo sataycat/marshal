@@ -75,8 +75,12 @@ export function registerTaskCommands(task: Command): void {
         console.log(`title:  ${t.title}`);
         console.log(`status: ${t.status}`);
         console.log(`id:     ${t.id}`);
+        console.log(`retries: ${t.retry_count}`);
         console.log(`created: ${t.created_at}`);
         console.log(`updated: ${t.updated_at}`);
+        if (t.last_failure) {
+          console.log(`last failure: ${t.last_failure}`);
+        }
         if (t.spec_markdown) {
           console.log("--- spec ---");
           console.log(t.spec_markdown);

@@ -140,7 +140,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 
 ---
 
-## Slice 7 — Retry Cap & Failure Routing
+## ✅ Slice 7 — Retry Cap & Failure Routing (COMPLETE)
 
 **Goal:** Failed validations retry a bounded number of times, then escalate to human review.
 

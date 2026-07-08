@@ -4,10 +4,13 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { InvalidTransitionError } from "./state-machine.js";
 import {
+  clearRetryState,
   createTask,
   DuplicateSlugError,
   getTask,
+  incrementRetryCount,
   listTasks,
+  setLastFailure,
   TaskNotFoundError,
   transitionTask,
 } from "./store.js";
@@ -24,6 +27,8 @@ describe("task store", () => {
     expect(t.slug).toBe("add-greeting");
     expect(t.status).toBe("backlog");
     expect(t.spec_markdown).toBe("");
+    expect(t.retry_count).toBe(0);
+    expect(t.last_failure).toBeNull();
 
     const fetched = getTask("add-greeting", root);
     expect(fetched.id).toBe(t.id);
@@ -86,5 +91,34 @@ describe("task store", () => {
     transitionTask("ts", "ready", root);
     const after = getTask("ts", root).updated_at;
     expect(after >= before).toBe(true);
+  });
+
+  it("increments retry count and stores the last failure", () => {
+    createTask({ slug: "retry", title: "Retry" }, root);
+    const t1 = incrementRetryCount("retry", "tests failed", root);
+    expect(t1.retry_count).toBe(1);
+    expect(t1.last_failure).toBe("tests failed");
+
+    const t2 = incrementRetryCount("retry", "lint errors", root);
+    expect(t2.retry_count).toBe(2);
+    expect(t2.last_failure).toBe("lint errors");
+
+    expect(getTask("retry", root).retry_count).toBe(2);
+  });
+
+  it("sets the last failure without changing the retry count", () => {
+    createTask({ slug: "set-fail", title: "Set Fail" }, root);
+    incrementRetryCount("set-fail", "first", root);
+    const t = setLastFailure("set-fail", "cap reached", root);
+    expect(t.retry_count).toBe(1);
+    expect(t.last_failure).toBe("cap reached");
+  });
+
+  it("clears retry state", () => {
+    createTask({ slug: "clear", title: "Clear" }, root);
+    incrementRetryCount("clear", "oops", root);
+    const t = clearRetryState("clear", root);
+    expect(t.retry_count).toBe(0);
+    expect(t.last_failure).toBeNull();
   });
 });

@@ -22,6 +22,9 @@ export interface GlobalConfig {
     builder?: string;
     validator?: string;
   };
+  policy?: {
+    maxRetries?: number;
+  };
 }
 
 export function loadMarshalJson(repoRoot: string): MarshalJson {
@@ -77,4 +80,19 @@ export function resolveAgentId(role: AgentRole, config: GlobalConfig = loadGloba
     return raw as AgentId;
   }
   throw new InvalidAgentIdError(role, raw);
+}
+
+export const DEFAULT_MAX_RETRIES = 2;
+
+export function resolveMaxRetries(config: GlobalConfig = loadGlobalConfig()): number {
+  const raw = config.policy?.maxRetries;
+  if (raw === undefined) {
+    return DEFAULT_MAX_RETRIES;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    logger.warn({ raw }, "Invalid policy.maxRetries; using default");
+    return DEFAULT_MAX_RETRIES;
+  }
+  return value;
 }
