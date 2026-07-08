@@ -187,4 +187,17 @@ describe("CLI smoke tests", () => {
     expect(showOut).toContain("builder opencode error");
     expect(showOut).toContain("run error: spawn failed: acpx missing");
   });
+
+  it("reports no ready task with `daemon run-once`", () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-"));
+    run(["init"], root);
+    const { stdout } = run(["daemon", "run-once"], root);
+    expect(stdout.trim()).toBe("no ready task");
+  });
+
+  it("exposes `daemon start` with an --interval option", () => {
+    const { stdout } = run(["daemon", "start", "--help"]);
+    expect(stdout).toContain("Poll interval");
+    expect(stdout).toContain("daemon");
+  });
 });

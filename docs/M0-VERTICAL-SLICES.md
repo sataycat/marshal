@@ -170,7 +170,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 
 ---
 
-## Slice 9 — M0 CLI Polish & Integration Test
+## ✅ Slice 9 — M0 CLI Polish & Integration Test (COMPLETE)
 
 **Goal:** The full M0 loop can be driven from the CLI and has an automated smoke test.
 
@@ -180,6 +180,15 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 - `marshal daemon start` polls for ready tasks (single-threaded, simple interval).
 - Integration test using a temp git repo and stub agent responses.
 - Update README with M0 usage.
+
+**Implementation:**
+
+- `src/daemon/loop.ts` adds `startDaemon` (a polling loop over `runOnce` with a configurable interval and `AbortSignal` stop) and `formatRunOnceResult` (one-line run summaries for CLI output).
+- `src/cli.ts` wires a `daemon` command group with `run-once` (single cycle) and `start` (long-running poll, `--interval <ms>`, stops on SIGINT/SIGTERM).
+- `src/daemon/loop.test.ts` covers the result formatter and the daemon loop (full build + validate across cycles, idle, pre-aborted).
+- `tests/m0-loop.test.ts` is the end-to-end M0 smoke test: drives `init` → `task create` → `task ready` (freeze) → `runOnce` (builder) → `runOnce` (validator) → `review` via the CLI binary plus a stub agent, plus retry-then-pass and retry-cap-escalation paths.
+- `tests/cli.smoke.test.ts` adds `daemon run-once` (no ready task) and `daemon start --help` checks.
+- `README.md` documents the M0 workflow, configuration, CLI reference, and development commands.
 
 ---
 
