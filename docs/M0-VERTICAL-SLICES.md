@@ -39,7 +39,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 
 ---
 
-## ✅ Slice 2 — Worktree Manager (COMPLETE)
+## ✅ Slice 2 — Worktree Manager (COMPLETE — base-branch policy amended by ADR-004)
 
 **Goal:** Marshal can create and destroy isolated git worktrees for a task, following the isolation model in [`docs/adr/ADR-002-worktree-isolation.md`](adr/ADR-002-worktree-isolation.md).
 
@@ -105,8 +105,8 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 **Scope:**
 
 - Orchestrator loop: look for `ready` tasks, claim one, transition to `building`.
-- Render the task spec into a prompt for the builder.
-- Run opencode in the worktree with the prompt.
+- Render the task spec into a prompt for the builder. (The frozen spec already lives at `specs/<NNNN>-<slug>.md` on the task branch from Slice 8; the builder reads it in its worktree per ADR-005.)
+- Run opencode in the worktree with the prompt. (The worktree already exists from the freeze at Ready; `WorktreeManager.create(slug)` returns it. No new worktree is created at Building.)
 - Commit any changes the builder made to the task branch.
 - Transition to `validating`.
 - Run log stored in SQLite.
@@ -142,7 +142,9 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─┬─> Slice 5 ─┬─> Slic
 
 ---
 
-## Slice 8 — Spec Freeze at Ready
+## ✅ Slice 8 — Spec Freeze at Ready (COMPLETE)
+
+**ADR:** [`docs/adr/ADR-005-spec-freeze-at-ready.md`](adr/ADR-005-spec-freeze-at-ready.md). Settles the worktree lifecycle at the Ready transition (Option A: the freeze creates the worktree + branch), the spec file format, the `--spec-file` / `task ready` / `task freeze` CLI surface, and re-freeze semantics.
 
 **Goal:** When a task transitions to `ready`, its working spec is frozen as committed markdown in the task branch.
 

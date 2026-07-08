@@ -74,4 +74,67 @@ describe("CLI smoke tests", () => {
       delete process.env.MARSHAL_GLOBAL_CONFIG;
     }
   });
+
+  it("freezes a task spec at `task ready`", () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-"));
+    const worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-wt-"));
+
+    execFileSync("git", ["init", "-b", "main"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+      stdio: "ignore",
+    });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["add", "."], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "init", "--allow-empty"], {
+      cwd: root,
+      stdio: "ignore",
+    });
+
+    run(["init"], root);
+
+    const globalConfigPath = join(worktreeRoot, "global-config.json");
+    writeFileSync(globalConfigPath, JSON.stringify({ worktree: { root: worktreeRoot } }));
+    process.env.MARSHAL_GLOBAL_CONFIG = globalConfigPath;
+
+    try {
+      const specFile = join(root, "spec.md");
+      writeFileSync(specFile, "## Goal\nBuild the thing.\n");
+      run(
+        ["task", "create", "--slug", "frozen-thing", "--title", "Frozen thing", "--spec-file", specFile],
+        root,
+      );
+      run(["task", "ready", "frozen-thing"], root);
+
+      const showOut = run(["task", "show", "frozen-thing"], root).stdout;
+      expect(showOut).toContain("status: ready");
+
+      const worktrees = execFileSync("git", ["worktree", "list"], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      expect(worktrees).toContain("frozen-thing-");
+
+      const branchRaw = execFileSync("git", ["branch", "--list", "marshal/task/frozen-thing-*"], {
+        cwd: root,
+        encoding: "utf8",
+      }).trim();
+      const branch = branchRaw.replace(/^[*+= ]+/m, "").trim();
+      expect(branch).toMatch(/^marshal\/task\/frozen-thing-/);
+      const lsTree = execFileSync("git", ["ls-tree", "-r", "--name-only", branch], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      expect(lsTree).toContain("specs/0001-frozen-thing.md");
+
+      const logBody = execFileSync(
+        "git",
+        ["log", "--format=%B", "-1", branch, "--", "specs/0001-frozen-thing.md"],
+        { cwd: root, encoding: "utf8" },
+      ).trim();
+      expect(logBody).toBe("freeze: frozen-thing");
+    } finally {
+      delete process.env.MARSHAL_GLOBAL_CONFIG;
+    }
+  });
 });
