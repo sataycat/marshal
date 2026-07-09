@@ -27,6 +27,14 @@ import { InvalidTransitionError, isTaskStatus, type TaskStatus } from "../tasks/
 import { freezeTask, FreezeError } from "../tasks/freeze.js";
 import { generateUniqueSlug } from "../tasks/slug.js";
 import { WorktreeManager } from "../worktree/manager.js";
+import {
+  EventBus,
+  publishTaskCreated,
+  publishTaskTransitioned,
+  publishTaskUpdated,
+  type TaskPayload,
+} from "./bus.js";
+import { attachWebSocket, type WebSocketBridgeHandle } from "./ws.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -36,12 +44,15 @@ export interface HttpServerOptions {
   port?: number;
   version?: string;
   config?: GlobalConfig;
+  bus?: EventBus;
+  attachWebSockets?: boolean;
 }
 
 export interface HttpServerHandle {
   host: string;
   port: number;
   portFile: string;
+  bus: EventBus;
   close(): Promise<void>;
 }
 
@@ -59,13 +70,15 @@ export function portFilePath(root = cwd()): string {
 export interface BuildAppOptions {
   root?: string;
   worktreeRoot?: string;
+  bus?: EventBus;
 }
 
 export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   const root = options.root;
+  const bus = options.bus;
   const app = new Hono();
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
-  registerTaskRoutes(app, root, options.worktreeRoot);
+  registerTaskRoutes(app, root, options.worktreeRoot, bus);
   app.notFound((c) => c.json({ error: "Not found" }, 404));
   app.onError((err, c) => {
     if (err instanceof ApiError) {
@@ -117,6 +130,10 @@ function taskCard(task: Task): TaskCardFields {
     created_at: task.created_at,
     updated_at: task.updated_at,
   };
+}
+
+function taskPayload(task: Task): TaskPayload {
+  return taskCard(task);
 }
 
 function taskDetail(task: Task): TaskDetailFields {
@@ -183,7 +200,12 @@ function mapDomainError(err: unknown): ApiError {
   return new ApiError(500, "Internal server error", "internal_error");
 }
 
-function registerTaskRoutes(app: Hono, root?: string, worktreeRoot?: string): void {
+function registerTaskRoutes(
+  app: Hono,
+  root: string | undefined,
+  worktreeRoot: string | undefined,
+  bus: EventBus | undefined,
+): void {
   app.get("/api/tasks", (c) => {
     const tasks = listTasks(root).map(taskCard);
     return c.json({ tasks });
@@ -216,6 +238,7 @@ function registerTaskRoutes(app: Hono, root?: string, worktreeRoot?: string): vo
     try {
       const slug = generateUniqueSlug(titleStr, root);
       const task = createTask({ slug, title: titleStr, specMarkdown }, root);
+      if (bus) publishTaskCreated(bus, taskPayload(task));
       return c.json({ task: taskDetail(task) }, 201);
     } catch (err) {
       throw mapDomainError(err);
@@ -234,7 +257,10 @@ function registerTaskRoutes(app: Hono, root?: string, worktreeRoot?: string): vo
       throw new ApiError(422, `Unknown status: ${toStr}`, "unknown_status");
     }
     try {
+      const fromTask = getTask(slug, root);
+      const from = fromTask.status;
       const task = transitionTask(slug, toStr, root);
+      if (bus) publishTaskTransitioned(bus, taskPayload(task), from, toStr);
       return c.json({ task: taskDetail(task) });
     } catch (err) {
       throw mapDomainError(err);
@@ -249,10 +275,14 @@ function registerTaskRoutes(app: Hono, root?: string, worktreeRoot?: string): vo
       specOverride = assertString(body.specMarkdown, "specMarkdown");
     }
     try {
+      const fromTask = getTask(slug, root);
+      const from = fromTask.status;
       if (specOverride !== undefined) {
         setSpecMarkdown(slug, specOverride, root);
+        if (bus) publishTaskUpdated(bus, taskPayload(getTask(slug, root)));
       }
       const task = transitionTask(slug, "ready", root);
+      if (bus) publishTaskTransitioned(bus, taskPayload(task), from, "ready");
       const manager =
         worktreeRoot !== undefined
           ? new WorktreeManager(root ?? process.cwd(), { worktreeRoot })
@@ -294,8 +324,10 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     options.config,
   );
   const version = options.version ?? readVersion();
+  const bus = options.bus ?? new EventBus();
+  const attachWs = options.attachWebSockets ?? true;
 
-  const app = buildApp(version, { root });
+  const app = buildApp(version, { root, bus });
   const server = serve({ fetch: app.fetch, hostname: host, port });
 
   let bound: { host: string; port: number };
@@ -310,6 +342,16 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     throw err;
   }
 
+  let wsHandle: WebSocketBridgeHandle | undefined;
+  if (attachWs) {
+    wsHandle = attachWebSocket(
+      server as HttpServer,
+      bus,
+      () => listTasks(root).map(taskCard),
+      { path: "/ws" },
+    );
+  }
+
   const portFile = portFilePath(root);
   writeFileSync(portFile, String(bound.port));
 
@@ -319,13 +361,25 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     host: bound.host,
     port: bound.port,
     portFile,
+    bus,
     close() {
-      return closeServer(server, portFile);
+      return closeServer(server, portFile, wsHandle);
     },
   };
 }
 
-async function closeServer(server: ServerType, portFile: string): Promise<void> {
+async function closeServer(
+  server: ServerType,
+  portFile: string,
+  wsHandle?: WebSocketBridgeHandle,
+): Promise<void> {
+  if (wsHandle) {
+    try {
+      await wsHandle.close();
+    } catch (err) {
+      logger.warn({ err }, "WebSocket bridge close failed");
+    }
+  }
   await new Promise<void>((resolveClose) => {
     let settled = false;
     const finish = (): void => {

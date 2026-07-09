@@ -1,11 +1,13 @@
 import { logger } from "../logger.js";
 import { runOnce, type RunOnceOptions, type RunOnceResult } from "./orchestrator.js";
+import { publishDaemonCycleComplete, publishDaemonIdle, type EventBus } from "./bus.js";
 
 export const DEFAULT_DAEMON_INTERVAL_MS = 5000;
 
 export interface StartDaemonOptions extends RunOnceOptions {
   intervalMs?: number;
   signal?: AbortSignal;
+  bus?: EventBus;
 }
 
 export function formatRunOnceResult(result: RunOnceResult | null): string {
@@ -50,13 +52,20 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<voi
 
   while (!signal?.aborted) {
     let result: RunOnceResult | null = null;
+    let published = false;
     try {
       result = await runOnce(options);
     } catch (err) {
       logger.error({ err }, "Daemon cycle failed");
+      published = true;
     }
     if (result) {
       console.log(formatRunOnceResult(result));
+      if (options.bus) publishDaemonCycleComplete(options.bus);
+      published = true;
+    } else if (!published && options.bus) {
+      publishDaemonIdle(options.bus);
+      published = true;
     }
     if (signal?.aborted) break;
     await sleep(intervalMs, signal);

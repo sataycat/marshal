@@ -1,0 +1,274 @@
+import { execSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
+import { startHttpServer } from "./http.js";
+
+function initGitRepo(root: string): void {
+  execSync("git init -b main", { cwd: root, stdio: "ignore" });
+  execSync("git config user.email test@example.com", { cwd: root, stdio: "ignore" });
+  execSync("git config user.name Test", { cwd: root, stdio: "ignore" });
+  writeFileSync(join(root, "README.md"), "# Test\n");
+  execSync("git add README.md", { cwd: root, stdio: "ignore" });
+  execSync("git commit -m init", { cwd: root, stdio: "ignore" });
+  mkdirSync(join(root, ".marshal"), { recursive: true });
+}
+
+interface MessageCollector {
+  next(timeoutMs?: number): Promise<any>;
+  close(): void;
+}
+
+function collectMessages(ws: WebSocket): MessageCollector {
+  const queue: any[] = [];
+  const waiters: Array<(msg: any) => void> = [];
+  const listener = (data: import("ws").RawData): void => {
+    let msg: any;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      msg = { raw: data.toString() };
+    }
+    const waiter = waiters.shift();
+    if (waiter) waiter(msg);
+    else queue.push(msg);
+  };
+  ws.on("message", listener);
+  return {
+    next(timeoutMs = 2000) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("timeout waiting for WS message")),
+          timeoutMs,
+        );
+        const deliver = (msg: any): void => {
+          clearTimeout(timer);
+          resolve(msg);
+        };
+        const buffered = queue.shift();
+        if (buffered !== undefined) deliver(buffered);
+        else waiters.push(deliver);
+      });
+    },
+    close() {
+      ws.off("message", listener);
+    },
+  };
+}
+
+async function openSocket(url: string): Promise<{ ws: WebSocket; collector: MessageCollector }> {
+  const ws = new WebSocket(url);
+  const collector = collectMessages(ws);
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", (err) => reject(err));
+  });
+  return { ws, collector };
+}
+
+describe("WebSocket event bus", () => {
+  let repoRoot: string;
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), "marshal-ws-"));
+    initGitRepo(repoRoot);
+  });
+
+  afterEach(() => {
+    delete process.env.MARSHAL_GLOBAL_CONFIG;
+  });
+
+  it("acceptance: connect to /ws, create a task via HTTP, observe task.created on the socket", async () => {
+    const handle = await startHttpServer({
+      root: repoRoot,
+      host: "127.0.0.1",
+      port: 0,
+      version: "0.0.1",
+    });
+
+    const { ws, collector } = await openSocket(`ws://127.0.0.1:${handle.port}/ws`);
+    try {
+      const connected = await collector.next(2000);
+      expect(connected.type).toBe("connected");
+      expect(connected.payload).toEqual({ tasks: [] });
+      expect(connected.timestamp).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/,
+      );
+
+      const res = await fetch(`http://127.0.0.1:${handle.port}/api/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Slice Three Acceptance" }),
+      });
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as { task: { slug: string } };
+      const slug = created.task.slug;
+
+      const createdEvent = await collector.next(2000);
+      expect(createdEvent.type).toBe("task.created");
+      expect(createdEvent.payload).toMatchObject({
+        slug,
+        title: "Slice Three Acceptance",
+        status: "backlog",
+      });
+    } finally {
+      collector.close();
+      ws.close();
+      await handle.close();
+    }
+  });
+
+  it("delivers task.transitioned events to connected clients", async () => {
+    const handle = await startHttpServer({
+      root: repoRoot,
+      host: "127.0.0.1",
+      port: 0,
+      version: "0.0.1",
+    });
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${handle.port}/api/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Transition me" }),
+      });
+      const created = (await res.json()) as { task: { slug: string } };
+      const slug = created.task.slug;
+
+      const { ws, collector } = await openSocket(`ws://127.0.0.1:${handle.port}/ws`);
+      try {
+        await collector.next(2000); // connected snapshot (task in backlog)
+
+        const transitionRes = await fetch(
+          `http://127.0.0.1:${handle.port}/api/tasks/${slug}/transition`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ to: "ready" }),
+          },
+        );
+        expect(transitionRes.status).toBe(200);
+
+        const event = await collector.next(2000);
+        expect(event.type).toBe("task.transitioned");
+        expect(event.payload).toMatchObject({
+          slug,
+          status: "ready",
+          from: "backlog",
+          to: "ready",
+        });
+      } finally {
+        collector.close();
+        ws.close();
+      }
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("sends a connected snapshot with existing tasks to late joiners", async () => {
+    const handle = await startHttpServer({
+      root: repoRoot,
+      host: "127.0.0.1",
+      port: 0,
+      version: "0.0.1",
+    });
+
+    try {
+      await fetch(`http://127.0.0.1:${handle.port}/api/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Pre-existing" }),
+      });
+
+      const { ws, collector } = await openSocket(`ws://127.0.0.1:${handle.port}/ws`);
+      try {
+        const connected = await collector.next(2000);
+        expect(connected.type).toBe("connected");
+        expect(connected.payload.tasks).toHaveLength(1);
+        expect(connected.payload.tasks[0]).toMatchObject({
+          slug: "pre-existing",
+          title: "Pre-existing",
+        });
+      } finally {
+        collector.close();
+        ws.close();
+      }
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("supports multiple concurrent clients receiving the same broadcast", async () => {
+    const handle = await startHttpServer({
+      root: repoRoot,
+      host: "127.0.0.1",
+      port: 0,
+      version: "0.0.1",
+    });
+
+    try {
+      const [{ ws: ws1, collector: c1 }, { ws: ws2, collector: c2 }] = await Promise.all([
+        openSocket(`ws://127.0.0.1:${handle.port}/ws`),
+        openSocket(`ws://127.0.0.1:${handle.port}/ws`),
+      ]);
+
+      try {
+        await Promise.all([c1.next(2000), c2.next(2000)]);
+
+        await fetch(`http://127.0.0.1:${handle.port}/api/tasks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: "Broadcast" }),
+        });
+
+        const [m1, m2] = await Promise.all([c1.next(2000), c2.next(2000)]);
+        expect(m1.type).toBe("task.created");
+        expect(m1.payload.title).toBe("Broadcast");
+        expect(m2.type).toBe("task.created");
+        expect(m2.payload.title).toBe("Broadcast");
+      } finally {
+        c1.close();
+        c2.close();
+        ws1.close();
+        ws2.close();
+      }
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("keeps the HTTP server healthy after a client drops abruptly", async () => {
+    const handle = await startHttpServer({
+      root: repoRoot,
+      host: "127.0.0.1",
+      port: 0,
+      version: "0.0.1",
+    });
+
+    try {
+      const { ws, collector } = await openSocket(`ws://127.0.0.1:${handle.port}/ws`);
+      try {
+        const closed = new Promise<void>((resolve) => ws.once("close", () => resolve()));
+        ws.terminate();
+        await closed;
+        collector.close();
+      } finally {
+        try {
+          ws.close();
+        } catch {
+          // already closed
+        }
+      }
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const health = await fetch(`http://127.0.0.1:${handle.port}/api/health`);
+      expect(health.status).toBe(200);
+    } finally {
+      await handle.close();
+    }
+  });
+});

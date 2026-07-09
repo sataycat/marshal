@@ -92,6 +92,7 @@ daemon
           root: process.cwd(),
           intervalMs: Number(options.interval),
           signal: controller.signal,
+          bus: http.bus,
         });
       } finally {
         await http.close();

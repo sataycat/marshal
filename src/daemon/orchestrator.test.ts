@@ -9,6 +9,16 @@ import { createTask, getTask, transitionTask } from "../tasks/store.js";
 import { freezeTask } from "../tasks/freeze.js";
 import { RunLog } from "./run-log.js";
 import {
+  DaemonCycleCompleteType,
+  DaemonIdleType,
+  EventBus,
+  RunEventType,
+  RunFinishedType,
+  RunStartedType,
+  TaskTransitionedType,
+} from "./bus.js";
+import { startDaemon } from "./loop.js";
+import {
   buildTask,
   detectTrunkRef,
   NoTrunkRefError,
@@ -1004,5 +1014,103 @@ describe("runOnce (validator dispatch)", () => {
     expect(getTask("v-zero-retries", repoRoot).status).toBe("review");
     expect(getTask("v-zero-retries", repoRoot).retry_count).toBe(0);
     expect(getTask("v-zero-retries", repoRoot).last_failure).toBe("no retries");
+  });
+});
+
+describe("runOnce event bus", () => {
+  let repoRoot: string;
+  let worktreeRoot: string;
+  let manager: WorktreeManager;
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), "marshal-bus-"));
+    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-bus-wt-"));
+    initGitRepo(repoRoot);
+    initMarshalState(repoRoot);
+    manager = new WorktreeManager(repoRoot, { worktreeRoot });
+  });
+
+  afterEach(() => {
+    delete process.env.MARSHAL_GLOBAL_CONFIG;
+  });
+
+  function createReadyFrozenTask(slug: string, specMarkdown: string) {
+    createTask({ slug, title: `Task ${slug}`, specMarkdown }, repoRoot);
+    transitionTask(slug, "ready", repoRoot);
+    freezeTask(slug, repoRoot, manager);
+  }
+
+  it("publishes run.started/run.event/run.finished and task.transitioned on a build", async () => {
+    const bus = new EventBus();
+    const events: { type: string; payload: any }[] = [];
+    bus.subscribe((e) => events.push({ type: e.type, payload: e.payload }));
+
+    createReadyFrozenTask("bus-build", "## Goal\nBuild the feature.\n");
+
+    const agent = new FakeAgent({
+      events: [
+        { type: "text", text: "working" },
+        { type: "done", stopReason: "end_turn" },
+      ],
+      onSpawn: (session) => {
+        mkdirSync(join(session.cwd, "src"), { recursive: true });
+        writeFileSync(join(session.cwd, "src", "feature.ts"), "export const x = 1;\n");
+      },
+    });
+
+    const result = await runOnce({ root: repoRoot, agent, manager, bus });
+
+    expect(result?.status).toBe("built");
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain(TaskTransitionedType);
+    expect(types).toContain(RunStartedType);
+    expect(types).toContain(RunEventType);
+    expect(types).toContain(RunFinishedType);
+
+    const transitions = events.filter((e) => e.type === TaskTransitionedType);
+    expect(transitions[0].payload).toMatchObject({
+      slug: "bus-build",
+      from: "ready",
+      to: "building",
+    });
+    expect(transitions[1].payload).toMatchObject({
+      slug: "bus-build",
+      from: "building",
+      to: "validating",
+    });
+
+    const started = events.filter((e) => e.type === RunStartedType)[0];
+    expect(started.payload.role).toBe("builder");
+
+    const finished = events.filter((e) => e.type === RunFinishedType)[0];
+    expect(finished.payload.status).toBe("done");
+    expect(finished.payload.commitSha).toBe(result?.commitSha);
+  });
+
+  it("publishes daemon.idle then daemon.cycle_complete across runOnce cycles", async () => {
+    const bus = new EventBus();
+    const events: string[] = [];
+    bus.subscribe((e) => events.push(e.type));
+
+    const agent = new FakeAgent();
+    const controller = new AbortController();
+    const watchdog = setTimeout(() => controller.abort(), 100);
+
+    try {
+      await startDaemon({
+        root: repoRoot,
+        agent,
+        manager,
+        intervalMs: 10,
+        signal: controller.signal,
+        bus,
+      });
+    } finally {
+      clearTimeout(watchdog);
+    }
+
+    expect(events).toContain(DaemonIdleType);
+    expect(events).not.toContain(DaemonCycleCompleteType);
   });
 });

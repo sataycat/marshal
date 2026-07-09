@@ -1,0 +1,164 @@
+import { WebSocketServer, type WebSocket } from "ws";
+import type { Server } from "node:http";
+import { URL } from "node:url";
+import { logger } from "../logger.js";
+import {
+  ConnectedType,
+  type BusEvent,
+  type BusSubscriber,
+  type ConnectedPayload,
+  type EventBus,
+  type TaskPayload,
+} from "./bus.js";
+
+export interface WebSocketBridgeOptions {
+  path: string;
+  pingIntervalMs?: number;
+  dropAfterMs?: number;
+}
+
+export interface WebSocketBridgeHandle {
+  close(): Promise<void>;
+  clientCount(): number;
+}
+
+const DEFAULT_PING_INTERVAL_MS = 30_000;
+const DEFAULT_DROP_AFTER_MS = 90_000;
+
+interface ClientState {
+  lastPongAt: number;
+  pingTimer: NodeJS.Timeout;
+}
+
+export function attachWebSocket(
+  server: Server,
+  bus: EventBus,
+  snapshot: () => TaskPayload[],
+  options: WebSocketBridgeOptions,
+): WebSocketBridgeHandle {
+  const path = options.path;
+  const pingIntervalMs = options.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS;
+  const dropAfterMs = options.dropAfterMs ?? DEFAULT_DROP_AFTER_MS;
+
+  const wss = new WebSocketServer({ noServer: true });
+  const clients = new Map<WebSocket, ClientState>();
+
+  function onUpgrade(req: import("node:http").IncomingMessage, socket: import("node:net").Socket, head: Buffer): void {
+    const requestUrl = new URL(req.url ?? "", "http://127.0.0.1");
+    if (requestUrl.pathname !== path) {
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  }
+
+  server.on("upgrade", onUpgrade);
+
+  const subscriber: BusSubscriber = (event: BusEvent) => {
+    broadcast(event);
+  };
+  const unsubscribe = bus.subscribe(subscriber);
+
+  wss.on("connection", (ws) => {
+    const pingTimer = setInterval(() => sendPing(ws), pingIntervalMs);
+    clients.set(ws, { lastPongAt: Date.now(), pingTimer });
+
+    ws.on("pong", () => {
+      const state = clients.get(ws);
+      if (state) state.lastPongAt = Date.now();
+    });
+
+    ws.on("close", () => removeClient(ws));
+    ws.on("error", (err) => {
+      logger.warn({ err }, "WebSocket client error");
+      removeClient(ws);
+    });
+
+    const connectedPayload: ConnectedPayload = { tasks: snapshot() };
+    const connectedEvent: BusEvent = {
+      type: ConnectedType,
+      payload: connectedPayload,
+      timestamp: new Date().toISOString(),
+    };
+    safeSend(ws, JSON.stringify(connectedEvent));
+  });
+
+  function sendPing(ws: WebSocket): void {
+    const state = clients.get(ws);
+    if (!state) return;
+    if (Date.now() - state.lastPongAt > dropAfterMs) {
+      logger.warn({ path }, "WebSocket client silent, dropping");
+      terminate(ws);
+      return;
+    }
+    try {
+      ws.ping();
+    } catch {
+      removeClient(ws);
+    }
+  }
+
+  function removeClient(ws: WebSocket): void {
+    const state = clients.get(ws);
+    if (!state) return;
+    clearInterval(state.pingTimer);
+    clients.delete(ws);
+    try {
+      if (ws.readyState !== ws.CLOSED && ws.readyState !== ws.CLOSING) ws.close();
+    } catch {
+      // ignore
+    }
+  }
+
+  function terminate(ws: WebSocket): void {
+    removeClient(ws);
+    try {
+      ws.terminate();
+    } catch {
+      // ignore
+    }
+  }
+
+  function broadcast(event: BusEvent): void {
+    const data = JSON.stringify(event);
+    for (const ws of clients.keys()) {
+      safeSend(ws, data);
+    }
+  }
+
+  function safeSend(ws: WebSocket, data: string): void {
+    if (ws.readyState !== ws.OPEN) return;
+    try {
+      ws.send(data);
+    } catch (err) {
+      logger.warn({ err }, "WebSocket send failed, dropping client");
+      removeClient(ws);
+    }
+  }
+
+  return {
+    clientCount() {
+      return clients.size;
+    },
+    close() {
+      return new Promise<void>((resolve) => {
+        server.off("upgrade", onUpgrade);
+        unsubscribe();
+        for (const state of clients.values()) {
+          clearInterval(state.pingTimer);
+        }
+        for (const ws of clients.keys()) {
+          try {
+            ws.terminate();
+          } catch {
+            // ignore
+          }
+        }
+        clients.clear();
+        wss.close(() => resolve());
+      });
+    },
+  };
+}

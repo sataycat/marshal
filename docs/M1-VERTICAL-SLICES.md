@@ -72,7 +72,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 ---
 
-## Slice 3 — WebSocket Event Bus
+## Slice 3 — WebSocket Event Bus ✅
 
 **Goal:** Clients receive real-time updates when task state changes or run events occur, without polling.
 

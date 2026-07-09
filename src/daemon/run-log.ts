@@ -1,6 +1,13 @@
 import Database from "better-sqlite3";
 import { openDb } from "../db/index.js";
 import type { AgentEvent } from "../agent/types.js";
+import {
+  publishRunEvent,
+  publishRunFinished,
+  publishRunStarted,
+  type EventBus,
+  type RunPayload,
+} from "./bus.js";
 
 export type RunStatus = "running" | "done" | "error";
 export type RunRole = "builder" | "validator";
@@ -96,9 +103,11 @@ function rowToRunEvent(row: RunEventRow): RunEventRecord {
 
 export class RunLog {
   private db: Database.Database;
+  private bus?: EventBus;
 
-  constructor(root?: string) {
+  constructor(root?: string, bus?: EventBus) {
     this.db = openDb(root);
+    this.bus = bus;
   }
 
   startRun(taskId: number, role: RunRole, agentId: string, prompt: string): number {
@@ -107,7 +116,12 @@ export class RunLog {
         "INSERT INTO runs (task_id, role, agent_id, status, prompt) VALUES (?, ?, ?, 'running', ?)",
       )
       .run(taskId, role, agentId, prompt);
-    return Number(info.lastInsertRowid);
+    const runId = Number(info.lastInsertRowid);
+    if (this.bus) {
+      const run = this.getRun(runId);
+      if (run) publishRunStarted(this.bus, toRunPayload(run));
+    }
+    return runId;
   }
 
   insertEvent(runId: number, seq: number, event: AgentEvent): void {
@@ -116,6 +130,7 @@ export class RunLog {
         "INSERT INTO run_events (run_id, seq, type, payload) VALUES (?, ?, ?, ?)",
       )
       .run(runId, seq, event.type, JSON.stringify(event));
+    if (this.bus) publishRunEvent(this.bus, runId, event);
   }
 
   finishRun(runId: number, status: "done" | "error", opts: FinishRunOptions = {}): void {
@@ -135,6 +150,10 @@ export class RunLog {
       this.db
         .prepare("UPDATE runs SET status = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(status, runId);
+    }
+    if (this.bus) {
+      const run = this.getRun(runId);
+      if (run) publishRunFinished(this.bus, toRunPayload(run));
     }
   }
 
@@ -158,4 +177,19 @@ export class RunLog {
       .all(runId) as RunEventRow[];
     return rows.map(rowToRunEvent);
   }
+}
+
+function toRunPayload(run: RunRecord): RunPayload {
+  return {
+    id: run.id,
+    taskId: run.taskId,
+    role: run.role,
+    agentId: run.agentId,
+    status: run.status,
+    prompt: run.prompt,
+    commitSha: run.commitSha,
+    startedAt: run.startedAt,
+    endedAt: run.endedAt,
+    error: run.error,
+  };
 }

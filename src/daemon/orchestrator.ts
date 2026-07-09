@@ -15,9 +15,12 @@ import {
   type Task,
 } from "../tasks/store.js";
 import { specRelPathFor } from "../tasks/freeze.js";
+import type { TaskStatus } from "../tasks/state-machine.js";
 import { WorktreeManager } from "../worktree/manager.js";
 import { resolveAgentId, resolveMaxRetries } from "../worktree/config.js";
 import { RunLog } from "./run-log.js";
+import type { EventBus } from "./bus.js";
+import { publishTaskTransitioned } from "./bus.js";
 
 export interface RunOnceResult {
   slug: string;
@@ -152,6 +155,7 @@ export interface BuildTaskOptions {
   root?: string;
   agent?: Agent;
   manager?: WorktreeManager;
+  bus?: EventBus;
 }
 
 export async function buildTask(
@@ -163,7 +167,7 @@ export async function buildTask(
 
   const manager = options.manager ?? new WorktreeManager(root ?? cwd());
   const agent = options.agent ?? new AcpxAgentAdapter();
-  const runLog = new RunLog(root);
+  const runLog = new RunLog(root, options.bus);
 
   const worktree = manager.create(slug);
   const prompt = renderBuilderPrompt(task);
@@ -240,6 +244,7 @@ export interface RunOnceOptions {
   manager?: WorktreeManager;
   validatorAgentId?: ReturnType<typeof resolveAgentId>;
   maxRetries?: number;
+  bus?: EventBus;
 }
 
 export interface ValidateTaskOptions {
@@ -248,6 +253,7 @@ export interface ValidateTaskOptions {
   manager?: WorktreeManager;
   validatorAgentId?: ReturnType<typeof resolveAgentId>;
   trunkRef?: string;
+  bus?: EventBus;
 }
 
 export interface RenderValidatorPromptOptions {
@@ -338,7 +344,7 @@ export async function validateTask(
   const manager = options.manager ?? new WorktreeManager(root ?? cwd());
   const agent = options.agent ?? new AcpxAgentAdapter();
   const validatorAgentId = options.validatorAgentId ?? resolveAgentId("validator");
-  const runLog = new RunLog(root);
+  const runLog = new RunLog(root, options.bus);
 
   const worktree = manager.create(slug);
   const buildCommit = lastBuilderCommitSha(slug, root);
@@ -508,12 +514,17 @@ export async function runOnce(
       };
     }
 
-    transitionTask(slug, "building", root);
+    transitionAndPublish(slug, "ready", "building", root, options.bus);
 
-    const result = await buildTask(slug, { root, agent: options.agent, manager });
+    const result = await buildTask(slug, {
+      root,
+      agent: options.agent,
+      manager,
+      bus: options.bus,
+    });
 
     if (result.status === "built") {
-      transitionTask(slug, "validating", root);
+      transitionAndPublish(slug, "building", "validating", root, options.bus);
     }
 
     return result;
@@ -525,22 +536,56 @@ export async function runOnce(
     agent: options.agent,
     manager,
     validatorAgentId: options.validatorAgentId,
+    bus: options.bus,
   });
 
   if (result.status === "validated") {
     clearRetryState(slug, root);
-    transitionTask(slug, "review", root);
+    transitionAndPublish(slug, "validating", "review", root, options.bus);
   } else if (result.status === "validation_failed") {
     const maxRetries = options.maxRetries ?? resolveMaxRetries();
     const reason = result.reason ?? result.error ?? "unknown validation failure";
     if (task.retry_count < maxRetries) {
       incrementRetryCount(slug, reason, root);
-      transitionTask(slug, "building", root);
+      transitionAndPublish(slug, "validating", "building", root, options.bus);
     } else {
       setLastFailure(slug, reason, root);
-      transitionTask(slug, "review", root);
+      transitionAndPublish(slug, "validating", "review", root, options.bus);
     }
   }
 
   return result;
+}
+
+function transitionAndPublish(
+  slug: string,
+  from: string,
+  to: TaskStatus,
+  root?: string,
+  bus?: EventBus,
+): void {
+  const task = transitionTask(slug, to, root);
+  if (bus) {
+    publishTaskTransitioned(bus, taskCardPayload(task), from, to);
+  }
+}
+
+function taskCardPayload(task: Task): {
+  id: number;
+  slug: string;
+  title: string;
+  status: string;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+} {
+  return {
+    id: task.id,
+    slug: task.slug,
+    title: task.title,
+    status: task.status,
+    retry_count: task.retry_count,
+    created_at: task.created_at,
+    updated_at: task.updated_at,
+  };
 }
