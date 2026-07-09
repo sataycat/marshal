@@ -30,7 +30,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 ---
 
-## Slice 1 — HTTP API Server Skeleton
+## Slice 1 — HTTP API Server Skeleton ✅
 
 **Goal:** The daemon process serves an HTTP API on localhost. Existing CLI commands work unchanged; a new `marshal daemon start` now also binds a port.
 
