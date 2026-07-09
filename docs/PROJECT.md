@@ -2,7 +2,7 @@
 
 > Working title, name TBD. A local-first, agent-agnostic coding-agent orchestrator built around a "software factory" loop: human authors the spec, an agent builds autonomously in an isolated worktree, a dedicated verification gate validates, and the human reviews and merges.
 
-Status: draft / pre-M0. Last updated: 2026-07-06.
+Status: draft / pre-M0. Last updated: 2026-07-09.
 
 ---
 
@@ -38,6 +38,8 @@ Owns:
 - API — HTTP + WebSocket. This is the contract every client shares.
 
 The daemon ships as an npm package installed independently of any repo (`npm i -g sataycat/marshal`). State is per-repo: the daemon manages a `.marshal/` directory in the repo root, and global config lives in `~/.marshal/`. State is discovered via cwd, same model as git — "one daemon per project" still composes on a VPS (run N daemons for N projects).
+
+Process model — explicit decision: one daemon process per repo, not one global process multiplexing multiple repos. Each daemon instance binds its own port and writes it to `.marshal/daemon.port` on start; clients resolve the repo root (cwd-walk, same as git) and read that file to discover the daemon. This keeps the API contract simple — no repo-selector in every request — at the cost of N processes for N repos, which is acceptable on a single-box target (Section 1). A global config (`~/.marshal/config`) may specify a preferred port range; there is no global multiplexer.
 
 ### 3.2 Clients (thin, all talk to the daemon API)
 
@@ -86,7 +88,7 @@ Backlog / Spec -> Ready -> Building -> Validating -> Review -> Done
 
 - Backlog / Spec — human drafts the task in a grill-me chat UI with an agent (see 7). Human owns the final acceptance criteria. Working spec lives in SQLite during this phase.
 - Ready — human marks the spec frozen. Daemon renders it to a committed markdown file (see 3.4). Signals the orchestrator to pick it up.
-- Building — orchestrator spins a worktree, runs the builder agent (opencode) headless until the fast in-loop gates pass or a step budget is hit. The agent self-plans via its own todo tooling; there is no separate Plan board state — planning is internal to the build run, not a HITL checkpoint.
+- Building — orchestrator spins a worktree, runs the builder agent (opencode) headless until the fast in-loop gates pass or a step budget is hit. The agent self-plans via its own todo tooling; there is no separate Plan board state — planning is internal to the build run, not a HITL checkpoint. Boundary test files (see Section 6) are frozen at the Ready transition alongside the spec (see Section 7); any diff produced during Building that modifies a frozen boundary test file is flagged and routed to human Review rather than allowed to auto-advance to Validating — editing the test instead of the code must not be a path to a passing gate.
 - Validating — the boundary gate runs in a separate worktree with a different model (pi). Tests live in the repo; the builder can see them, but they are executed by the decorrelated validator.
 - Review — human reviews the diff, comments, merges.
 - Done — merged.
@@ -99,7 +101,19 @@ Backlog / Spec -> Ready -> Building -> Validating -> Review -> Done
 - Boundary gate passes + change-class is on the trusted auto-merge list -> auto-merge (later phases only).
 - Boundary gate passes + change-class not trusted -> Review.
 
+Spend ceiling — explicit non-functional requirement: every task carries a hard per-task spend ceiling in addition to the step budget. The ceiling is set at spec authoring time; a global default may be configured in `~/.marshal/config`. Steps can vary arbitrarily in token cost; the retry loop can compound spend further. The ceiling caps total dollar cost regardless of step count or step size. Reaching the ceiling before completion is treated identically to exceeding the retry cap — escalate to human Review with a cost-exceeded annotation. Cost is observable: the run history and gate results state in SQLite (Section 3.1) record cumulative spend per task, surfaced in the web board.
+
 Concurrency capped at 1 initially.
+
+### 5.3 Daemon crash recovery
+
+If the daemon process dies while a task is in the Building or Validating state, the policy on restart is:
+
+- The task is moved to Review with a "recovered after crash" annotation; no automatic retry is attempted.
+- The worktree is preserved, not garbage-collected, for manual inspection.
+- The in-flight agent process is considered orphaned and is not reattached; the operator re-queues manually.
+
+This is the M0/M1 policy — intentionally conservative. SQLite WAL mode keeps the state database consistent across an unclean shutdown. Resume-from-checkpoint can be revisited once the gate is proven reliable; the policy must be stated explicitly rather than left undefined.
 
 ## 6. Verification and validation
 
@@ -108,20 +122,28 @@ Two levels, borrowed from the mainstream software-factory framing:
 - In-loop (fast, cheap, deterministic): typecheck, lint, unit tests. Runs inside the builder's iteration. The builder can see and fix these.
 - Boundary (comprehensive): integration and scenario tests, run in a separate disposable worktree after the build. The tests live in the repo — the builder can see them — but they are executed by the decorrelated validator, not the builder.
 
-Decorrelated validator: the boundary gate uses a different model/agent than the build. This is the single highest-leverage design choice for "no mistakes" — a second model in a clean worktree, re-checking the builder's diff against the full test suite, catches what the builder's blind spots miss.
+Decorrelated validator: the boundary gate uses a different model/agent than the build. This is the single highest-leverage design choice for "no mistakes" — a second model in a clean worktree, re-executing the full boundary test suite against the builder's diff, catches what the builder's blind spots miss.
+
+Gate signal — explicit decision: the boundary gate's pass/fail MUST be the exit code and structured report from deterministic test execution, not free-form model judgment on whether the diff satisfies the spec. Tenet #1 ("verification is the product") holds only when the gate is deterministic and auditable. A future contributor who substitutes model judgment for test execution as the gating signal is knowingly violating this stated principle.
+
+Advisory signal (non-gating): a narrative model-judgment signal (e.g., "does this diff look architecturally sound?") may be added as a separate, explicitly-labeled advisory output surfaced to the human at Review — never conflated with the gate result and never used to advance or block task state automatically.
+
+Boundary test files: the set of files constituting the boundary test suite. These are frozen at the Ready transition alongside the spec (see Section 7); spec and boundary tests freeze together as one atomic build contract. Any modification to frozen boundary test files during Building is a gate-integrity violation routed to human Review rather than allowed to auto-advance (see Section 5.1).
 
 ## 7. Spec authoring
 
 - The spec-authoring surface is a grill-me chat UI: the human and an agent iterate on the spec conversationally, bouncing ideas and exploring before finalizing. The working spec lives in SQLite during this phase (concurrent editing, WebSocket broadcast).
 - Human owns acceptance criteria. An agent may help draft the spec, but if the same agent writes and implements it, it will write a spec it already knows it can satisfy.
-- At the Ready transition, the daemon freezes the working spec: renders it to `specs/NNNN-slug.md` and commits it to the task branch. This frozen file is the immutable contract for the build run. The builder reads it via git in its worktree. If the spec is wrong mid-build, that is a new build run — unfreeze, revise, re-freeze.
-- Acceptance criteria in the spec map to the boundary gate's test suite (visible to the builder, executed by the decorrelated validator).
+- Spec granularity constraint: a spec must be scoped to a single mergeable diff completable within the configured step and spend budgets, not a multi-day epic. With concurrency capped at 1 (tenet #6) on a single-box target, larger work must be decomposed into sequential tasks before authoring.
+- At the Ready transition, the daemon freezes two artifacts as one atomic build contract: (a) the working spec, rendered to `specs/NNNN-slug.md` and committed to the task branch, and (b) the boundary test files (see Section 6) in their current repo state. Both freeze simultaneously. The builder reads the spec via git in its worktree. If the spec is wrong mid-build, that is a new build run — unfreeze, revise, re-freeze. Neither artifact can be modified during Building without triggering a gate-integrity violation (Section 5.1).
+- Acceptance criteria in the spec map to the boundary gate's test suite (frozen at Ready alongside the spec, executed by the decorrelated validator).
 
 ## 8. Security and sandboxing
 
-- ACP/ACPX and OpenClaw do NOT sandbox the harness. The agent runs on the host with its own CLI file/exec permissions, and headless runs need a permissive profile (e.g. approve-all) because there is no TTY to approve prompts.
+- ACP/ACPX and OpenClaw do NOT sandbox the harness. The agent runs on the host with its own CLI file/exec permissions, and headless runs need a permissive profile (e.g. approve-all) because there is no TTY to approve prompts. Running an approve-all agent bare on the host without isolation is therefore unsafe in any scenario where the agent can reach paths beyond the task worktree.
 - Therefore isolation is our responsibility: run the builder inside a container or throwaway VM, scoped to the task worktree. Do not run approve-all agents bare on the host.
 - Pin alpha dependencies; audit postinstall hooks; keep provider credentials out of the agent's blast radius where possible.
+- Daemon API trust boundary — hard requirement: the daemon's HTTP + WebSocket API (Section 3.1) is an RCE-as-a-service surface — it can spawn processes with file/exec permissions on request. The daemon MUST bind to localhost only by default. Any exposure beyond localhost requires an authenticated tunnel (SSH port-forward, Tailscale, or equivalent) or token-based auth on all HTTP/WebSocket endpoints. An unauthenticated listener reachable beyond localhost is never acceptable, regardless of perceived network-level safety.
 
 ## 9. Dependencies and risk posture
 
@@ -130,8 +152,8 @@ Decorrelated validator: the boundary gate uses a different model/agent than the 
 | ACP           | agent protocol    | low (durable, multi-vendor) | target directly as fallback          |
 | ACPX          | ACP client        | high (alpha, changing)      | anti-corruption adapter, pin version |
 | opencode      | builder agent     | low                         | swappable via ACP                    |
-| pi            | validator agent   | low-med (smaller            |
-| ecosystem)    | swappable via ACP |
+| pi            | validator agent   | low-med (smaller ecosystem) | swappable via ACP                    |
+| wrapped-agent adapters | agent compat shim | med (upstream lag per agent) | prove loop on native-ACP agents first (opencode/pi); treat wrapped agents as lower-trust until adapter maturity demonstrated (aligns with M3 sequencing) |
 | git worktrees | isolation         | low                         | standard                             |
 | SQLite        | state             | low                         | standard                             |
 
