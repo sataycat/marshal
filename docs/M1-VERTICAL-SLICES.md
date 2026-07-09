@@ -68,6 +68,8 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 **Acceptance test:** Create a task via curl, list it, freeze it, observe worktree created.
 
+**ADR:** Document task CRUD API shape, validation, and CLI/domain reuse in `docs/adr/ADR-011-task-crud-api.md`.
+
 ---
 
 ## Slice 3 — WebSocket Event Bus
@@ -88,6 +90,8 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 - No authentication for M1 (localhost-only per Slice 1 security constraint).
 
 **Acceptance test:** Open a WebSocket to `ws://127.0.0.1:7433/ws`, create a task via the HTTP API, observe `task.created` event on the socket.
+
+**ADR:** Document WebSocket event bus shape, delivery semantics, and heartbeat policy in `docs/adr/ADR-012-websocket-event-bus.md`.
 
 ---
 
@@ -122,7 +126,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 - No drag-and-drop yet (transitions are button-driven in Slice 6).
 - Responsive enough for a laptop browser; no mobile optimization.
 
-**ADR:** Decide on React meta-framework or plain Vite React. Document build/serve strategy in `docs/adr/ADR-011-frontend-build-and-serve.md`.
+**ADR:** Decide on React meta-framework or plain Vite React. Document build/serve strategy in `docs/adr/ADR-013-frontend-build-and-serve.md`.
 
 **Acceptance test:** `marshal daemon start`, open `http://127.0.0.1:7433/` in a browser, see the board with any existing tasks.
 
@@ -202,7 +206,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 **Acceptance test:** Open a Backlog task in the board, chat with the agent about the spec, click "Update Spec" to capture the refined version, click "Freeze", task moves to Ready with the authored spec committed.
 
-**ADR:** Decide spec-authoring agent prompt template and context window strategy. Document in `docs/adr/ADR-012-spec-authoring-chat.md`.
+**ADR:** Decide spec-authoring agent prompt template and context window strategy. Document in `docs/adr/ADR-014-spec-authoring-chat.md`.
 
 ---
 
