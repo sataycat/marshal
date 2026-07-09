@@ -25,6 +25,10 @@ export interface GlobalConfig {
   policy?: {
     maxRetries?: number;
   };
+  daemon?: {
+    host?: string;
+    port?: number;
+  };
 }
 
 export function loadMarshalJson(repoRoot: string): MarshalJson {
@@ -95,4 +99,38 @@ export function resolveMaxRetries(config: GlobalConfig = loadGlobalConfig()): nu
     return DEFAULT_MAX_RETRIES;
   }
   return value;
+}
+
+export const DEFAULT_DAEMON_HOST = "127.0.0.1";
+export const DEFAULT_DAEMON_PORT = 7433;
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+
+export interface ResolvedDaemonBind {
+  host: string;
+  port: number;
+}
+
+export function resolveDaemonBind(args: { host?: string; port?: number }, config: GlobalConfig = loadGlobalConfig()): ResolvedDaemonBind {
+  const host = args.host ?? config.daemon?.host ?? DEFAULT_DAEMON_HOST;
+  const rawPort = args.port ?? config.daemon?.port;
+  let port = DEFAULT_DAEMON_PORT;
+  if (rawPort !== undefined) {
+    const n = Number(rawPort);
+    // Port 0 is valid and means "ask the OS for a free port" (used by tests and
+    // any caller that wants ephemeral binding). Reject only out-of-range ints.
+    if (Number.isInteger(n) && n >= 0 && n <= 65535) {
+      port = n;
+    } else {
+      logger.warn({ rawPort }, "Invalid daemon.port; using default");
+    }
+  }
+
+  if (!LOOPBACK_HOSTS.has(host)) {
+    logger.warn(
+      { host },
+      "Binding to a non-loopback address. Daemon API has no auth layer. Expose only via an authenticated tunnel. Continuing because explicitly requested.",
+    );
+  }
+
+  return { host, port };
 }

@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  DEFAULT_DAEMON_HOST,
+  DEFAULT_DAEMON_PORT,
   DEFAULT_MAX_RETRIES,
   InvalidAgentIdError,
   resolveAgentId,
+  resolveDaemonBind,
   resolveMaxRetries,
   type GlobalConfig,
 } from "./config.js";
@@ -70,5 +73,47 @@ describe("resolveMaxRetries", () => {
   it("defaults when the configured value is not an integer", () => {
     const config: GlobalConfig = { policy: { maxRetries: 1.5 } };
     expect(resolveMaxRetries(config)).toBe(DEFAULT_MAX_RETRIES);
+  });
+});
+
+describe("resolveDaemonBind", () => {
+  it("defaults to 127.0.0.1 and 7433 with no config or flags", () => {
+    const bind = resolveDaemonBind({}, {});
+    expect(bind).toEqual({ host: DEFAULT_DAEMON_HOST, port: DEFAULT_DAEMON_PORT });
+  });
+
+  it("uses flags over config over defaults", () => {
+    expect(resolveDaemonBind({ port: 9999 }, { daemon: { port: 8888 } })).toEqual({
+      host: DEFAULT_DAEMON_HOST,
+      port: 9999,
+    });
+  });
+
+  it("uses config.daemon.port when no flag is passed", () => {
+    expect(resolveDaemonBind({}, { daemon: { port: 8888 } })).toEqual({
+      host: DEFAULT_DAEMON_HOST,
+      port: 8888,
+    });
+  });
+
+  it("uses config.daemon.host when no flag is passed", () => {
+    expect(resolveDaemonBind({}, { daemon: { host: "::1" } })).toEqual({
+      host: "::1",
+      port: DEFAULT_DAEMON_PORT,
+    });
+  });
+
+  it("accepts port 0 as an ephemeral binding", () => {
+    expect(resolveDaemonBind({ port: 0 }, {})).toEqual({
+      host: DEFAULT_DAEMON_HOST,
+      port: 0,
+    });
+  });
+
+  it("falls back to the default port when the configured port is out of range", () => {
+    expect(resolveDaemonBind({}, { daemon: { port: 99999 } })).toEqual({
+      host: DEFAULT_DAEMON_HOST,
+      port: DEFAULT_DAEMON_PORT,
+    });
   });
 });

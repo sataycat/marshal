@@ -4,11 +4,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getRepoStateDir, initGlobalConfig, initRepoState } from "./daemon/config.js";
+import { startHttpServer } from "./daemon/http.js";
 import { formatRunOnceResult, startDaemon } from "./daemon/loop.js";
 import { runOnce } from "./daemon/orchestrator.js";
 import { openDb } from "./db/index.js";
 import { registerTaskCommands } from "./tasks/commands.js";
 import { WorktreeManager } from "./worktree/manager.js";
+import { loadGlobalConfig } from "./worktree/config.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const pkgPath = resolve(__dirname, "../package.json");
@@ -67,17 +69,33 @@ daemon
   .command("start")
   .description("Run the orchestrator daemon, polling for ready tasks")
   .option("--interval <ms>", "Poll interval in milliseconds", "5000")
-  .action(async (options: { interval: string }) => {
+  .option("--port <number>", "HTTP API port (default: 7433 or config daemon.port)")
+  .option("--host <addr>", "HTTP API bind address (default: 127.0.0.1)")
+  .action(async (options: { interval: string; port?: string; host?: string }) => {
     const controller = new AbortController();
     const stop = (): void => controller.abort();
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     try {
-      await startDaemon({
+      const config = loadGlobalConfig();
+      const port = options.port !== undefined ? Number(options.port) : config.daemon?.port;
+      const host = options.host ?? config.daemon?.host;
+      const http = await startHttpServer({
         root: process.cwd(),
-        intervalMs: Number(options.interval),
-        signal: controller.signal,
+        host,
+        port,
+        version: pkg.version,
+        config,
       });
+      try {
+        await startDaemon({
+          root: process.cwd(),
+          intervalMs: Number(options.interval),
+          signal: controller.signal,
+        });
+      } finally {
+        await http.close();
+      }
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
