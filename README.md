@@ -28,19 +28,19 @@ This produces `dist/` and makes `bin/marshal` runnable. To use `marshal` from an
 ```jsonc
 {
   "worktree": {
-    "root": "~/.marshal/worktrees"   // where task worktrees are created
+    "root": "~/.marshal/worktrees", // where task worktrees are created
   },
   "acpx": {
-    "bin": "acpx",                   // path to the acpx binary
-    "version": ">=0.12.0 <0.13.0"    // expected acpx version range
+    "bin": "acpx", // path to the acpx binary
+    "version": ">=0.12.0 <0.13.0", // expected acpx version range
   },
   "agents": {
-    "builder": "opencode",           // builder agent id
-    "validator": "pi"                // validator agent id
+    "builder": "opencode", // builder agent id
+    "validator": "pi", // validator agent id
   },
   "policy": {
-    "maxRetries": 2                  // validation retry cap before escalating to review
-  }
+    "maxRetries": 2, // validation retry cap before escalating to review
+  },
 }
 ```
 
@@ -51,8 +51,8 @@ The `MARSHAL_GLOBAL_CONFIG` env var overrides the config file path (useful for t
 ```jsonc
 {
   "worktree": {
-    "setup": "pnpm install"          // shell command run after each worktree is created
-  }
+    "setup": "pnpm install", // shell command run after each worktree is created
+  },
 }
 ```
 
@@ -164,3 +164,30 @@ pnpm run test         # vitest
 Pre-commit staged checks: `vp staged`.
 
 Architecture decisions are recorded in [`docs/adr/`](docs/adr/).
+
+## Web board (M1)
+
+The daemon serves a React SPA (the Kanban board) from `web/dist/`. The `web/` directory is a separate pnpm workspace package (`marshal-web`, plain Vite + React).
+
+```sh
+pnpm run build:web    # build the SPA into web/dist/
+pnpm run check:web    # type-check the SPA
+pnpm run test:web     # run the SPA tests
+# or the aggregates:
+pnpm run build:all
+pnpm run check:all
+pnpm run test:all
+```
+
+If `web/dist/` has not been built, `GET /` returns a 404 explaining the bundle is missing; the daemon keeps running and the API/WebSocket stay available. See [`docs/adr/ADR-014-frontend-build-and-serve.md`](docs/adr/ADR-014-frontend-build-and-serve.md).
+
+### Dev workflow (Vite proxy)
+
+Run the daemon in one terminal and the Vite dev server in another:
+
+```sh
+marshal daemon start          # API + WebSocket on 127.0.0.1:7433
+pnpm --filter marshal-web run dev   # Vite on 127.0.0.1:5173, proxies /api and /ws
+```
+
+Open `http://127.0.0.1:5173/`. The SPA uses same-origin relative URLs (`/api`, `/ws`) so no code changes are needed between dev and production. In production, build the SPA and open `http://127.0.0.1:7433/` directly.

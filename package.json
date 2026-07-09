@@ -7,8 +7,14 @@
   "type": "module",
   "scripts": {
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
+    "build:web": "pnpm --filter marshal-web run build",
+    "build:all": "pnpm run build && pnpm run build:web",
     "test": "vitest run",
-    "check": "tsc --noEmit"
+    "test:web": "pnpm --filter marshal-web run test",
+    "test:all": "pnpm run test && pnpm run test:web",
+    "check": "tsc --noEmit",
+    "check:web": "pnpm --filter marshal-web run check",
+    "check:all": "pnpm run check && pnpm run check:web"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.8",

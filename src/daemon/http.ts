@@ -1,8 +1,8 @@
 import { Hono, type Context } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import type { Server as HttpServer } from "node:http";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { extname, resolve, sep } from "node:path";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { logger } from "../logger.js";
@@ -54,6 +54,7 @@ export interface HttpServerOptions {
   config?: GlobalConfig;
   bus?: EventBus;
   attachWebSockets?: boolean;
+  webDir?: string;
 }
 
 export interface HttpServerHandle {
@@ -79,16 +80,24 @@ export interface BuildAppOptions {
   root?: string;
   worktreeRoot?: string;
   bus?: EventBus;
+  webDir?: string;
+}
+
+export function defaultWebDistDir(): string {
+  const __dirname = fileURLToPath(new URL(".", import.meta.url));
+  return resolve(__dirname, "../../web/dist");
 }
 
 export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   const root = options.root;
   const bus = options.bus;
+  const webDir = options.webDir ?? defaultWebDistDir();
   const app = new Hono();
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
   registerRunRoutes(app, root);
-  app.notFound((c) => c.json({ error: "Not found" }, 404));
+  registerStaticRoutes(app, webDir);
+  app.notFound((c) => spaNotFound(c, webDir));
   app.onError((err, c) => {
     if (err instanceof ApiError) {
       const body: { error: string; code?: string } = { error: err.message };
@@ -102,6 +111,84 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
 }
 
 type StatusCode = 200 | 201 | 400 | 404 | 409 | 422 | 500;
+
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".eot": "application/vnd.ms-fontobject",
+  ".wasm": "application/wasm",
+  ".txt": "text/plain; charset=utf-8",
+};
+
+function mimeFor(ext: string): string {
+  return MIME_TYPES[ext.toLowerCase()] ?? "application/octet-stream";
+}
+
+function registerStaticRoutes(app: Hono, webDir: string): void {
+  app.get("/", (c) => serveSpaIndex(c, webDir));
+  app.get("/assets/*", (c) => serveAsset(c, webDir));
+}
+
+function serveSpaIndex(c: Context, webDir: string): Response {
+  const indexHtml = resolve(webDir, "index.html");
+  if (!existsSync(indexHtml) || !statSync(indexHtml).isFile()) {
+    const body =
+      "<!doctype html><h1>Web bundle not built</h1>" +
+      "<p>The Marshal web bundle has not been built. Run " +
+      "<code>pnpm run build:web</code> and restart the daemon.</p>";
+    return new Response(body, {
+      status: 404,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+  const body = readFileSync(indexHtml);
+  return new Response(body, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+function serveAsset(c: Context, webDir: string): Response {
+  const prefix = "/assets/";
+  const path = c.req.path;
+  if (!path.startsWith(prefix)) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const rel = path.slice(prefix.length);
+  const assetsBase = resolve(webDir, "assets");
+  const filePath = resolve(assetsBase, rel);
+  if (
+    !filePath.startsWith(assetsBase + sep) ||
+    !existsSync(filePath) ||
+    !statSync(filePath).isFile()
+  ) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const body = readFileSync(filePath);
+  return new Response(body, {
+    headers: { "Content-Type": mimeFor(extname(filePath)) },
+  });
+}
+
+function spaNotFound(c: Context, webDir: string): Response {
+  const path = c.req.path;
+  if (path === "/api/health" || path.startsWith("/api/") || path.startsWith("/assets/")) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  return serveSpaIndex(c, webDir);
+}
 
 class ApiError extends Error {
   constructor(
@@ -449,7 +536,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const bus = options.bus ?? new EventBus();
   const attachWs = options.attachWebSockets ?? true;
 
-  const app = buildApp(version, { root, bus });
+  const app = buildApp(version, { root, bus, webDir: options.webDir });
   const server = serve({ fetch: app.fetch, hostname: host, port });
 
   let bound: { host: string; port: number };

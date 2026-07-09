@@ -113,7 +113,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 ---
 
-## Slice 5 — Static SPA Shell & Board View
+## Slice 5 — Static SPA Shell & Board View ✅
 
 **Goal:** The daemon serves a React SPA that displays the Kanban board with live task state.
 
@@ -128,9 +128,19 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 - No drag-and-drop yet (transitions are button-driven in Slice 6).
 - Responsive enough for a laptop browser; no mobile optimization.
 
-**ADR:** Decide on React meta-framework or plain Vite React. Document build/serve strategy in `docs/adr/ADR-014-frontend-build-and-serve.md`.
+**ADR:** [`docs/adr/ADR-014-frontend-build-and-serve.md`](adr/ADR-014-frontend-build-and-serve.md).
 
 **Acceptance test:** `marshal daemon start`, open `http://127.0.0.1:7433/` in a browser, see the board with any existing tasks.
+
+**Implementation:**
+
+- `web/` is a pnpm workspace package (`marshal-web`) using plain Vite + React 18, with a dev-server proxy for `/api` and `/ws` to `127.0.0.1:7433` so the browser uses same-origin relative URLs in both dev and production.
+- `src/daemon/http.ts` adds static serving to `buildApp`: `GET /` and unknown non-API paths fall back to `web/dist/index.html`; `/assets/*` serves built assets with correct MIME types and path-traversal guards; `/api/*` and `/assets/*` misses return JSON 404 while the SPA fallback handles browser routes. When `web/dist/index.html` is absent, `GET /` returns a clear HTML 404 telling the user to run `pnpm run build:web` (the daemon does not crash).
+- `defaultWebDistDir()` resolves the bundle relative to the daemon module (`<pkg>/web/dist`), so it works both from a source checkout and a packaged install.
+- The SPA seeds state from `GET /api/tasks` for first paint, then treats the WebSocket `connected` snapshot as truth (ADR-014 Decision 5). A pure `boardReducer` applies `connected` / `task.created` / `task.updated` / `task.transitioned` events; unknown events are ignored. The socket auto-reconnects and re-accepts the snapshot on reconnect.
+- The board renders six columns from `state-machine` statuses; cards show title, slug, and a ticking `timeInState` (relative time from `updated_at`); a card click opens a detail panel that fetches `GET /api/tasks/:slug` and renders the frozen spec markdown via `marked`.
+- Tests: `src/daemon/static-api.test.ts` covers index/asset serving, SPA fallback, missing-bundle 404, API precedence, and traversal safety; `web/src/board/reducer.test.ts` and `web/src/time.test.ts` cover the pure client logic. Root vitest is scoped to the daemon suite via `vitest.config.ts` (excludes `web/**`); web has its own `vitest` config.
+- Root `package.json` adds `build:web` / `check:web` / `test:web` and `*:all` aggregates. `web/dist/` is gitignored; the bundle is a build artifact, not source.
 
 ---
 
@@ -223,7 +233,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 Record decisions for these in new ADRs before they block implementation:
 
 1. **HTTP framework choice.** Hono vs Fastify vs raw node:http. Decided in `docs/adr/ADR-010-http-framework.md`. (Slice 1)
-2. **Frontend build/serve strategy.** Vite dev proxy vs pre-built bundle served by daemon. Monorepo structure for web/. Decided in `docs/adr/ADR-014-frontend-build-and-serve.md`. (Slice 5)
+2. **Frontend build/serve strategy.** Vite dev proxy vs pre-built bundle served by daemon. Monorepo structure for web/. Decided in `docs/adr/ADR-014-frontend-build-and-serve.md`. (Slice 5) ✅
 3. **Spec authoring prompt design.** How much context to feed the agent, how to handle long chats exceeding context window. Decided in `docs/adr/ADR-018-spec-authoring-chat.md`. (Slice 9)
 4. **Auth for non-localhost.** When the daemon is exposed via tunnel, what auth mechanism? Token-based? Deferred past M1; ADR-010 records localhost-only as the M1 boundary.
 5. **Merge strategy.** Squash vs merge commit vs rebase for task branches. Decided in `docs/adr/ADR-016-diff-review-and-merge.md`. (Slice 7)
@@ -233,7 +243,7 @@ Record decisions for these in new ADRs before they block implementation:
 1. Slice 1 (HTTP skeleton) — foundational, everything depends on it.
 2. Slice 2 (Task CRUD API) and Slice 3 (WebSocket bus) — can be parallel.
 3. Slice 4 (Run history API) — depends on Slice 2.
-4. Slice 5 (SPA shell) — depends on Slices 2 + 3.
+4. ~~Slice 5 (SPA shell)~~ ✅ — depends on Slices 2 + 3.
 5. Slice 6 (Board interactions) — depends on Slice 5.
 6. Slice 7 (Diff review) — depends on Slice 6.
 7. Slice 8 (PR creation) — depends on Slice 5.
