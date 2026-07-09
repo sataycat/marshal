@@ -1,7 +1,10 @@
 import { Board } from "./board/Board";
-import { useBoard } from "./hooks/useBoard";
+import { BoardProvider } from "./board/BoardContext";
 
 export function App() {
-  const { tasks, status } = useBoard();
-  return <Board tasks={tasks} status={status} />;
+  return (
+    <BoardProvider>
+      <Board />
+    </BoardProvider>
+  );
 }

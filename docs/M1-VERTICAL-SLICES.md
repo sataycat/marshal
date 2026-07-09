@@ -144,7 +144,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 ---
 
-## Slice 6 — Board Interactions (Transitions & Create)
+## Slice 6 — Board Interactions (Transitions & Create) ✅
 
 **Goal:** The web board is interactive — users can create tasks, freeze specs, and trigger transitions from the UI.
 
@@ -162,6 +162,19 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 **Acceptance test:** Create a task from the board, freeze it, observe it move to Ready, then watch it progress through Building → Validating → Review as the daemon runs.
 
 **ADR:** Document board mutation behavior, optimistic updates, and escape-hatch confirmations in `docs/adr/ADR-015-board-interactions.md`.
+
+**Implementation:**
+
+- `web/src/board/actions.ts` holds the M1 state-to-action map (ADR-015 Decision 2) as pure data: `actionsForStatus(status)` returns the buttons to render (`freeze` for `backlog`, `mark-done` for `review`, escape hatches for `building`/`validating`; none for `ready`/`done`). `confirmMessage(action)` produces the escape-hatch confirmation text (mentions retry reset; send-back messages also mention spec revision). The array is a stable per-status reference with unique keys.
+- `web/src/board/reducer.ts` accepts three synthetic client-only event types — `optimistic.apply`, `optimistic.commit`, `optimistic.rollback` — that upsert a task alongside the existing `task.created`/`task.updated`/`task.transitioned` handlers. This implements ADR-015 Decision 3 (optimistic update with explicit rollback).
+- `web/src/board/BoardContext.tsx` exposes a `BoardProvider` + `useBoardContext` bundling board state (via `useBoard`), a toast reducer, a `useConfirm` dialog, and the three mutation helpers `createTask` / `freezeTask` / `transitionTask`. Each mutation helper dispatches `optimistic.apply` (status → target) before the request, `optimistic.commit` with the server task on success, or `optimistic.rollback` to the previous card plus a toast on failure. Freeze uses `POST /api/tasks/:slug/ready`; transitions use `POST /api/tasks/:slug/transition` (ADR-015 Decisions 1 and 6). The board never shells out or touches SQLite.
+- `web/src/detail/TaskDetail.tsx` renders transition buttons from `actionsForStatus(detail.status)`, gates escape hatches behind `confirm()` before running, applies an optimistic local status update, and reconciles from the mutation result (restoring the previous detail on failure so the panel never lies about success).
+- `web/src/board/NewTaskModal.tsx` collects `title` (required, validated client-side) and optional `spec_markdown` via a plain textarea, then calls `createTask` (ADR-015 Decision 5). On success it closes; on a missing title or server error it toasts.
+- `web/src/components/ConfirmDialog.tsx` is a `useConfirm()` hook returning `{ confirm, dialog }` — a promise-returning `confirm(options)` plus the dialog node rendered by the provider. Escape cancels.
+- `web/src/toast/` holds a pure `toastReducer` (add/dismiss with an internal id counter) and `ToastHost`, which auto-dismisses toasts by kind (errors linger 8s). Error messages flow through `web/src/api/errors.ts` (`friendlyErrorMessage` maps `invalid_transition` / `freeze_failed` / `duplicate_slug` / `task_not_found` codes to human text, falling back to the server message).
+- `web/src/api/client.ts` adds `createTask`, `freezeTask`, `transitionTask`, and a shared `jsonOrThrow` that parses the server's `{ error, code? }` envelope into an `ApiError` carrying `status` and `code`.
+- `web/src/styles.css` adds button, modal-backdrop, toast-host, and detail-action styles (functional, no design system).
+- Tests: pure-logic coverage in `web/src/board/actions.test.ts` (action map + confirm text + escape-hatch detection), `web/src/board/reducer.test.ts` (optimistic apply/commit/rollback), `web/src/toast/toast.test.ts` (add/dismiss/id-counter/non-mutation), and `web/src/api/errors.test.ts` (envelope parsing + friendly mapping). Server contract coverage in `src/daemon/board-interactions-api.test.ts` walks the full manual surface the board depends on (lifecycle walk + all three escape hatches returning 200 with `retry_count`/`last_failure` reset + the 409 `invalid_transition` envelope). `pnpm run check:all && pnpm run test:all` stays green (247 root + 46 web).
 
 ---
 
@@ -244,7 +257,7 @@ Record decisions for these in new ADRs before they block implementation:
 2. Slice 2 (Task CRUD API) and Slice 3 (WebSocket bus) — can be parallel.
 3. Slice 4 (Run history API) — depends on Slice 2.
 4. ~~Slice 5 (SPA shell)~~ ✅ — depends on Slices 2 + 3.
-5. Slice 6 (Board interactions) — depends on Slice 5.
+5. ~~Slice 6 (Board interactions)~~ ✅ — depends on Slice 5.
 6. Slice 7 (Diff review) — depends on Slice 6.
 7. Slice 8 (PR creation) — depends on Slice 5.
 8. Slice 9 (Spec authoring chat) — depends on Slice 6; can parallel with 7/8.

@@ -58,6 +58,41 @@ describe("boardReducer", () => {
     const next = boardReducer(state, ev("run.started", { id: 99 }));
     expect(next).toBe(state);
   });
+
+  it("optimistic.apply upserts an optimistic task without touching others", () => {
+    const state: BoardState = { 1: card({ id: 1, status: "ready" }) };
+    const next = boardReducer(
+      state,
+      ev("optimistic.apply", card({ id: 1, status: "building" })),
+    );
+    expect(next[1]?.status).toBe("building");
+  });
+
+  it("optimistic.commit replaces the optimistic task with the server task", () => {
+    const state: BoardState = { 1: card({ id: 1, status: "building" }) };
+    const server = card({ id: 1, status: "validating", updated_at: "2026-01-03T00:00:00.000Z" });
+    const next = boardReducer(state, ev("optimistic.commit", server));
+    expect(next[1]).toEqual(server);
+  });
+
+  it("optimistic.rollback restores the previous task", () => {
+    const state: BoardState = { 1: card({ id: 1, status: "building" }) };
+    const previous = card({ id: 1, status: "ready" });
+    const next = boardReducer(state, ev("optimistic.rollback", previous));
+    expect(next[1]?.status).toBe("ready");
+  });
+
+  it("optimistic events leave other tasks untouched", () => {
+    const state: BoardState = {
+      1: card({ id: 1, status: "ready" }),
+      2: card({ id: 2, status: "backlog" }),
+    };
+    const next = boardReducer(
+      state,
+      ev("optimistic.apply", card({ id: 1, status: "building" })),
+    );
+    expect(next[2]).toEqual(state[2]);
+  });
 });
 
 describe("boardToList", () => {

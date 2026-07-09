@@ -2,6 +2,9 @@ import { useState } from "react";
 import type { TaskCard, TaskStatus } from "../types";
 import { TaskCardView } from "./TaskCard";
 import { TaskDetailPanel } from "../detail/TaskDetail";
+import { NewTaskModal } from "./NewTaskModal";
+import { ToastHost } from "../toast/ToastHost";
+import { useBoardContext } from "./BoardContext";
 import { useNow } from "../hooks/useNow";
 
 const COLUMNS: { status: TaskStatus; title: string }[] = [
@@ -13,22 +16,24 @@ const COLUMNS: { status: TaskStatus; title: string }[] = [
   { status: "done", title: "Done" },
 ];
 
-interface Props {
-  tasks: TaskCard[];
-  status: string;
-}
-
-export function Board({ tasks, status }: Props) {
+export function Board() {
+  const { tasks, status } = useBoardContext();
   const [selected, setSelected] = useState<TaskCard | null>(null);
+  const [showNewTask, setShowNewTask] = useState(false);
   const now = useNow(5000);
 
   return (
     <div className="board">
       <header className="board-header">
         <h1>Marshal</h1>
-        <span className={`ws-status ws-${status}`} title={`WebSocket: ${status}`}>
-          {status}
-        </span>
+        <div className="board-header-actions">
+          <button type="button" className="btn btn-primary" onClick={() => setShowNewTask(true)}>
+            New Task
+          </button>
+          <span className={`ws-status ws-${status}`} title={`WebSocket: ${status}`}>
+            {status}
+          </span>
+        </div>
       </header>
       <div className="columns">
         {COLUMNS.map((col) => {
@@ -50,6 +55,8 @@ export function Board({ tasks, status }: Props) {
       {selected && (
         <TaskDetailPanel slug={selected.slug} onClose={() => setSelected(null)} />
       )}
+      {showNewTask && <NewTaskModal onClose={() => setShowNewTask(false)} />}
+      <ToastHost />
     </div>
   );
 }

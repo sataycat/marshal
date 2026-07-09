@@ -12,7 +12,10 @@ export function boardReducer(state: BoardState, event: BusEvent): BoardState {
     }
     case "task.created":
     case "task.updated":
-    case "task.transitioned": {
+    case "task.transitioned":
+    case "optimistic.apply":
+    case "optimistic.commit":
+    case "optimistic.rollback": {
       const task = event.payload as TaskCard;
       return { ...state, [task.id]: task };
     }

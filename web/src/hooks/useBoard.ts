@@ -6,6 +6,7 @@ import type { BusEvent, TaskCard } from "../types";
 export interface BoardView {
   tasks: TaskCard[];
   status: SocketStatus;
+  dispatch: React.Dispatch<BusEvent>;
 }
 
 export function useBoard(): BoardView {
@@ -38,5 +39,5 @@ export function useBoard(): BoardView {
     };
   }, []);
 
-  return { tasks: boardToList(state), status };
+  return { tasks: boardToList(state), status, dispatch };
 }
