@@ -157,3 +157,16 @@ export function clearRetryState(slug: string, root?: string): Task {
   }
   return rowToTask(row);
 }
+
+export function setSpecMarkdown(slug: string, specMarkdown: string, root?: string): Task {
+  const db = openDb(root);
+  const row = db
+    .prepare(
+      "UPDATE tasks SET spec_markdown = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *",
+    )
+    .get(specMarkdown, slug) as TaskRow | undefined;
+  if (!row) {
+    throw new TaskNotFoundError(slug);
+  }
+  return rowToTask(row);
+}

@@ -51,7 +51,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 ---
 
-## Slice 2 — Task CRUD API
+## Slice 2 — Task CRUD API ✅
 
 **Goal:** Tasks can be listed, created, inspected, and transitioned via HTTP, matching the existing CLI surface.
 
