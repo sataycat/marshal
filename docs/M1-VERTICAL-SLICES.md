@@ -109,6 +109,8 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 **Acceptance test:** Trigger a build via `POST /api/tasks/:slug/transition { to: "building" }` (or `daemon run-once`), then `GET /api/runs/:id/events` returns the builder's streamed output.
 
+**ADR:** Document run history endpoints, pagination, and WebSocket/durable-log relationship in `docs/adr/ADR-013-run-history-logs-api.md`.
+
 ---
 
 ## Slice 5 — Static SPA Shell & Board View
@@ -126,7 +128,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 - No drag-and-drop yet (transitions are button-driven in Slice 6).
 - Responsive enough for a laptop browser; no mobile optimization.
 
-**ADR:** Decide on React meta-framework or plain Vite React. Document build/serve strategy in `docs/adr/ADR-013-frontend-build-and-serve.md`.
+**ADR:** Decide on React meta-framework or plain Vite React. Document build/serve strategy in `docs/adr/ADR-014-frontend-build-and-serve.md`.
 
 **Acceptance test:** `marshal daemon start`, open `http://127.0.0.1:7433/` in a browser, see the board with any existing tasks.
 
@@ -149,6 +151,8 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 **Acceptance test:** Create a task from the board, freeze it, observe it move to Ready, then watch it progress through Building → Validating → Review as the daemon runs.
 
+**ADR:** Document board mutation behavior, optimistic updates, and escape-hatch confirmations in `docs/adr/ADR-015-board-interactions.md`.
+
 ---
 
 ## Slice 7 — Diff Review Panel
@@ -168,6 +172,8 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 **Acceptance test:** A task reaches Review, open the board, view the diff, click "Approve & Merge", task moves to Done, branch is merged into trunk.
 
+**ADR:** Document diff endpoint shape, local merge strategy, and cleanup policy in `docs/adr/ADR-016-diff-review-and-merge.md`.
+
 ---
 
 ## Slice 8 — PR Creation (GitHub)
@@ -185,6 +191,8 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 - Task moves to Done when the PR is merged (polled or webhook — for M1, poll on `GET /api/tasks/:slug` checks `gh pr view --json state`).
 
 **Acceptance test:** Task in Review, click "Create PR", PR appears on GitHub with the correct diff and spec in the body.
+
+**ADR:** Document GitHub PR creation, persisted PR metadata, and merge-state polling in `docs/adr/ADR-017-github-pr-creation.md`.
 
 ---
 
@@ -206,7 +214,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 **Acceptance test:** Open a Backlog task in the board, chat with the agent about the spec, click "Update Spec" to capture the refined version, click "Freeze", task moves to Ready with the authored spec committed.
 
-**ADR:** Decide spec-authoring agent prompt template and context window strategy. Document in `docs/adr/ADR-014-spec-authoring-chat.md`.
+**ADR:** Decide spec-authoring agent prompt template and context window strategy. Document in `docs/adr/ADR-018-spec-authoring-chat.md`.
 
 ---
 
@@ -214,11 +222,11 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 Record decisions for these in new ADRs before they block implementation:
 
-1. **HTTP framework choice.** Hono vs Fastify vs raw node:http. (Slice 1)
-2. **Frontend build/serve strategy.** Vite dev proxy vs pre-built bundle served by daemon. Monorepo structure for web/. (Slice 5)
-3. **Spec authoring prompt design.** How much context to feed the agent, how to handle long chats exceeding context window. (Slice 9)
-4. **Auth for non-localhost.** When the daemon is exposed via tunnel, what auth mechanism? Token-based? (Deferred past M1 but worth recording.)
-5. **Merge strategy.** Squash vs merge commit vs rebase for task branches. (Slice 7)
+1. **HTTP framework choice.** Hono vs Fastify vs raw node:http. Decided in `docs/adr/ADR-010-http-framework.md`. (Slice 1)
+2. **Frontend build/serve strategy.** Vite dev proxy vs pre-built bundle served by daemon. Monorepo structure for web/. Decided in `docs/adr/ADR-014-frontend-build-and-serve.md`. (Slice 5)
+3. **Spec authoring prompt design.** How much context to feed the agent, how to handle long chats exceeding context window. Decided in `docs/adr/ADR-018-spec-authoring-chat.md`. (Slice 9)
+4. **Auth for non-localhost.** When the daemon is exposed via tunnel, what auth mechanism? Token-based? Deferred past M1; ADR-010 records localhost-only as the M1 boundary.
+5. **Merge strategy.** Squash vs merge commit vs rebase for task branches. Decided in `docs/adr/ADR-016-diff-review-and-merge.md`. (Slice 7)
 
 ## Suggested Order for Agents
 
