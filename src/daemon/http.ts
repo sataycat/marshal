@@ -35,6 +35,14 @@ import {
   type TaskPayload,
 } from "./bus.js";
 import { attachWebSocket, type WebSocketBridgeHandle } from "./ws.js";
+import {
+  DEFAULT_RUN_EVENTS_LIMIT,
+  MAX_RUN_EVENTS_LIMIT,
+  RunNotFoundError,
+  RunLog,
+  type RunEventRecord,
+  type RunRecord,
+} from "./run-log.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -79,6 +87,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   const app = new Hono();
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
+  registerRunRoutes(app, root);
   app.notFound((c) => c.json({ error: "Not found" }, 404));
   app.onError((err, c) => {
     if (err instanceof ApiError) {
@@ -196,6 +205,9 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof FreezeError) {
     return new ApiError(409, err.message, "freeze_failed");
   }
+  if (err instanceof RunNotFoundError) {
+    return new ApiError(404, err.message, "run_not_found");
+  }
   logger.error({ err }, "Unexpected error in task HTTP handler");
   return new ApiError(500, "Internal server error", "internal_error");
 }
@@ -295,6 +307,116 @@ function registerTaskRoutes(
   });
 }
 
+interface RunCardFields {
+  id: number;
+  task_id: number;
+  role: string;
+  agent_id: string;
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  commit_sha: string | null;
+  error: string | null;
+}
+
+interface RunDetailFields extends RunCardFields {
+  prompt: string | null;
+}
+
+interface RunEventFields {
+  seq: number;
+  type: string;
+  payload: unknown;
+  created_at: string;
+}
+
+function runCard(run: RunRecord): RunCardFields {
+  return {
+    id: run.id,
+    task_id: run.taskId,
+    role: run.role,
+    agent_id: run.agentId,
+    status: run.status,
+    started_at: run.startedAt,
+    ended_at: run.endedAt,
+    commit_sha: run.commitSha,
+    error: run.error,
+  };
+}
+
+function runDetail(run: RunRecord): RunDetailFields {
+  return { ...runCard(run), prompt: run.prompt };
+}
+
+function runEventFields(event: RunEventRecord): RunEventFields {
+  return {
+    seq: event.seq,
+    type: event.type,
+    payload: event.payload,
+    created_at: event.createdAt,
+  };
+}
+
+function parseNonNegativeInt(value: string, field: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new ApiError(400, `${field} must be a non-negative integer`, "invalid_query");
+  }
+  return parsed;
+}
+
+function registerRunRoutes(app: Hono, root: string | undefined): void {
+  app.get("/api/tasks/:slug/runs", (c) => {
+    const slug = c.req.param("slug");
+    try {
+      const task = getTask(slug, root);
+      const log = new RunLog(root);
+      const runs = log.listRunsForTask(task.id).map(runCard);
+      return c.json({ runs });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+
+  app.get("/api/runs/:id", (c) => {
+    const runId = parseRunId(c.req.param("id"));
+    const log = new RunLog(root);
+    const run = log.getRun(runId);
+    if (run === undefined) throw new ApiError(404, `Run not found: ${runId}`, "run_not_found");
+    return c.json({ run: runDetail(run) });
+  });
+
+  app.get("/api/runs/:id/events", (c) => {
+    const runId = parseRunId(c.req.param("id"));
+    let afterSeq: number | undefined;
+    if (c.req.query("after_seq") !== undefined) {
+      afterSeq = parseNonNegativeInt(c.req.query("after_seq")!, "after_seq");
+    }
+    let limit = DEFAULT_RUN_EVENTS_LIMIT;
+    if (c.req.query("limit") !== undefined) {
+      limit = parseNonNegativeInt(c.req.query("limit")!, "limit");
+      if (limit > MAX_RUN_EVENTS_LIMIT) {
+        throw new ApiError(422, `limit must be at most ${MAX_RUN_EVENTS_LIMIT}`, "invalid_limit");
+      }
+    }
+    const log = new RunLog(root);
+    if (log.getRun(runId) === undefined) {
+      throw new ApiError(404, `Run not found: ${runId}`, "run_not_found");
+    }
+    const events = log.getEvents(runId, { afterSeq, limit }).map(runEventFields);
+    const nextAfterSeq = events.length > 0 ? events[events.length - 1].seq : null;
+    return c.json({ events, next_after_seq: nextAfterSeq });
+  });
+}
+
+function parseRunId(raw: string): number {
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new ApiError(400, "run id must be a positive integer", "invalid_run_id");
+  }
+  return parsed;
+}
+
 async function waitForListening(server: ServerType): Promise<{ host: string; port: number }> {
   return new Promise((resolveListen, rejectListen) => {
     const onError = (err: Error): void => {
@@ -344,12 +466,9 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
 
   let wsHandle: WebSocketBridgeHandle | undefined;
   if (attachWs) {
-    wsHandle = attachWebSocket(
-      server as HttpServer,
-      bus,
-      () => listTasks(root).map(taskCard),
-      { path: "/ws" },
-    );
+    wsHandle = attachWebSocket(server as HttpServer, bus, () => listTasks(root).map(taskCard), {
+      path: "/ws",
+    });
   }
 
   const portFile = portFilePath(root);

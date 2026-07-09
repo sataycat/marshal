@@ -188,4 +188,56 @@ describe("RunLog", () => {
       createdAt: expect.any(String),
     });
   });
+
+  it("listRunsForTask returns all runs for a task, newest first", () => {
+    const log = new RunLog(root);
+    const first = log.startRun(taskId, "builder", "opencode", "first");
+    log.finishRun(first, "error", { error: "boom" });
+    const second = log.startRun(taskId, "validator", "pi", "second");
+    log.finishRun(second, "done", { commitSha: "cafe" });
+
+    const runs = log.listRunsForTask(taskId);
+    expect(runs.map((r) => r.id)).toEqual([second, first]);
+    expect(runs[0].role).toBe("validator");
+    expect(runs[1].role).toBe("builder");
+  });
+
+  it("listRunsForTask returns [] when the task has no runs", () => {
+    const log = new RunLog(root);
+    expect(log.listRunsForTask(taskId)).toEqual([]);
+  });
+
+  it("getEvents paginates by afterSeq and limit", () => {
+    const log = new RunLog(root);
+    const runId = log.startRun(taskId, "builder", "opencode", "p");
+    const events: AgentEvent[] = Array.from({ length: 5 }, (_, i) => ({
+      type: "text",
+      text: `line ${i}`,
+    }));
+    events.forEach((ev, seq) => log.insertEvent(runId, seq, ev));
+
+    const page1 = log.getEvents(runId, { afterSeq: 0, limit: 2 });
+    expect(page1.map((e) => e.seq)).toEqual([1, 2]);
+
+    const page2 = log.getEvents(runId, { afterSeq: 2, limit: 2 });
+    expect(page2.map((e) => e.seq)).toEqual([3, 4]);
+
+    const beyond = log.getEvents(runId, { afterSeq: 4, limit: 2 });
+    expect(beyond).toEqual([]);
+  });
+
+  it("getEvents defaults to afterSeq=0 and limit=100", () => {
+    const log = new RunLog(root);
+    const runId = log.startRun(taskId, "builder", "opencode", "p");
+    const events: AgentEvent[] = Array.from({ length: 150 }, (_, i) => ({
+      type: "text",
+      text: `line ${i}`,
+    }));
+    events.forEach((ev, seq) => log.insertEvent(runId, seq, ev));
+
+    const stored = log.getEvents(runId);
+    expect(stored).toHaveLength(100);
+    expect(stored[0].seq).toBe(0);
+    expect(stored[99].seq).toBe(99);
+  });
 });

@@ -12,6 +12,13 @@ import {
 export type RunStatus = "running" | "done" | "error";
 export type RunRole = "builder" | "validator";
 
+export class RunNotFoundError extends Error {
+  constructor(runId: number) {
+    super(`Run not found: ${runId}`);
+    this.name = "RunNotFoundError";
+  }
+}
+
 export interface RunRecord {
   id: number;
   taskId: number;
@@ -38,6 +45,14 @@ export interface FinishRunOptions {
   commitSha?: string;
   error?: string;
 }
+
+export interface GetEventsOptions {
+  afterSeq?: number;
+  limit?: number;
+}
+
+export const DEFAULT_RUN_EVENTS_LIMIT = 100;
+export const MAX_RUN_EVENTS_LIMIT = 500;
 
 interface RunRow {
   id: number;
@@ -126,9 +141,7 @@ export class RunLog {
 
   insertEvent(runId: number, seq: number, event: AgentEvent): void {
     this.db
-      .prepare(
-        "INSERT INTO run_events (run_id, seq, type, payload) VALUES (?, ?, ?, ?)",
-      )
+      .prepare("INSERT INTO run_events (run_id, seq, type, payload) VALUES (?, ?, ?, ?)")
       .run(runId, seq, event.type, JSON.stringify(event));
     if (this.bus) publishRunEvent(this.bus, runId, event);
   }
@@ -142,9 +155,7 @@ export class RunLog {
         .run(status, opts.commitSha, runId);
     } else if (opts.error !== undefined) {
       this.db
-        .prepare(
-          "UPDATE runs SET status = ?, error = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?",
-        )
+        .prepare("UPDATE runs SET status = ?, error = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(status, opts.error, runId);
     } else {
       this.db
@@ -158,9 +169,7 @@ export class RunLog {
   }
 
   getRun(runId: number): RunRecord | undefined {
-    const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as
-      | RunRow
-      | undefined;
+    const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow | undefined;
     return row ? rowToRun(row) : undefined;
   }
 
@@ -171,10 +180,21 @@ export class RunLog {
     return row ? rowToRun(row) : undefined;
   }
 
-  getEvents(runId: number): RunEventRecord[] {
+  listRunsForTask(taskId: number): RunRecord[] {
     const rows = this.db
-      .prepare("SELECT * FROM run_events WHERE run_id = ? ORDER BY seq")
-      .all(runId) as RunEventRow[];
+      .prepare("SELECT * FROM runs WHERE task_id = ? ORDER BY started_at DESC, id DESC")
+      .all(taskId) as RunRow[];
+    return rows.map(rowToRun);
+  }
+
+  getEvents(runId: number, opts: GetEventsOptions = {}): RunEventRecord[] {
+    // Default to "from the beginning". Run event seq starts at 0, so use -1
+    // so that `seq > afterSeq` includes the first event.
+    const afterSeq = opts.afterSeq ?? -1;
+    const limit = opts.limit ?? DEFAULT_RUN_EVENTS_LIMIT;
+    const rows = this.db
+      .prepare("SELECT * FROM run_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?")
+      .all(runId, afterSeq, limit) as RunEventRow[];
     return rows.map(rowToRunEvent);
   }
 }

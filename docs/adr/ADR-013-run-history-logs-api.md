@@ -76,7 +76,7 @@ HTTP responses use the same JSON style as ADR-011: database-derived fields are s
 
 | Query parameter | Meaning                                                     |
 | --------------- | ----------------------------------------------------------- |
-| `after_seq`     | Return events with `seq > after_seq`. Defaults to `0`.      |
+| `after_seq`     | Return events with `seq > after_seq`. Omitted → from the start of the run (since `seq` begins at `0`). |
 | `limit`         | Maximum events to return. Defaults to `100`; maximum `500`. |
 
 The `seq` column is the pagination cursor because it is already monotonic within a run and indexed by `idx_run_events_run_id`.

@@ -95,7 +95,7 @@ Slice 1 ─┬─> Slice 2 ─┬─> Slice 4 ─> Slice 5 ─> Slice 8
 
 ---
 
-## Slice 4 — Run History & Logs API
+## Slice 4 — Run History & Logs API ✅
 
 **Goal:** Run history and per-run event streams are queryable via HTTP for the web board to display build/validation output.
 
