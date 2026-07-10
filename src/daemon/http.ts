@@ -27,6 +27,7 @@ import { InvalidTransitionError, isTaskStatus, type TaskStatus } from "../tasks/
 import { freezeTask, FreezeError } from "../tasks/freeze.js";
 import { generateUniqueSlug } from "../tasks/slug.js";
 import { WorktreeManager } from "../worktree/manager.js";
+import { DiffError, MergeError } from "../worktree/diff-merge.js";
 import {
   EventBus,
   publishTaskCreated,
@@ -292,6 +293,15 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof FreezeError) {
     return new ApiError(409, err.message, "freeze_failed");
   }
+  if (err instanceof DiffError) {
+    return new ApiError(409, err.message, "diff_failed");
+  }
+  if (err instanceof MergeError) {
+    if (/conflict/i.test(err.message)) {
+      return new ApiError(409, err.message, "merge_conflict");
+    }
+    return new ApiError(409, err.message, "merge_failed");
+  }
   if (err instanceof RunNotFoundError) {
     return new ApiError(404, err.message, "run_not_found");
   }
@@ -305,6 +315,10 @@ function registerTaskRoutes(
   worktreeRoot: string | undefined,
   bus: EventBus | undefined,
 ): void {
+  const makeManager = (): WorktreeManager =>
+    worktreeRoot !== undefined
+      ? new WorktreeManager(root ?? process.cwd(), { worktreeRoot })
+      : new WorktreeManager(root ?? process.cwd());
   app.get("/api/tasks", (c) => {
     const tasks = listTasks(root).map(taskCard);
     return c.json({ tasks });
@@ -382,12 +396,49 @@ function registerTaskRoutes(
       }
       const task = transitionTask(slug, "ready", root);
       if (bus) publishTaskTransitioned(bus, taskPayload(task), from, "ready");
-      const manager =
-        worktreeRoot !== undefined
-          ? new WorktreeManager(root ?? process.cwd(), { worktreeRoot })
-          : undefined;
-      freezeTask(slug, root, manager);
+      freezeTask(slug, root, makeManager());
       return c.json({ task: taskDetail(task) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+
+  app.get("/api/tasks/:slug/diff", (c) => {
+    const slug = c.req.param("slug");
+    try {
+      const task = getTask(slug, root);
+      if (task.status !== "review") {
+        throw new ApiError(409, "task is not in review state", "not_review");
+      }
+      const result = makeManager().diffForSlug(slug);
+      return c.json({ diff: result.diff, stats: result.stats });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+
+  app.post("/api/tasks/:slug/merge", async (c) => {
+    const slug = c.req.param("slug");
+    const body = await readJsonObject(c, new Set<string>());
+    void body;
+    try {
+      const task = getTask(slug, root);
+      if (task.status !== "review") {
+        throw new ApiError(409, "task is not in review state", "not_review");
+      }
+      const manager = makeManager();
+      if (manager.resolveTaskBranch(slug) === undefined) {
+        throw new ApiError(409, "no worktree for task", "no_worktree");
+      }
+      const { commitSha } = manager.mergeTaskBranch(slug);
+      // Cleanup first; only mark done once merge + cleanup have fully completed
+      // (ADR-016 Decision 5). A cleanup failure surfaces as an error without
+      // marking Done.
+      manager.destroy(slug);
+      const from = task.status;
+      const done = transitionTask(slug, "done", root);
+      if (bus) publishTaskTransitioned(bus, taskPayload(done), from, "done");
+      return c.json({ merged: true, commitSha, task: taskDetail(done) });
     } catch (err) {
       throw mapDomainError(err);
     }

@@ -1,5 +1,22 @@
 import type { BusEvent, TaskCard, TaskDetail, TaskStatus } from "../types";
 
+export interface DiffStats {
+  files: number;
+  insertions: number;
+  deletions: number;
+}
+
+export interface DiffResponse {
+  diff: string;
+  stats: DiffStats;
+}
+
+export interface MergeResponse {
+  merged: boolean;
+  commitSha: string;
+  task: TaskDetail;
+}
+
 export async function fetchTasks(): Promise<TaskCard[]> {
   const res = await fetch("/api/tasks");
   if (!res.ok) throw new Error(`Failed to list tasks: ${res.status}`);
@@ -56,10 +73,7 @@ export async function createTask(input: {
   return body.task;
 }
 
-export async function freezeTask(
-  slug: string,
-  specMarkdown?: string,
-): Promise<TaskDetail> {
+export async function freezeTask(slug: string, specMarkdown?: string): Promise<TaskDetail> {
   const body: Record<string, string> = {};
   if (specMarkdown !== undefined) body.specMarkdown = specMarkdown;
   const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/ready`, {
@@ -71,10 +85,7 @@ export async function freezeTask(
   return json.task;
 }
 
-export async function transitionTask(
-  slug: string,
-  to: TaskStatus,
-): Promise<TaskDetail> {
+export async function transitionTask(slug: string, to: TaskStatus): Promise<TaskDetail> {
   const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/transition`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -82,6 +93,20 @@ export async function transitionTask(
   });
   const json = await jsonOrThrow<{ task: TaskDetail }>(res);
   return json.task;
+}
+
+export async function fetchTaskDiff(slug: string): Promise<DiffResponse> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/diff`);
+  return jsonOrThrow<DiffResponse>(res);
+}
+
+export async function mergeTask(slug: string): Promise<MergeResponse> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return jsonOrThrow<MergeResponse>(res);
 }
 
 function wsUrl(): string {

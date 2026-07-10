@@ -24,6 +24,7 @@ describe("state-machine", () => {
     expect(isValidTransition("building", "ready")).toBe(true);
     expect(isValidTransition("building", "backlog")).toBe(true);
     expect(isValidTransition("validating", "backlog")).toBe(true);
+    expect(isValidTransition("review", "backlog")).toBe(true);
   });
 
   it("rejects invalid transitions", () => {
@@ -46,6 +47,7 @@ describe("state-machine", () => {
     expect(isEscapeHatch("building", "ready")).toBe(true);
     expect(isEscapeHatch("building", "backlog")).toBe(true);
     expect(isEscapeHatch("validating", "backlog")).toBe(true);
+    expect(isEscapeHatch("review", "backlog")).toBe(true);
   });
 
   it("does not treat automated transitions as escape hatches", () => {
@@ -54,13 +56,15 @@ describe("state-machine", () => {
     expect(isEscapeHatch("building", "validating")).toBe(false);
     expect(isEscapeHatch("backlog", "ready")).toBe(false);
     expect(isEscapeHatch("ready", "building")).toBe(false);
+    expect(isEscapeHatch("review", "done")).toBe(false);
   });
 
-  it("exports exactly the three escape-hatch edges", () => {
+  it("exports exactly the escape-hatch edges", () => {
     expect(ESCAPE_HATCH_TRANSITIONS).toEqual([
       ["building", "ready"],
       ["building", "backlog"],
       ["validating", "backlog"],
+      ["review", "backlog"],
     ]);
   });
 

@@ -5,7 +5,7 @@ export const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   ready: ["building"],
   building: ["validating", "ready", "backlog"],
   validating: ["building", "review", "backlog"],
-  review: ["done"],
+  review: ["done", "backlog"],
   done: [],
 };
 
@@ -13,6 +13,7 @@ export const ESCAPE_HATCH_TRANSITIONS: ReadonlyArray<readonly [TaskStatus, TaskS
   ["building", "ready"],
   ["building", "backlog"],
   ["validating", "backlog"],
+  ["review", "backlog"],
 ] as const;
 
 export function isEscapeHatch(from: TaskStatus, to: TaskStatus): boolean {

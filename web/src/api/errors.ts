@@ -31,5 +31,20 @@ export function friendlyErrorMessage(err: unknown): string {
   if (code === "task_not_found") {
     return "That task no longer exists.";
   }
+  if (code === "merge_conflict") {
+    return "The merge has conflicts. Resolve them in your checkout and retry.";
+  }
+  if (code === "merge_failed") {
+    return "The merge could not be completed. The source checkout may be dirty.";
+  }
+  if (code === "no_worktree") {
+    return "This task has no worktree to merge.";
+  }
+  if (code === "not_review") {
+    return "That action is only available while the task is in review.";
+  }
+  if (code === "diff_failed") {
+    return "Could not load the diff for this task.";
+  }
   return base;
 }

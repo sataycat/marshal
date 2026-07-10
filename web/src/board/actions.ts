@@ -1,6 +1,6 @@
 import type { TaskStatus } from "../types";
 
-export type ActionKind = "freeze" | "transition";
+export type ActionKind = "freeze" | "transition" | "merge";
 
 export interface BoardAction {
   /** Stable identifier for React keys and analytics. */
@@ -22,12 +22,20 @@ const FREEZE: BoardAction = {
   confirm: false,
 };
 
-const MARK_DONE: BoardAction = {
-  key: "mark-done",
-  label: "Mark Done",
+const APPROVE_MERGE: BoardAction = {
+  key: "approve-merge",
+  label: "Approve & Merge",
   to: "done",
-  kind: "transition",
+  kind: "merge",
   confirm: false,
+};
+
+const REVIEW_SEND_BACK: BoardAction = {
+  key: "review-send-back",
+  label: "Send Back to Backlog",
+  to: "backlog",
+  kind: "transition",
+  confirm: true,
 };
 
 const REQUEUE_BUILD: BoardAction = {
@@ -59,7 +67,7 @@ const ACTIONS_BY_STATUS: Record<TaskStatus, BoardAction[]> = {
   ready: [],
   building: [REQUEUE_BUILD, BUILD_TO_BACKLOG],
   validating: [VALIDATE_TO_BACKLOG],
-  review: [MARK_DONE],
+  review: [APPROVE_MERGE, REVIEW_SEND_BACK],
   done: [],
 };
 

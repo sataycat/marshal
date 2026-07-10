@@ -8,6 +8,13 @@ import { logger } from "../logger.js";
 import { loadGlobalConfig, loadMarshalJson } from "./config.js";
 import { copyWorktreeIncludes } from "./include.js";
 import { branchNameForSlug, descriptorForSlug } from "./name.js";
+import {
+  DiffError,
+  type DiffResult,
+  MergeError,
+  type MergeResult,
+  parseDiffStats,
+} from "./diff-merge.js";
 
 export interface WorktreeInfo {
   slug: string;
@@ -248,5 +255,58 @@ export class WorktreeManager {
       path: w.path,
       descriptor: w.descriptor,
     }));
+  }
+
+  resolveTaskBranch(slug: string): string | undefined {
+    return this.readIndex().worktrees.find((w) => w.slug === slug)?.branch;
+  }
+
+  diffForSlug(slug: string): DiffResult {
+    const branch = this.resolveTaskBranch(slug);
+    if (branch === undefined) {
+      throw new DiffError(slug, "no worktree for task");
+    }
+    const diff = this.execGit(["diff", `HEAD...${branch}`]);
+    return { diff, stats: parseDiffStats(diff) };
+  }
+
+  mergeTaskBranch(slug: string): MergeResult {
+    const branch = this.resolveTaskBranch(slug);
+    if (branch === undefined) {
+      throw new MergeError(slug, "no worktree for task");
+    }
+    const headBranch = this.execGit(["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+    if (headBranch === "HEAD") {
+      throw new MergeError(slug, "source checkout is in detached HEAD state");
+    }
+    const status = this.execGit(["status", "--porcelain=v1"]).trim();
+    // Untracked files (e.g. the .marshal/ index dir) are safe to merge around.
+    // Only block when there are tracked modifications or staged changes.
+    const dirty = status
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("?? "));
+    if (dirty.length > 0) {
+      throw new MergeError(slug, "source checkout has uncommitted changes; refusing to merge");
+    }
+    try {
+      this.execGit(["merge", "--no-ff", branch, "-m", `merge: ${slug}`]);
+    } catch (err) {
+      // Abort the in-progress merge so the source checkout is not left in a
+      // conflicted state. If abort fails (no merge in progress) we ignore it.
+      try {
+        this.execGit(["merge", "--abort"]);
+      } catch {
+        // ignore
+      }
+      const stderr = (err as { stderr?: string }).stderr ?? (err as Error).message;
+      if (/CONFLICT|conflict/i.test(stderr)) {
+        throw new MergeError(slug, "merge conflict; resolve manually and retry");
+      }
+      throw new MergeError(slug, `git merge failed: ${(err as Error).message}`);
+    }
+    const commitSha = this.execGit(["rev-parse", "HEAD"]).trim();
+    logger.info({ slug, branch, commitSha }, "Task branch merged into base");
+    return { commitSha };
   }
 }

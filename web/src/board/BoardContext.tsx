@@ -9,6 +9,7 @@ import {
 import {
   createTask as apiCreateTask,
   freezeTask as apiFreezeTask,
+  mergeTask as apiMergeTask,
   transitionTask as apiTransitionTask,
   type SocketStatus,
 } from "../api/client";
@@ -35,6 +36,7 @@ export interface BoardContextValue {
     to: TaskStatus,
     previous: TaskCard,
   ) => Promise<TaskDetail | null>;
+  mergeTask: (slug: string, previous: TaskCard) => Promise<TaskDetail | null>;
 }
 
 const BoardContext = createContext<BoardContextValue | null>(null);
@@ -114,6 +116,23 @@ export function BoardProvider({ children }: { children: ReactNode }) {
     [dispatch, pushError],
   );
 
+  const mergeTask = useCallback(
+    async (slug: string, previous: TaskCard): Promise<TaskDetail | null> => {
+      const optimistic: TaskCard = { ...previous, status: "done" };
+      dispatch({ type: "optimistic.apply", payload: optimistic, timestamp: nowIso() });
+      try {
+        const result = await apiMergeTask(slug);
+        dispatch({ type: "optimistic.commit", payload: toCard(result.task), timestamp: nowIso() });
+        return result.task;
+      } catch (err) {
+        dispatch({ type: "optimistic.rollback", payload: previous, timestamp: nowIso() });
+        pushError(friendlyErrorMessage(err));
+        return null;
+      }
+    },
+    [dispatch, pushError],
+  );
+
   const value = useMemo<BoardContextValue>(
     () => ({
       tasks,
@@ -126,8 +145,9 @@ export function BoardProvider({ children }: { children: ReactNode }) {
       createTask,
       freezeTask,
       transitionTask,
+      mergeTask,
     }),
-    [tasks, status, toasts, dismissToast, pushError, pushInfo, confirm, createTask, freezeTask, transitionTask],
+    [tasks, status, toasts, dismissToast, pushError, pushInfo, confirm, createTask, freezeTask, transitionTask, mergeTask],
   );
 
   return (

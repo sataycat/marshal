@@ -25,10 +25,13 @@ describe("actionsForStatus", () => {
     expect(actions[0]).toMatchObject({ to: "backlog", confirm: true, kind: "transition" });
   });
 
-  it("offers a mark-done action from review (no confirmation)", () => {
+  it("offers approve-merge and send-back actions from review", () => {
     const actions = actionsForStatus("review");
-    expect(actions).toHaveLength(1);
-    expect(actions[0]).toMatchObject({ to: "done", confirm: false, kind: "transition" });
+    expect(actions).toHaveLength(2);
+    const merge = actions.find((a) => a.kind === "merge")!;
+    expect(merge).toMatchObject({ to: "done", confirm: false, kind: "merge" });
+    const sendBack = actions.find((a) => a.to === "backlog")!;
+    expect(sendBack).toMatchObject({ to: "backlog", confirm: true, kind: "transition" });
   });
 
   it("offers no actions from done", () => {
@@ -40,9 +43,9 @@ describe("actionsForStatus", () => {
   });
 
   it("every action key is unique within a status", () => {
-    const all = (
-      ["backlog", "ready", "building", "validating", "review", "done"] as const
-    ).flatMap(actionsForStatus);
+    const all = (["backlog", "ready", "building", "validating", "review", "done"] as const).flatMap(
+      actionsForStatus,
+    );
     const keys = all.map((a) => a.key);
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -51,7 +54,8 @@ describe("actionsForStatus", () => {
 describe("confirmMessage", () => {
   it("returns empty string for non-confirm actions", () => {
     expect(confirmMessage(actionsForStatus("backlog")[0])).toBe("");
-    expect(confirmMessage(actionsForStatus("review")[0])).toBe("");
+    const reviewMerge = actionsForStatus("review").find((a) => a.kind === "merge")!;
+    expect(confirmMessage(reviewMerge)).toBe("");
   });
 
   it("mentions retry reset for re-queue (building -> ready)", () => {
@@ -71,6 +75,12 @@ describe("confirmMessage", () => {
     expect(confirmMessage(back)).toMatch(/retry counter will be reset/i);
     expect(confirmMessage(back)).toMatch(/spec will/i);
   });
+
+  it("mentions retry reset and spec revision for review -> backlog send back", () => {
+    const back = actionsForStatus("review").find((a) => a.to === "backlog")!;
+    expect(confirmMessage(back)).toMatch(/retry counter will be reset/i);
+    expect(confirmMessage(back)).toMatch(/spec will/i);
+  });
 });
 
 describe("isEscapeHatchAction", () => {
@@ -80,6 +90,7 @@ describe("isEscapeHatchAction", () => {
 
   it("treats confirm=false actions as non-escape-hatches", () => {
     expect(isEscapeHatchAction(actionsForStatus("backlog")[0])).toBe(false);
-    expect(isEscapeHatchAction(actionsForStatus("review")[0])).toBe(false);
+    const reviewMerge = actionsForStatus("review").find((a) => a.kind === "merge")!;
+    expect(isEscapeHatchAction(reviewMerge)).toBe(false);
   });
 });

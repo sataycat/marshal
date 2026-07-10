@@ -49,6 +49,31 @@ describe("friendlyErrorMessage", () => {
     expect(friendlyErrorMessage(err)).toBe("That task no longer exists.");
   });
 
+  it("maps merge_conflict to a resolve-and-retry message", () => {
+    const err = Object.assign(new Error("conflict"), { code: "merge_conflict" });
+    expect(friendlyErrorMessage(err)).toMatch(/conflict/i);
+  });
+
+  it("maps merge_failed to a dirty-checkout hint", () => {
+    const err = Object.assign(new Error("boom"), { code: "merge_failed" });
+    expect(friendlyErrorMessage(err)).toMatch(/dirty/i);
+  });
+
+  it("maps no_worktree to a worktree hint", () => {
+    const err = Object.assign(new Error("nope"), { code: "no_worktree" });
+    expect(friendlyErrorMessage(err)).toMatch(/worktree/);
+  });
+
+  it("maps not_review to a review-only hint", () => {
+    const err = Object.assign(new Error("nope"), { code: "not_review" });
+    expect(friendlyErrorMessage(err)).toMatch(/review/i);
+  });
+
+  it("maps diff_failed to a load-failure message", () => {
+    const err = Object.assign(new Error("nope"), { code: "diff_failed" });
+    expect(friendlyErrorMessage(err)).toMatch(/diff/);
+  });
+
   it("falls back to the raw message for unknown codes", () => {
     const err = Object.assign(new Error("server exploded"), { code: "internal_error" });
     expect(friendlyErrorMessage(err)).toBe("server exploded");
