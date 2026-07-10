@@ -95,7 +95,7 @@ Same as M0:
 
 ---
 
-## Slice 4 — Run History & Logs API
+## Slice 4 — Run History & Logs API ✅
 
 **Goal:** Run history and per-run event streams are queryable via HTTP for the web board to display build/validation output.
 
@@ -113,7 +113,7 @@ Same as M0:
 
 ---
 
-## Slice 5 — Static SPA Shell & Board View
+## Slice 5 — Static SPA Shell & Board View ✅
 
 **Goal:** The daemon serves a React SPA that displays the Kanban board with live task state.
 
@@ -134,7 +134,7 @@ Same as M0:
 
 ---
 
-## Slice 6 — Board Interactions (Transitions & Create)
+## Slice 6 — Board Interactions (Transitions & Create) ✅
 
 **Goal:** The web board is interactive — users can create tasks, freeze specs, and trigger transitions from the UI.
 
@@ -155,7 +155,7 @@ Same as M0:
 
 ---
 
-## Slice 7 — Diff Review Panel
+## Slice 7 — Diff Review Panel ✅
 
 **Goal:** The Review column is actionable — the human can inspect the builder's diff and decide to merge or send back.
 
