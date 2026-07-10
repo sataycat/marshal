@@ -6,6 +6,7 @@ import { actionsForStatus, confirmMessage, type BoardAction } from "../board/act
 import type { TaskDetail } from "../types";
 import { DiffView } from "../diff/DiffView";
 import { parseUnifiedDiff } from "../diff/parseDiff";
+import { SpecChatPanel } from "../specchat/SpecChatPanel";
 
 interface Props {
   slug: string;
@@ -120,6 +121,16 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
             className="spec"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(detail.spec_markdown) }}
           />
+          {detail.status === "backlog" && (
+            <SpecChatPanel
+              slug={slug}
+              detail={detail}
+              onSpecUpdated={(updated) => setDetail(updated)}
+              onFrozen={(frozen) => {
+                if (frozen) setDetail(frozen);
+              }}
+            />
+          )}
           {detail.status === "review" && (
             <div className="diff-panel">
               <h3>

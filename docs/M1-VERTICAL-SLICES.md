@@ -196,7 +196,7 @@ Same as M0:
 
 ---
 
-## Slice 9 — Spec Authoring Chat (Grill-Me)
+## Slice 9 — Spec Authoring Chat (Grill-Me) ✅
 
 **Goal:** The Backlog column has a chat-based spec authoring surface where a human and an agent iterate on the spec before freezing.
 

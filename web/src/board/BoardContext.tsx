@@ -10,15 +10,18 @@ import {
   createTask as apiCreateTask,
   freezeTask as apiFreezeTask,
   mergeTask as apiMergeTask,
+  sendSpecMessage as apiSendSpecMessage,
   transitionTask as apiTransitionTask,
+  updateTaskSpec as apiUpdateTaskSpec,
   type SocketStatus,
 } from "../api/client";
 import { friendlyErrorMessage } from "../api/errors";
 import { useConfirm, type ConfirmApi } from "../components/ConfirmDialog";
-import type { BusEvent, TaskCard, TaskDetail, TaskStatus } from "../types";
+import type { BusEvent, SpecMessage, TaskCard, TaskDetail, TaskStatus } from "../types";
 
 export interface BoardContextValue {
   tasks: TaskCard[];
+  specMessagesFor: (slug: string) => SpecMessage[];
   status: SocketStatus;
   toasts: Toast[];
   dismissToast: (id: number) => void;
@@ -37,6 +40,11 @@ export interface BoardContextValue {
     previous: TaskCard,
   ) => Promise<TaskDetail | null>;
   mergeTask: (slug: string, previous: TaskCard) => Promise<TaskDetail | null>;
+  sendSpecMessage: (
+    slug: string,
+    content: string,
+  ) => Promise<{ userMessage: SpecMessage; assistantMessage: SpecMessage } | null>;
+  updateTaskSpec: (slug: string, specMarkdown: string) => Promise<TaskDetail | null>;
 }
 
 const BoardContext = createContext<BoardContextValue | null>(null);
@@ -53,7 +61,7 @@ function nowIso(): string {
 }
 
 export function BoardProvider({ children }: { children: ReactNode }) {
-  const { tasks, status, dispatch } = useBoard();
+  const { tasks, specMessagesFor, status, dispatch } = useBoard();
   const [toasts, dispatchToast] = useReducer(toastReducer, []);
   const { confirm, dialog } = useConfirm();
 
@@ -133,9 +141,57 @@ export function BoardProvider({ children }: { children: ReactNode }) {
     [dispatch, pushError],
   );
 
+  const sendSpecMessage = useCallback(
+    async (
+      slug: string,
+      content: string,
+    ): Promise<{ userMessage: SpecMessage; assistantMessage: SpecMessage } | null> => {
+      try {
+        const result = await apiSendSpecMessage(slug, content);
+        // Server also broadcasts these over the bus; dispatch locally so the
+        // chat panel reflects the new messages immediately even if the WS
+        // frame arrives slightly later.
+        dispatch({
+          type: "spec.message",
+          payload: { taskSlug: slug, message: result.userMessage },
+          timestamp: nowIso(),
+        });
+        dispatch({
+          type: "spec.message",
+          payload: { taskSlug: slug, message: result.assistantMessage },
+          timestamp: nowIso(),
+        });
+        return result;
+      } catch (err) {
+        pushError(friendlyErrorMessage(err));
+        return null;
+      }
+    },
+    [dispatch, pushError],
+  );
+
+  const updateTaskSpec = useCallback(
+    async (slug: string, specMarkdown: string): Promise<TaskDetail | null> => {
+      try {
+        const task = await apiUpdateTaskSpec(slug, specMarkdown);
+        dispatch({
+          type: "task.updated",
+          payload: toCard(task),
+          timestamp: nowIso(),
+        });
+        return task;
+      } catch (err) {
+        pushError(friendlyErrorMessage(err));
+        return null;
+      }
+    },
+    [dispatch, pushError],
+  );
+
   const value = useMemo<BoardContextValue>(
     () => ({
       tasks,
+      specMessagesFor,
       status,
       toasts,
       dismissToast,
@@ -146,8 +202,25 @@ export function BoardProvider({ children }: { children: ReactNode }) {
       freezeTask,
       transitionTask,
       mergeTask,
+      sendSpecMessage,
+      updateTaskSpec,
     }),
-    [tasks, status, toasts, dismissToast, pushError, pushInfo, confirm, createTask, freezeTask, transitionTask, mergeTask],
+    [
+      tasks,
+      specMessagesFor,
+      status,
+      toasts,
+      dismissToast,
+      pushError,
+      pushInfo,
+      confirm,
+      createTask,
+      freezeTask,
+      transitionTask,
+      mergeTask,
+      sendSpecMessage,
+      updateTaskSpec,
+    ],
   );
 
   return (

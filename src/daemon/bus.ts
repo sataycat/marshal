@@ -1,4 +1,5 @@
 import { logger } from "../logger.js";
+import type { SpecMessage } from "../tasks/spec-store.js";
 
 export interface BusEvent<P = unknown> {
   type: string;
@@ -39,6 +40,12 @@ export const RunFinishedType = "run.finished";
 export const DaemonIdleType = "daemon.idle";
 export const DaemonCycleCompleteType = "daemon.cycle_complete";
 export const ConnectedType = "connected";
+export const SpecMessageType = "spec.message";
+
+export interface SpecMessagePayload {
+  taskSlug: string;
+  message: SpecMessage;
+}
 
 export interface TaskPayload {
   id: number;
@@ -112,4 +119,9 @@ export function publishDaemonIdle(bus: EventBus): void {
 
 export function publishDaemonCycleComplete(bus: EventBus): void {
   bus.publish(DaemonCycleCompleteType, {});
+}
+
+export function publishSpecMessage(bus: EventBus, taskSlug: string, message: SpecMessage): void {
+  const payload: SpecMessagePayload = { taskSlug, message };
+  bus.publish(SpecMessageType, payload);
 }

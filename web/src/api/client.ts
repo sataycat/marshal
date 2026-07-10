@@ -1,4 +1,4 @@
-import type { BusEvent, TaskCard, TaskDetail, TaskStatus } from "../types";
+import type { BusEvent, SpecMessage, TaskCard, TaskDetail, TaskStatus } from "../types";
 
 export interface DiffStats {
   files: number;
@@ -107,6 +107,39 @@ export async function mergeTask(slug: string): Promise<MergeResponse> {
     body: JSON.stringify({}),
   });
   return jsonOrThrow<MergeResponse>(res);
+}
+
+export async function fetchSpecMessages(slug: string): Promise<SpecMessage[]> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-messages`);
+  const body = await jsonOrThrow<{ messages: SpecMessage[] }>(res);
+  return body.messages;
+}
+
+export interface SendSpecMessageResponse {
+  userMessage: SpecMessage;
+  assistantMessage: SpecMessage;
+}
+
+export async function sendSpecMessage(
+  slug: string,
+  content: string,
+): Promise<SendSpecMessageResponse> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  return jsonOrThrow<SendSpecMessageResponse>(res);
+}
+
+export async function updateTaskSpec(slug: string, specMarkdown: string): Promise<TaskDetail> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ spec_markdown: specMarkdown }),
+  });
+  const body = await jsonOrThrow<{ task: TaskDetail }>(res);
+  return body.task;
 }
 
 function wsUrl(): string {

@@ -508,3 +508,109 @@ body {
 .diff-line-del {
   background: #fbe9e9;
 }
+
+.spec-chat {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border, #e3e3e3);
+  padding-top: 0.75rem;
+}
+
+.spec-chat h3 {
+  margin: 0 0 0.5rem;
+}
+
+.spec-chat-messages {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: #fafafa;
+}
+
+.spec-chat-messages .hint {
+  color: #777;
+  margin: 0.25rem 0;
+}
+
+.spec-chat-msg {
+  margin-bottom: 0.5rem;
+}
+
+.spec-chat-role {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #666;
+  margin-bottom: 0.15rem;
+}
+
+.spec-chat-assistant .spec-chat-role {
+  color: #1a7f37;
+}
+
+.spec-chat-content {
+  font-size: 0.9rem;
+}
+
+.spec-chat-content p {
+  margin: 0 0 0.4rem;
+}
+
+.spec-chat-content pre {
+  background: #f3f3f3;
+  padding: 0.4rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.8rem;
+}
+
+.spec-chat-composer {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  margin-top: 0.5rem;
+}
+
+.spec-chat-composer .textarea {
+  flex: 1;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.spec-chat-proposal {
+  margin-top: 0.75rem;
+  border: 1px dashed var(--border, #cbd3e6);
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: #fffdf5;
+}
+
+.spec-chat-proposal-label {
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.spec-chat-proposal-text {
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: 4px;
+  padding: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.spec-chat-proposal-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.spec-chat-freeze {
+  margin-top: 0.75rem;
+}

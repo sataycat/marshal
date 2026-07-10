@@ -44,6 +44,11 @@ import {
   type RunEventRecord,
   type RunRecord,
 } from "./run-log.js";
+import { runSpecAuthorTurn, SpecChatClosedError } from "./spec-chat.js";
+import { listSpecMessages, type SpecMessage } from "../tasks/spec-store.js";
+import { publishSpecMessage } from "./bus.js";
+import type { Agent } from "../agent/types.js";
+import { resolveAgentId } from "../worktree/config.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -82,6 +87,7 @@ export interface BuildAppOptions {
   worktreeRoot?: string;
   bus?: EventBus;
   webDir?: string;
+  specAgent?: Agent;
 }
 
 export function defaultWebDistDir(): string {
@@ -97,6 +103,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
   registerRunRoutes(app, root);
+  registerSpecRoutes(app, root, bus, options.specAgent);
   registerStaticRoutes(app, webDir);
   app.notFound((c) => spaNotFound(c, webDir));
   app.onError((err, c) => {
@@ -304,6 +311,9 @@ function mapDomainError(err: unknown): ApiError {
   }
   if (err instanceof RunNotFoundError) {
     return new ApiError(404, err.message, "run_not_found");
+  }
+  if (err instanceof SpecChatClosedError) {
+    return new ApiError(409, err.message, "spec_chat_closed");
   }
   logger.error({ err }, "Unexpected error in task HTTP handler");
   return new ApiError(500, "Internal server error", "internal_error");
@@ -553,6 +563,107 @@ function parseRunId(raw: string): number {
     throw new ApiError(400, "run id must be a positive integer", "invalid_run_id");
   }
   return parsed;
+}
+
+interface SpecMessageFields {
+  id: number;
+  task_id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+function specMessageFields(msg: SpecMessage): SpecMessageFields {
+  return {
+    id: msg.id,
+    task_id: msg.task_id,
+    role: msg.role,
+    content: msg.content,
+    created_at: msg.created_at,
+  };
+}
+
+function registerSpecRoutes(
+  app: Hono,
+  root: string | undefined,
+  bus: EventBus | undefined,
+  specAgent: Agent | undefined,
+): void {
+  const ensureBus = (bus: EventBus | undefined): EventBus => {
+    if (!bus) throw new ApiError(500, "event bus not configured", "internal_error");
+    return bus;
+  };
+
+  app.get("/api/tasks/:slug/spec-messages", (c) => {
+    const slug = c.req.param("slug");
+    try {
+      const messages = listSpecMessages(slug, root).map(specMessageFields);
+      return c.json({ messages });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+
+  app.post("/api/tasks/:slug/spec-messages", async (c) => {
+    const slug = c.req.param("slug");
+    const body = await readJsonObject(c, new Set(["content"]));
+    const content = body.content;
+    if (content === undefined) {
+      throw new ApiError(422, "content is required", "missing_field");
+    }
+    const contentStr = assertString(content, "content");
+    if (contentStr.trim().length === 0) {
+      throw new ApiError(422, "content must not be empty", "invalid_field");
+    }
+    try {
+      const busLocal = ensureBus(bus);
+      // Pre-flight: only backlog tasks accept spec chat.
+      const fromTask = getTask(slug, root);
+      if (fromTask.status !== "backlog") {
+        throw new SpecChatClosedError(slug, fromTask.status);
+      }
+      const promptEvents = await runSpecAuthorTurn(slug, contentStr, {
+        root,
+        agent: specAgent,
+        agentId: resolveAgentId("specAuthor"),
+      });
+      publishSpecMessage(busLocal, slug, promptEvents.userMessage);
+      publishSpecMessage(busLocal, slug, promptEvents.assistantMessage);
+      return c.json(
+        {
+          userMessage: specMessageFields(promptEvents.userMessage),
+          assistantMessage: specMessageFields(promptEvents.assistantMessage),
+        },
+        201,
+      );
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+
+  app.post("/api/tasks/:slug/spec", async (c) => {
+    const slug = c.req.param("slug");
+    const body = await readJsonObject(c, new Set(["spec_markdown"]));
+    const specRaw = body.spec_markdown;
+    if (specRaw === undefined) {
+      throw new ApiError(422, "spec_markdown is required", "missing_field");
+    }
+    const specStr = assertString(specRaw, "spec_markdown");
+    if (specStr.trim().length === 0) {
+      throw new ApiError(422, "spec_markdown must not be empty", "invalid_field");
+    }
+    try {
+      const task = getTask(slug, root);
+      if (task.status !== "backlog") {
+        throw new SpecChatClosedError(slug, task.status);
+      }
+      const updated = setSpecMarkdown(slug, specStr, root);
+      if (bus) publishTaskUpdated(bus, taskPayload(updated));
+      return c.json({ task: taskDetail(updated) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
 }
 
 async function waitForListening(server: ServerType): Promise<{ host: string; port: number }> {

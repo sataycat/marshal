@@ -1,17 +1,34 @@
-import { useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useState } from "react";
 import { boardReducer, boardToList, type BoardState } from "../board/reducer";
+import {
+  specMessagesReducer,
+  messagesForSlug,
+  type SpecMessagesState,
+} from "../specchat/specMessagesReducer";
 import { connectBus, fetchTasks, type SocketStatus, type WebSocketHandle } from "../api/client";
-import type { BusEvent, TaskCard } from "../types";
+import type { BusEvent, SpecMessage } from "../types";
 
 export interface BoardView {
-  tasks: TaskCard[];
+  tasks: ReturnType<typeof boardToList>;
+  specMessagesFor: (slug: string) => SpecMessage[];
   status: SocketStatus;
-  dispatch: React.Dispatch<BusEvent>;
+  dispatch: (event: BusEvent) => void;
 }
 
 export function useBoard(): BoardView {
-  const [state, dispatch] = useReducer(boardReducer, {} as BoardState);
+  const [state, dispatchTasks] = useReducer(boardReducer, {} as BoardState);
+  const [specState, dispatchSpec] = useReducer(specMessagesReducer, {} as SpecMessagesState);
   const [status, setStatus] = useState<SocketStatus>("connecting");
+
+  const dispatch = useCallback((event: BusEvent): void => {
+    dispatchTasks(event);
+    dispatchSpec(event);
+  }, []);
+
+  const specMessagesFor = useCallback(
+    (slug: string): SpecMessage[] => messagesForSlug(specState, slug),
+    [specState],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -37,7 +54,12 @@ export function useBoard(): BoardView {
       cancelled = true;
       handle?.close();
     };
-  }, []);
+  }, [dispatch]);
 
-  return { tasks: boardToList(state), status, dispatch };
+  return {
+    tasks: boardToList(state),
+    specMessagesFor,
+    status,
+    dispatch,
+  };
 }

@@ -24,3 +24,18 @@ export interface BusEvent<P = unknown> {
 export interface ConnectedPayload {
   tasks: TaskCard[];
 }
+
+export type SpecMessageRole = "user" | "assistant";
+
+export interface SpecMessage {
+  id: number;
+  task_id: number;
+  role: SpecMessageRole;
+  content: string;
+  created_at: string;
+}
+
+export interface SpecMessagePayload {
+  taskSlug: string;
+  message: SpecMessage;
+}

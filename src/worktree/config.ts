@@ -21,6 +21,7 @@ export interface GlobalConfig {
   agents?: {
     builder?: string;
     validator?: string;
+    specAuthor?: string;
   };
   policy?: {
     maxRetries?: number;
@@ -64,9 +65,10 @@ const VALID_AGENT_IDS: readonly AgentId[] = ["opencode", "pi"] as const;
 const AGENT_ID_DEFAULTS: Record<AgentRole, AgentId> = {
   builder: "opencode",
   validator: "pi",
+  specAuthor: "opencode",
 };
 
-export type AgentRole = "builder" | "validator";
+export type AgentRole = "builder" | "validator" | "specAuthor";
 
 export class InvalidAgentIdError extends Error {
   constructor(role: AgentRole, value: string) {
@@ -75,9 +77,15 @@ export class InvalidAgentIdError extends Error {
   }
 }
 
-export function resolveAgentId(role: AgentRole, config: GlobalConfig = loadGlobalConfig()): AgentId {
+export function resolveAgentId(
+  role: AgentRole,
+  config: GlobalConfig = loadGlobalConfig(),
+): AgentId {
   const raw = config.agents?.[role];
   if (raw === undefined) {
+    if (role === "specAuthor") {
+      return resolveAgentId("builder", config);
+    }
     return AGENT_ID_DEFAULTS[role];
   }
   if ((VALID_AGENT_IDS as readonly string[]).includes(raw)) {
@@ -110,7 +118,10 @@ export interface ResolvedDaemonBind {
   port: number;
 }
 
-export function resolveDaemonBind(args: { host?: string; port?: number }, config: GlobalConfig = loadGlobalConfig()): ResolvedDaemonBind {
+export function resolveDaemonBind(
+  args: { host?: string; port?: number },
+  config: GlobalConfig = loadGlobalConfig(),
+): ResolvedDaemonBind {
   const host = args.host ?? config.daemon?.host ?? DEFAULT_DAEMON_HOST;
   const rawPort = args.port ?? config.daemon?.port;
   let port = DEFAULT_DAEMON_PORT;
