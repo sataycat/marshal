@@ -176,7 +176,7 @@ Same as M0:
 
 ---
 
-## Slice 8 — PR Creation (GitHub)
+## Slice 8 — PR Creation (GitHub) ⏭️ (SKIPPED FOR NOW)
 
 **Goal:** Instead of local-only merge, the human can push the task branch and open a GitHub PR from the board.
 
