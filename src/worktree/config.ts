@@ -60,8 +60,6 @@ export function loadGlobalConfig(): GlobalConfig {
   }
 }
 
-const VALID_AGENT_IDS: readonly AgentId[] = ["opencode", "pi"] as const;
-
 const AGENT_ID_DEFAULTS: Record<AgentRole, AgentId> = {
   builder: "opencode",
   validator: "pi",
@@ -70,13 +68,9 @@ const AGENT_ID_DEFAULTS: Record<AgentRole, AgentId> = {
 
 export type AgentRole = "builder" | "validator" | "specAuthor";
 
-export class InvalidAgentIdError extends Error {
-  constructor(role: AgentRole, value: string) {
-    super(`Invalid agent ID for ${role}: ${value}`);
-    this.name = "InvalidAgentIdError";
-  }
-}
-
+// Any non-empty string is a valid agent id: it is passed through to ACPX
+// as-is, and ACPX (or the agent's own auth handshake) is the source of
+// truth for whether it's actually usable. See ADR-019.
 export function resolveAgentId(
   role: AgentRole,
   config: GlobalConfig = loadGlobalConfig(),
@@ -88,10 +82,7 @@ export function resolveAgentId(
     }
     return AGENT_ID_DEFAULTS[role];
   }
-  if ((VALID_AGENT_IDS as readonly string[]).includes(raw)) {
-    return raw as AgentId;
-  }
-  throw new InvalidAgentIdError(role, raw);
+  return raw;
 }
 
 export const DEFAULT_MAX_RETRIES = 2;

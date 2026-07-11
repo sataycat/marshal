@@ -1,4 +1,4 @@
-export type AgentId = "opencode" | "pi";
+export type AgentId = string;
 
 export interface AgentSession {
   agentId: AgentId;
@@ -30,6 +30,7 @@ export interface PromptOptions extends SpawnOptions {
 }
 
 export interface Agent {
+  // Any string; the id is passed to ACPX as-is.
   spawn(cwd: string, agentId: AgentId, opts?: SpawnOptions): Promise<AgentSession>;
   prompt(session: AgentSession, text: string, opts?: PromptOptions): AsyncIterable<AgentEvent>;
   cancel(session: AgentSession): Promise<void>;

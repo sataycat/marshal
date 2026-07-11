@@ -230,11 +230,15 @@ describe("AcpxAgentAdapter", () => {
     );
   });
 
-  it("throws for unknown agent IDs", async () => {
+  it("passes a custom agent id straight through to acpx (ADR-019)", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "marshal-cwd-"));
     const adapter = makeAdapter({ binPath: fakeBinPath, versionRange: ">=0.12.0 <0.13.0" });
 
-    await expect(adapter.spawn(cwd, "codex" as "opencode")).rejects.toThrow("Unknown agent ID");
+    const session = await adapter.spawn(cwd, "claude-code");
+
+    expect(session.agentId).toBe("claude-code");
+    expect(session.name).toBe("marshal-claude-code");
+    expect(session.recordId).toMatch(/^rec-marshal-claude-code/);
   });
 
   it("warns when the installed ACPX version is outside the expected range", async () => {

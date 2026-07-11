@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-07-10. Supersedes ADR-003 Decision 6 (the closed `AgentId` union, the runtime allowlist, and the `AGENT_TOKENS` registry).
+Accepted — 2026-07-11. Supersedes ADR-003 Decision 6 (the closed `AgentId` union, the runtime allowlist, and the `AGENT_TOKENS` registry).
 
 ## Context
 
@@ -38,7 +38,7 @@ Branded types (`string & { readonly __agentId: unique symbol }`) were considered
 
 `InvalidAgentIdError` is removed: there is no validation failure to throw. Its only call site is `resolveAgentId`, which no longer raises. If a future slice reintroduces agent-id shape validation (e.g. a regex), the error class can be reinstated at that point.
 
-The defaults remain so that `marshal init` and out-of-the-box usage keeps working. They are *defaults*, not *gatekeepers*.
+The defaults remain so that `marshal init` and out-of-the-box usage keeps working. They are _defaults_, not _gatekeepers_.
 
 ### 3. The adapter passes the agent id straight through to ACPX
 

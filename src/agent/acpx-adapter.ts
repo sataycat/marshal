@@ -11,10 +11,8 @@ import type {
   SpawnOptions,
 } from "./types.js";
 
-const AGENT_TOKENS: Record<AgentId, string> = {
-  opencode: "opencode",
-  pi: "pi",
-};
+// Removed. ACPX takes the agent id as a positional CLI argument, so the id
+// IS the token. There is no registry to consult.
 
 const DEFAULT_VERSION_RANGE = ">=0.12.0 <0.13.0";
 const DEFAULT_TIMEOUT_SECONDS = 1800;
@@ -71,13 +69,12 @@ export class AcpxAgentAdapter implements Agent {
   }
 
   async spawn(cwd: string, agentId: AgentId, opts: SpawnOptions = {}): Promise<AgentSession> {
-    const token = resolveAgentToken(agentId);
     const name = opts.sessionName ?? defaultSessionName(agentId);
 
     await this.ensureVersion();
 
     const args = [
-      token,
+      agentId,
       "sessions",
       "ensure",
       "--name",
@@ -210,14 +207,7 @@ export class AcpxAgentAdapter implements Agent {
   }
 
   async cancel(session: AgentSession): Promise<void> {
-    const args = [
-      resolveAgentToken(session.agentId),
-      "cancel",
-      "-s",
-      session.name,
-      "--cwd",
-      session.cwd,
-    ];
+    const args = [session.agentId, "cancel", "-s", session.name, "--cwd", session.cwd];
     const { code, stdout, stderr } = await runCommand(this.binPath, args);
     if (code !== 0) {
       throw acpxCommandError("cancel", code!, stderr || stdout);
@@ -225,27 +215,12 @@ export class AcpxAgentAdapter implements Agent {
   }
 
   async close(session: AgentSession): Promise<void> {
-    const args = [
-      resolveAgentToken(session.agentId),
-      "sessions",
-      "close",
-      session.name,
-      "--cwd",
-      session.cwd,
-    ];
+    const args = [session.agentId, "sessions", "close", session.name, "--cwd", session.cwd];
     const { code, stdout, stderr } = await runCommand(this.binPath, args);
     if (code !== 0) {
       throw acpxCommandError("sessions close", code!, stderr || stdout);
     }
   }
-}
-
-function resolveAgentToken(agentId: AgentId): string {
-  const token = AGENT_TOKENS[agentId];
-  if (!token) {
-    throw new Error(`Unknown agent ID: ${agentId}`);
-  }
-  return token;
 }
 
 function defaultSessionName(agentId: AgentId): string {
@@ -254,7 +229,7 @@ function defaultSessionName(agentId: AgentId): string {
 
 function buildPromptArgs(session: AgentSession, opts: PromptOptions): string[] {
   const args: string[] = [
-    resolveAgentToken(session.agentId),
+    session.agentId,
     "-s",
     session.name,
     "--cwd",

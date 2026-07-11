@@ -3,7 +3,6 @@ import {
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_PORT,
   DEFAULT_MAX_RETRIES,
-  InvalidAgentIdError,
   resolveAgentId,
   resolveDaemonBind,
   resolveMaxRetries,
@@ -44,14 +43,19 @@ describe("resolveAgentId", () => {
     expect(resolveAgentId("validator", config)).toBe("pi");
   });
 
-  it("throws InvalidAgentIdError for an unknown validator id", () => {
+  it("passes through a custom validator id without validation", () => {
     const config: GlobalConfig = { agents: { validator: "claude" } };
-    expect(() => resolveAgentId("validator", config)).toThrow(InvalidAgentIdError);
+    expect(resolveAgentId("validator", config)).toBe("claude");
   });
 
-  it("throws InvalidAgentIdError for an unknown builder id", () => {
+  it("passes through a custom builder id without validation", () => {
     const config: GlobalConfig = { agents: { builder: "gemini" } };
-    expect(() => resolveAgentId("builder", config)).toThrow(InvalidAgentIdError);
+    expect(resolveAgentId("builder", config)).toBe("gemini");
+  });
+
+  it("passes through a custom agent id end-to-end (ADR-019)", () => {
+    const config: GlobalConfig = { agents: { builder: "claude-code" } };
+    expect(resolveAgentId("builder", config)).toBe("claude-code");
   });
 });
 

@@ -36,7 +36,7 @@ This produces `dist/` and makes `bin/marshal` runnable. To use `marshal` from an
   },
   "agents": {
     "builder": "opencode", // builder agent id
-    "validator": "pi", // validator agent id
+    "validator": "claude-code", // validator agent id — any ACP-compatible agent that ACPX knows works here
   },
   "policy": {
     "maxRetries": 2, // validation retry cap before escalating to review
