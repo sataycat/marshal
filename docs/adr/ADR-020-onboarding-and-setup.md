@@ -13,7 +13,7 @@ Today, getting Marshal running requires the user to manually:
 3. Install a validator agent CLI (`pi`) and ensure it's ACP-compatible.
 4. Set up provider API keys (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) in their environment so the agents can reach model endpoints.
 5. Hand-author `~/.marshal/config.json` with correct agent IDs, version ranges, and policy settings.
-6. Run `marshal init` in the target repo to create `.marshal/` and the SQLite database.
+6. Run `marshal init` in the target repo to create `.marshal/` and the SQLite database (`.marshal/state.db`, the only file this step produces).
 
 None of these steps are discovered automatically. The current `marshal init` command (§`src/cli.ts:25–32`) creates the state directory and database, but does not check prerequisites, does not detect what's installed, and does not guide the user through configuration. The README lists the requirements, but a new user hitting their first `acpx is not installed` error after trying to run a task is a bad first experience.
 
@@ -21,25 +21,33 @@ ADR-003 chose to shell out to the `acpx` binary and ADR-019 opened the agent ID 
 
 ### Design constraints
 
-- **No new runtime dependencies.** The setup command uses the tools already on PATH (`npm`/`npx`, `acpx`, agent CLIs). It does not bundle or vendor any of them.
-- **Idempotent.** Running `marshal setup` on an already-configured system is a no-op that reports "all checks passed."
-- **Non-destructive.** Existing `~/.marshal/config.json` values are preserved; setup only fills in missing keys or offers to update them interactively.
+- **No new runtime dependencies.** The preflight uses the tools already on PATH (`npm`/`npx`, `acpx`, agent CLIs). It does not bundle or vendor any of them.
+- **Idempotent.** Running `marshal init` on an already-configured system (machine and/or repo) is a no-op that reports "all checks passed."
+- **Non-destructive.** Existing `~/.marshal/config.json` values are preserved; the preflight only fills in missing keys or offers to update them interactively.
 - **Offline-safe for checks.** Probing what's installed (`which`, `--version`) works offline. Auth verification (which hits model APIs) is clearly labeled as an optional online step.
-- **CLI-first.** M0/M1 is headless/CLI. The setup surface is a CLI command. A web-based setup wizard is a future concern for M2+.
+- **CLI-first.** M0/M1 is headless/CLI. The onboarding surface is a single CLI command (`marshal init`). A web-based setup wizard is a future concern for M2+.
+- **One command, not two.** There is no separate `marshal setup` distinct from `marshal init` — see Decision 1.
 
 ## Decisions
 
-### 1. New `marshal setup` command (replaces the role of bare `marshal init`)
+### 1. `marshal init` absorbs `setup` — one onboarding command, not two
 
-`marshal setup` is the recommended entry point for new users. It runs an interactive, step-by-step preflight that checks prerequisites, installs missing tools (with user consent), writes config, and finishes with `marshal init` (state dir + database).
+Earlier drafts of this ADR introduced `marshal setup` as a new command sitting alongside the existing `marshal init`, with `setup` calling `init` at the end. In review this split proved to be an unnecessary distinction: the only thing `init` does today is create `.marshal/` and the SQLite database (`.marshal/state.db`) — two lines of code (`initRepoState()` + `openDb()`) — and it was never a complete onboarding path on its own. Keeping it as a separate public command just gave new users a "which one do I run?" decision with no real payoff.
 
-`marshal init` remains and continues to do exactly what it does today (create `.marshal/` + SQLite). `marshal setup` calls `init` at the end, so users who run `setup` never need to run `init` separately. Users who know what they're doing can skip `setup` and use `init` + hand-authored config, same as today.
+**Decision: there is one command, `marshal init`.** It runs the full preflight (Phases 1–5 below) and then does what `init` does today (Phase 6: repo state dir + SQLite). `marshal setup` is dropped — it does not ship as a separate command or alias.
 
-The command lives at `src/setup/` with its own module so the setup logic doesn't bloat the daemon or adapter code.
+`marshal init` is scope-aware and idempotent across the two things it manages:
+
+- **Machine-level state** (Phases 1–5: system prerequisites, `acpx`, agent CLIs, auth env vars, `~/.marshal/config.json`) is checked once and cached as "already configured." Re-running `init` in a second or third repo on the same machine skips straight past these phases with a single `✓ machine already configured` line instead of re-printing the full checklist — it does not re-run installs or re-prompt.
+- **Repo-level state** (Phase 6: `.marshal/state.db`) always runs, since it's specific to the current repo.
+
+This means: first repo on a new machine → full interactive preflight + repo init. Every repo after that on the same machine → an near-instant repo init, same command, no extra flags needed. Users who know what they're doing can still skip straight to a hand-authored `~/.marshal/config.json` — `init`'s machine-level phases are a no-op if that file already passes checks.
+
+The command lives at `src/setup/` with its own module so the preflight logic doesn't bloat the daemon or adapter code; only the CLI verb (`marshal init`) changes, not the internal module boundary.
 
 ### 2. Preflight check phases
 
-`marshal setup` runs the following phases in order. Each phase reports a status line (✓ found / ✗ missing / ⚠ warning) and, where applicable, offers to fix the issue.
+`marshal init` runs the following phases in order. Each phase reports a status line (✓ found / ✗ missing / ⚠ warning) and, where applicable, offers to fix the issue. Phases 1–5 are skipped (collapsed to one summary line) when machine-level state is already known good; Phase 6 always runs.
 
 #### Phase 1: System prerequisites
 
@@ -122,7 +130,7 @@ If the file already exists, setup merges — filling in missing keys, leaving ex
 
 #### Phase 6: Repo init
 
-Runs the existing `initGlobalConfig()` + `initRepoState()` + `openDb()` sequence (what `marshal init` does today). Creates `.marshal/` and the SQLite database.
+Runs the existing `initGlobalConfig()` + `initRepoState()` + `openDb()` sequence (what `marshal init` does today). Creates `.marshal/` and the SQLite database (`.marshal/state.db`) — the only file this phase produces. This is the one phase that always runs, even when Phases 1–5 were skipped as already-configured.
 
 Prints a final summary:
 
@@ -137,25 +145,26 @@ Marshal is ready. Create your first task:
   marshal task create --slug my-feature --title "My feature" --spec-file spec.md
 ```
 
-### 3. `marshal doctor` — re-run checks without setup
+### 3. `marshal doctor` — re-run checks without mutating anything
 
-`marshal doctor` runs Phases 1–4 (checks only, no installs, no config writes) and reports the status table. Useful for diagnosing a broken setup after an upgrade or environment change. It is a read-only command that never mutates state.
+`marshal doctor` runs Phases 1–4 (checks only, no installs, no config writes, no repo init) and reports the status table. Useful for diagnosing a broken setup after an upgrade or environment change. It is a read-only command that never mutates state, and remains distinct from `init` for that reason — it's a different verb (diagnose vs. onboard), not a redundant one.
 
 ### 4. `--non-interactive` flag
 
-`marshal setup --non-interactive` runs all checks, skips all prompts (no auto-installs, no config writes), and exits with code 0 if all checks pass or code 1 if any check fails. Intended for CI, scripts, and automated environments. The output is the same status table, machine-parseable via `--format json` (future).
+`marshal init --non-interactive` runs all checks, skips all prompts (no auto-installs, no config writes), and exits with code 0 if all checks pass or code 1 if any check fails. Intended for CI, scripts, and automated environments. The output is the same status table, machine-parseable via `--format json` (future).
 
-### 5. Existing `marshal init` is unchanged
+### 5. First-run nudge instead of an install-time hook
 
-`init` keeps doing exactly what it does today. `setup` is a superset that calls `init` at the end. We do not break existing scripts or docs that use `init`.
+`marshal init` (or any command that needs config) detects a missing `~/.marshal/config.json` and prints "run `marshal init` to get started," then exits non-zero. We deliberately do **not** auto-run `init` from an npm `postinstall` script: postinstall hooks that prompt interactively or shell out to install other global tools are fragile and surprising, especially for a command that needs explicit user consent to install things (`acpx`, agent CLIs). First run of `marshal init` after `npm i -g marshal` (per ADR-021) is the one onboarding entry point; there is no separate first-install command to remember.
 
 ## Consequences
 
-- **New users run one command** (`marshal setup`) and get a working system, or a clear diagnosis of what's missing and how to fix it.
-- **The anti-corruption boundary is preserved.** Setup shells out to `acpx` and agent CLIs the same way the adapter does. It does not import ACPX internals or agent libraries. If ACPX dies, setup's checks die too — and that's correct, because the adapter would also be dead.
-- **The curated install-hint table is not a runtime allowlist.** It lives in `src/setup/` and is only consulted during `setup` and `doctor`. The adapter and config system remain fully open per ADR-019. Adding a new agent to the hint table is a one-line change; omitting one just means setup says "install it manually."
-- **Auth checks are best-effort.** Presence of an env var does not guarantee it's valid. The one-shot handshake probe in Phase 3 catches most auth failures, but setup does not guarantee the first real build will succeed. The run log (ADR-006) and the daemon's error surfacing remain the definitive diagnostic path.
-- **`marshal doctor` gives ongoing diagnostic value** beyond first-time setup — it's the answer to "my build suddenly fails, what changed?" (e.g., ACPX was upgraded past the pinned range, or an API key expired).
+- **New users run one command** (`marshal init`) and get a working system, or a clear diagnosis of what's missing and how to fix it. There is no second command (`setup`) to discover or choose between.
+- **Repeat use is fast.** Onboarding a second, third, etc. repo on an already-configured machine is a near-instant `init` run — Phases 1–5 collapse to one line, only Phase 6 (repo state dir + SQLite) does real work.
+- **The anti-corruption boundary is preserved.** `init`'s preflight shells out to `acpx` and agent CLIs the same way the adapter does. It does not import ACPX internals or agent libraries. If ACPX dies, the preflight's checks die too — and that's correct, because the adapter would also be dead.
+- **The curated install-hint table is not a runtime allowlist.** It lives in `src/setup/` and is only consulted during `init` and `doctor`. The adapter and config system remain fully open per ADR-019. Adding a new agent to the hint table is a one-line change; omitting one just means `init` says "install it manually."
+- **Auth checks are best-effort.** Presence of an env var does not guarantee it's valid. The one-shot handshake probe in Phase 3 catches most auth failures, but `init` does not guarantee the first real build will succeed. The run log (ADR-006) and the daemon's error surfacing remain the definitive diagnostic path.
+- **`marshal doctor` gives ongoing diagnostic value** beyond first-time onboarding — it's the answer to "my build suddenly fails, what changed?" (e.g., ACPX was upgraded past the pinned range, or an API key expired).
 
 ## Open questions (deferred)
 
@@ -169,6 +178,6 @@ Marshal is ready. Create your first task:
 - `docs/PROJECT.md` §4 — anti-corruption layer (preserved, not changed).
 - `docs/adr/archived/ADR-003-agent-adapter-and-acpx.md` — the ACPX integration model setup validates against.
 - `docs/adr/archived/ADR-019-coding-agent-agnostic.md` — the open agent-ID model. Setup's hint table is advisory, not gating.
-- `src/daemon/config.ts` — `initGlobalConfig()`, `initRepoState()` (called by setup Phase 6).
-- `src/worktree/config.ts` — `GlobalConfig` schema, `resolveAgentId()` (setup reads/writes the same config shape).
-- `src/agent/acpx-adapter.ts` — `DEFAULT_VERSION_RANGE`, `acpxNotInstalledError()` (setup reuses the version range and improves on the error message).
+- `src/daemon/config.ts` — `initGlobalConfig()`, `initRepoState()` (called by `init`'s Phase 6).
+- `src/worktree/config.ts` — `GlobalConfig` schema, `resolveAgentId()` (`init` reads/writes the same config shape).
+- `src/agent/acpx-adapter.ts` — `DEFAULT_VERSION_RANGE`, `acpxNotInstalledError()` (`init` reuses the version range and improves on the error message).
