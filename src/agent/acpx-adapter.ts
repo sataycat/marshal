@@ -17,6 +17,14 @@ import type {
 // Acceptance range: the semver range an ALREADY-installed acpx binary must
 // satisfy for Marshal to use it. Kept wide within a minor so users who installed
 // acpx themselves (e.g. `npm i -g acpx@0.12.3`) are not forced to downgrade.
+//
+// Per ADR-023 Decision 6, this pin exists because ACPX's CLI grammar, flag
+// names, output shapes, and the no-envelope NDJSON stream are now Marshal's
+// versioned API contract (acpx.sh/VISION Principle 4) — NOT because we expect
+// ACPX to break. A minor-bump warning stays a warning (not a hard fail) so a
+// 0.12 → 0.13 bump on a stability-committed CLI is a normal semver transition,
+// not an emergency; the daemon logs it loudly so an operator notices before a
+// subtle flag rename bites them.
 export const DEFAULT_VERSION_RANGE = ">=0.12.0 <0.13.0";
 
 // Install pin: the exact version string Marshal puts in `npm i -g acpx@...`
@@ -237,13 +245,7 @@ function defaultSessionName(agentId: AgentId): string {
 }
 
 function buildPromptArgs(session: AgentSession, opts: PromptOptions): string[] {
-  const args: string[] = [
-    "--cwd",
-    session.cwd,
-    "--format",
-    "json",
-    "--json-strict",
-  ];
+  const args: string[] = ["--cwd", session.cwd, "--format", "json", "--json-strict"];
 
   const permissionMode = opts.permissionMode ?? "approve-all";
   args.push(`--${permissionMode}`);
@@ -277,7 +279,7 @@ function buildPromptArgs(session: AgentSession, opts: PromptOptions): string[] {
 
 function acpxNotInstalledError(): Error {
   return new Error(
-    "acpx is not installed. Install with `npm i -g acpx@latest` and see docs/adr/ADR-003.md.",
+    "acpx is not installed. Install with `npm i -g acpx@latest` and see docs/adr/archived/ADR-023.md.",
   );
 }
 

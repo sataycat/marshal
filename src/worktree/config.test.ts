@@ -3,6 +3,7 @@ import {
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_PORT,
   DEFAULT_MAX_RETRIES,
+  MissingAgentIdError,
   resolveAgentId,
   resolveDaemonBind,
   resolveMaxRetries,
@@ -19,43 +20,58 @@ afterEach(() => {
   }
 });
 
-describe("resolveAgentId", () => {
-  it("defaults the validator to 'pi' when no config is provided", () => {
-    expect(resolveAgentId("validator", {})).toBe("pi");
+describe("resolveAgentId (ADR-023: no per-role defaults)", () => {
+  it("throws MissingAgentIdError when no agent is configured for the role", () => {
+    expect(() => resolveAgentId("builder", {})).toThrow(MissingAgentIdError);
+    const err = (() => {
+      try {
+        resolveAgentId("builder", {});
+      } catch (e) {
+        return e as Error;
+      }
+    })();
+    expect(err?.message).toContain("agents.builder");
+    expect(err?.message).toContain("acpx.sh/agents.html");
   });
 
-  it("defaults the builder to 'opencode' when no config is provided", () => {
-    expect(resolveAgentId("builder", {})).toBe("opencode");
+  it("throws MissingAgentIdError for validator when only builder is set", () => {
+    expect(() => resolveAgentId("validator", { agents: { builder: "codex" } })).toThrow(
+      MissingAgentIdError,
+    );
   });
 
-  it("returns the configured validator when set to 'opencode'", () => {
-    const config: GlobalConfig = { agents: { validator: "opencode" } };
-    expect(resolveAgentId("validator", config)).toBe("opencode");
+  it("throws MissingAgentIdError for specAuthor without falling back to builder", () => {
+    expect(() =>
+      resolveAgentId("specAuthor", { agents: { builder: "codex", validator: "claude" } }),
+    ).toThrow(MissingAgentIdError);
   });
 
-  it("returns the configured builder when set to 'pi'", () => {
-    const config: GlobalConfig = { agents: { builder: "pi" } };
-    expect(resolveAgentId("builder", config)).toBe("pi");
+  it("returns the configured builder id", () => {
+    const config: GlobalConfig = { agents: { builder: "codex" } };
+    expect(resolveAgentId("builder", config)).toBe("codex");
   });
 
-  it("ignores the other role's field", () => {
-    const config: GlobalConfig = { agents: { builder: "pi" } };
-    expect(resolveAgentId("validator", config)).toBe("pi");
-  });
-
-  it("passes through a custom validator id without validation", () => {
+  it("returns the configured validator id", () => {
     const config: GlobalConfig = { agents: { validator: "claude" } };
     expect(resolveAgentId("validator", config)).toBe("claude");
   });
 
-  it("passes through a custom builder id without validation", () => {
-    const config: GlobalConfig = { agents: { builder: "gemini" } };
-    expect(resolveAgentId("builder", config)).toBe("gemini");
+  it("returns the configured specAuthor id", () => {
+    const config: GlobalConfig = { agents: { specAuthor: "opencode" } };
+    expect(resolveAgentId("specAuthor", config)).toBe("opencode");
   });
 
   it("passes through a custom agent id end-to-end (ADR-019)", () => {
     const config: GlobalConfig = { agents: { builder: "claude-code" } };
     expect(resolveAgentId("builder", config)).toBe("claude-code");
+  });
+
+  it("exposes the role on the error", () => {
+    try {
+      resolveAgentId("validator", {});
+    } catch (e) {
+      expect((e as MissingAgentIdError).role).toBe("validator");
+    }
   });
 });
 

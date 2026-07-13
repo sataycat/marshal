@@ -3,6 +3,7 @@ import type { Agent, AgentEvent, AgentSession, SpawnOptions } from "../agent/typ
 import { AcpxAgentAdapter } from "../agent/acpx-adapter.js";
 import { logger } from "../logger.js";
 import { getTask } from "../tasks/store.js";
+import { resolveAgentId } from "../worktree/config.js";
 import {
   appendSpecMessage,
   listSpecMessages,
@@ -169,7 +170,7 @@ export async function runSpecAuthorTurn(
   const userMessage = appendSpecMessage(slug, "user", userContent, root);
 
   const agent = options.agent ?? new AcpxAgentAdapter();
-  const agentId: AgentId = options.agentId ?? "opencode";
+  const agentId: AgentId = options.agentId ?? resolveAgentId("specAuthor");
 
   const specMessages = listSpecMessages(slug, root);
   const prompt = renderSpecAuthoringPrompt(task, specMessages, {

@@ -10,8 +10,11 @@ import {
   checkSystemPrerequisites,
   formatCheckLine,
   generateConfig,
+  isProbeUsable,
   machineAlreadyConfigured,
   mergeConfig,
+  probeAgentCandidates,
+  renderProbeLine,
   type CommandResult,
   type CommandRunner,
 } from "./preflight.js";
@@ -141,8 +144,10 @@ describe("checkAcpx", () => {
 describe("checkAgent", () => {
   it("passes when the agent responds to --help and the handshake", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help") return ok("opencode 1.0.0\n");
-      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello") return ok("hi\n");
+      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help")
+        return ok("opencode 1.0.0\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello")
+        return ok("hi\n");
       return "notfound";
     });
     const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
@@ -151,7 +156,7 @@ describe("checkAgent", () => {
     expect(result.handshake.status).toBe("ok");
   });
 
-  it("fails install with the curated npm package hint for a known agent", async () => {
+  it("fails install with the curated acpx adapter command hint for a known agent", async () => {
     const run = fakeRunner((bin, args) => {
       if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help")
         return err(1, "no such agent");
@@ -160,8 +165,8 @@ describe("checkAgent", () => {
     const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
     const result = await checkAgent(run, "opencode", "acpx", "builder", tmp);
     expect(result.installed.status).toBe("fail");
-    expect(result.installed.fix).toBe("npm i -g opencode-ai");
-    expect(result.installed.docs).toBe("https://github.com/nicholasgriffintn/opencode");
+    expect(result.installed.fix).toContain("npx -y opencode-ai acp");
+    expect(result.installed.docs).toBe("https://opencode.ai");
   });
 
   it("warns (does not fail) when the handshake fails — likely auth — and surfaces the agent's docs", async () => {
@@ -178,7 +183,7 @@ describe("checkAgent", () => {
     expect(result.handshake.detail).toContain("auth");
     expect(result.handshake.detail).toContain("auth error");
     // ADR-022 Decision 2: docs are the agent's own, never a provider console URL.
-    expect(result.handshake.docs).toBe("https://github.com/nicholasgriffintn/opencode");
+    expect(result.handshake.docs).toBe("https://opencode.ai");
     expect(result.handshake.docs).not.toContain("openai.com");
   });
 
@@ -193,7 +198,7 @@ describe("checkAgent", () => {
     const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
     const result = await checkAgent(run, "custom-agent", "acpx", "builder", tmp);
     expect(result.handshake.status).toBe("warning");
-    expect(result.handshake.docs).toBe("https://github.com/openclaw/acpx");
+    expect(result.handshake.docs).toBe("https://acpx.sh/agents.html");
   });
 
   it("asks the user to install manually for an unknown agent id", async () => {
@@ -209,11 +214,56 @@ describe("checkAgent", () => {
   });
 });
 
+describe("probeAgentCandidates and renderProbeLine (ADR-023 Decision 4)", () => {
+  it("probes every agent in the ACPX built-in registry", async () => {
+    const run = fakeRunner((bin, args) => {
+      if (bin === "acpx" && args[1] === "--help") return ok("1.0.0\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("exec")) return ok("hi\n");
+      return "notfound";
+    });
+    const tmp = mkdtempSync(join(tmpdir(), "marshal-probe-"));
+    const probes = await probeAgentCandidates(run, "acpx", tmp);
+    // Every entry in AGENT_INSTALL_HINTS is probed.
+    const { AGENT_INSTALL_HINTS } = await import("./hints.js");
+    expect(probes).toHaveLength(Object.keys(AGENT_INSTALL_HINTS).length);
+    // All handshakes ok with the stub runner.
+    expect(probes.every((p) => isProbeUsable(p))).toBe(true);
+  });
+
+  it("marks agents with a failing handshake as not usable", async () => {
+    const run = fakeRunner((bin, args) => {
+      // installed check fails → not usable
+      if (bin === "acpx" && args[1] === "--help") return err(1, "no such agent");
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("exec"))
+        return err(1, "auth error");
+      return "notfound";
+    });
+    const tmp = mkdtempSync(join(tmpdir(), "marshal-probe-"));
+    const probes = await probeAgentCandidates(run, "acpx", tmp);
+    // Every probe has a failed install → not usable.
+    expect(probes.every((p) => !isProbeUsable(p))).toBe(true);
+  });
+
+  it("renderProbeLine formats an indexed line with a status icon", () => {
+    const line = renderProbeLine(
+      {
+        agentId: "codex",
+        installed: { label: "codex", status: "ok" },
+        handshake: { label: "codex handshake", status: "ok" },
+      },
+      1,
+    );
+    expect(line).toContain("[1] codex");
+    expect(line).toContain("✓ handshake ok");
+  });
+});
+
 describe("ADR-022 Decision 2 — preflight no longer references provider auth env vars", () => {
   it("checkAgentHandshake drops the legacy pre-ADR-022 docs string", async () => {
     const run = fakeRunner((bin, args) => {
       if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help") return ok("1.0.0\n");
-      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello") return err(1, "boom");
+      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello")
+        return err(1, "boom");
       return "notfound";
     });
     const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
@@ -227,13 +277,28 @@ describe("config generation and merge", () => {
     const config = generateConfig({
       acpxBin: "acpx",
       versionRange: ">=0.12.0 <0.13.0",
-      builder: "opencode",
-      validator: "pi",
+      builder: "codex",
+      validator: "claude",
     });
     expect(config).toEqual({
       acpx: { bin: "acpx", version: ">=0.12.0 <0.13.0" },
-      agents: { builder: "opencode", validator: "pi" },
+      agents: { builder: "codex", validator: "claude" },
       policy: { maxRetries: 2 },
+    });
+  });
+
+  it("generates a config with specAuthor when provided (ADR-023 Decision 4)", () => {
+    const config = generateConfig({
+      acpxBin: "acpx",
+      versionRange: ">=0.12.0 <0.13.0",
+      builder: "codex",
+      validator: "claude",
+      specAuthor: "opencode",
+    });
+    expect(config.agents).toEqual({
+      builder: "codex",
+      validator: "claude",
+      specAuthor: "opencode",
     });
   });
 
@@ -242,12 +307,14 @@ describe("config generation and merge", () => {
     const patch = generateConfig({
       acpxBin: "acpx",
       versionRange: ">=0.12.0 <0.13.0",
-      builder: "opencode",
-      validator: "pi",
+      builder: "codex",
+      validator: "claude",
+      specAuthor: "opencode",
     });
     const merged = mergeConfig(existing, patch);
     expect(merged.agents?.builder).toBe("claude-code");
-    expect(merged.agents?.validator).toBe("pi");
+    expect(merged.agents?.validator).toBe("claude");
+    expect(merged.agents?.specAuthor).toBe("opencode");
     expect(merged.policy?.maxRetries).toBe(5);
     expect(merged.acpx?.bin).toBe("acpx");
   });

@@ -147,6 +147,14 @@ describe("runInit", () => {
       prompts.push(q);
       return /Initialize Marshal in this repo/.test(q);
     };
+    const agentSelect = async (
+      role: string,
+      _candidates: unknown[],
+      defaultId?: string,
+    ): Promise<string> => {
+      if (role === "validator") return "claude";
+      return defaultId ?? "opencode";
+    };
 
     const result = await runInit({
       repoRoot,
@@ -155,6 +163,7 @@ describe("runInit", () => {
       env: {},
       nonInteractive: false,
       prompt,
+      agentSelect,
     });
 
     expect(result.ok).toBe(true);
@@ -163,7 +172,8 @@ describe("runInit", () => {
       await import("node:fs").then((m) => m.readFileSync(configPath, "utf8")),
     );
     expect(written.agents.builder).toBe("claude-code");
-    expect(written.agents.validator).toBe("pi");
+    expect(written.agents.validator).toBe("claude");
+    expect(written.agents.specAuthor).toBe("claude-code");
     expect(written.acpx.version).toBe(">=0.12.0 <0.13.0");
     // ADR-022 Decision 1: single merged prompt names both write targets.
     expect(prompts.some((q) => /~\/.marshal\/config\.json/.test(q))).toBe(true);
@@ -176,6 +186,11 @@ describe("runInit", () => {
   // neither ~/.marshal/config.json nor .marshal/state.db.
   it("writes nothing — no config, no repo state — when the user declines the merged prompt", async () => {
     const prompt = async (): Promise<boolean> => false;
+    const agentSelect = async (
+      _role: string,
+      _candidates: unknown[],
+      defaultId?: string,
+    ): Promise<string> => defaultId ?? "codex";
 
     await runInit({
       repoRoot,
@@ -184,6 +199,7 @@ describe("runInit", () => {
       env: {},
       nonInteractive: false,
       prompt,
+      agentSelect,
     });
 
     expect(existsSync(configPath)).toBe(false);
@@ -386,6 +402,11 @@ describe("ADR-022 Decision 2 — init/doctor output never names provider env var
 
   it("init interactive output contains no OPENAI_API_KEY / ANTHROPIC_API_KEY", async () => {
     const prompt = async (): Promise<boolean> => false;
+    const agentSelect = async (
+      _role: string,
+      _candidates: unknown[],
+      defaultId?: string,
+    ): Promise<string> => defaultId ?? "codex";
     const { out } = await captureStdout(() =>
       runInit({
         repoRoot,
@@ -394,6 +415,7 @@ describe("ADR-022 Decision 2 — init/doctor output never names provider env var
         env: {},
         nonInteractive: false,
         prompt,
+        agentSelect,
       }),
     );
     expect(out).not.toMatch(/OPENAI_API_KEY/);

@@ -4,6 +4,20 @@ import { resolve } from "node:path";
 import { logger } from "../logger.js";
 import type { AgentId } from "../agent/types.js";
 
+export type AgentRole = "builder" | "validator" | "specAuthor";
+
+export class MissingAgentIdError extends Error {
+  readonly role: AgentRole;
+  constructor(role: AgentRole) {
+    const key = `agents.${role}`;
+    super(
+      `No agent configured for role "${role}". Set ~/.marshal/config.json →\n${key} to any acpx agent (see https://acpx.sh/agents.html), e.g.:\n  { "agents": { "builder": "codex", "validator": "claude", "specAuthor": "opencode" } }`,
+    );
+    this.name = "MissingAgentIdError";
+    this.role = role;
+  }
+}
+
 export interface MarshalJson {
   worktree?: {
     setup?: string;
@@ -60,27 +74,22 @@ export function loadGlobalConfig(): GlobalConfig {
   }
 }
 
-const AGENT_ID_DEFAULTS: Record<AgentRole, AgentId> = {
-  builder: "opencode",
-  validator: "pi",
-  specAuthor: "opencode",
-};
-
-export type AgentRole = "builder" | "validator" | "specAuthor";
-
 // Any non-empty string is a valid agent id: it is passed through to ACPX
 // as-is, and ACPX (or the agent's own auth handshake) is the source of
-// truth for whether it's actually usable. See ADR-019.
+// truth for whether it's actually usable. See ADR-019 / ADR-023.
+//
+// Per ADR-023 Decision 3, Marshal ships NO per-role defaults. Every role
+// must be explicitly configured in ~/.marshal/config.json; omitting a role
+// throws MissingAgentIdError at first real use (not at boot), so the daemon
+// starts fine without a config and only fails when a task actually tries to
+// build/validate/author a spec.
 export function resolveAgentId(
   role: AgentRole,
   config: GlobalConfig = loadGlobalConfig(),
 ): AgentId {
   const raw = config.agents?.[role];
-  if (raw === undefined) {
-    if (role === "specAuthor") {
-      return resolveAgentId("builder", config);
-    }
-    return AGENT_ID_DEFAULTS[role];
+  if (!raw) {
+    throw new MissingAgentIdError(role);
   }
   return raw;
 }

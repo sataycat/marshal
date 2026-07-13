@@ -50,10 +50,9 @@ Process model — explicit decision: one daemon process per repo, not one global
 ### 3.3 Agent layer
 
 - Substrate: ACP (Agent Client Protocol, Zed's JSON-RPC over stdio standard). Durable, multi-vendor, 25+ agents, registry launched Jan 2026, remote transports on the roadmap.
-- First client: ACPX (openclaw/acpx). Gives persistent + named sessions, prompt queueing, cancel, cwd sandboxing, permission modes, and structured typed output (thinking / tool calls / diffs). Alpha, so wrapped behind our interface (see 4).
-- Starting agents: opencode as builder, pi as validator. Both have clean programmatic surfaces and ACPX adapters, and using two different lineages gives the decorrelated builder/validator split for free.
-- Later agents (near-free via ACP): claude, codex, gemini, kimi. Note Claude Code and Codex are adapter-wrapped rather than native ACP, so expect occasional adapter lag;
-  that is a reason to prove the loop on opencode/pi first.
+- First client: ACPX (openclaw/acpx). Gives persistent + named sessions, prompt queueing, cancel, cwd sandboxing, permission modes, and structured typed output (thinking / tool calls / diffs). ACPX publishes a stability commitment for its CLI grammar, flag names, output shapes, and the no-envelope NDJSON stream (`acpx.sh/VISION.html` Principle 4); Marshal pins a semver range and treats ACPX as a versioned infrastructure dependency.
+- Starting agents: chosen by the user at `marshal init` time. Marshal ships no preferred agent; any agent in the ACPX built-in registry (`acpx.sh/agents.html`) or any custom `--agent <command>` works.
+- Note some agents are adapter-wrapped rather than native ACP, so expect occasional adapter lag; that is a property of the upstream adapters, not a reason for Marshal to defer supporting them.
 
 ### 3.4 Data and source of truth
 
@@ -68,11 +67,10 @@ The split maps to the board: authoring is collaborative and mutable (SQLite); th
 
 ## 4. Anti-corruption layer around ACPX
 
-ACPX is alpha and its CLI/runtime interfaces are expected to change. Do not couple the core to it.
+ACPX publishes a stability commitment for its CLI grammar, flag names, output shapes, and the no-envelope NDJSON stream (`acpx.sh/VISION.html` Principle 4). Marshal pins a semver range and treats ACPX as a versioned infrastructure dependency, not as experimental scaffolding.
 
 - Define an internal Agent interface: spawn(cwd, agentId, opts?), prompt(session, text, opts?) returns AsyncIterable<AgentEvent>, cancel(session), close(session).
 - ACPX sits behind one adapter implementing that interface.
-- If ACPX churns, fix the adapter. If ACPX dies, implement the same interface directly against ACP JSON-RPC (ACPX becomes reference, not dependency).
 - Pin the ACPX version. Review the npm postinstall hook (it fetches platform binaries) before trusting it on your box.
 
 The risk is deliberately contained to one replaceable component sitting on top of a stable protocol. That, not any vendor's backing, is the safety story.
@@ -88,8 +86,8 @@ Backlog / Spec -> Ready -> Building -> Validating -> Review -> Done
 
 - Backlog / Spec — human drafts the task in a grill-me chat UI with an agent (see 7). Human owns the final acceptance criteria. Working spec lives in SQLite during this phase.
 - Ready — human marks the spec frozen. Daemon renders it to a committed markdown file (see 3.4). Signals the orchestrator to pick it up.
-- Building — orchestrator spins a worktree, runs the builder agent (opencode) headless until the fast in-loop gates pass or a step budget is hit. The agent self-plans via its own todo tooling; there is no separate Plan board state — planning is internal to the build run, not a HITL checkpoint. Boundary test files (see Section 6) are frozen at the Ready transition alongside the spec (see Section 7); any diff produced during Building that modifies a frozen boundary test file is flagged and routed to human Review rather than allowed to auto-advance to Validating — editing the test instead of the code must not be a path to a passing gate.
-- Validating — the boundary gate runs in a separate worktree with a different model (pi). Tests live in the repo; the builder can see them, but they are executed by the decorrelated validator.
+- Building — orchestrator spins a worktree, runs the builder agent headless until the fast in-loop gates pass or a step budget is hit. The agent self-plans via its own todo tooling; there is no separate Plan board state — planning is internal to the build run, not a HITL checkpoint. Boundary test files (see Section 6) are frozen at the Ready transition alongside the spec (see Section 7); any diff produced during Building that modifies a frozen boundary test file is flagged and routed to human Review rather than allowed to auto-advance to Validating — editing the test instead of the code must not be a path to a passing gate.
+- Validating — the boundary gate runs in a separate worktree with a different agent (the validator). Tests live in the repo; the builder can see them, but they are executed by the decorrelated validator.
 - Review — human reviews the diff, comments, merges.
 - Done — merged.
 
@@ -147,19 +145,19 @@ Boundary test files: the set of files constituting the boundary test suite. Thes
 
 ## 9. Dependencies and risk posture
 
-| Component     | Role              | Risk                        | Mitigation                           |
-| ------------- | ----------------- | --------------------------- | ------------------------------------ |
-| ACP           | agent protocol    | low (durable, multi-vendor) | target directly as fallback          |
-| ACPX          | ACP client        | high (alpha, changing)      | anti-corruption adapter, pin version |
-| opencode      | builder agent     | low                         | swappable via ACP                    |
-| pi            | validator agent   | low-med (smaller ecosystem) | swappable via ACP                    |
-| wrapped-agent adapters | agent compat shim | med (upstream lag per agent) | prove loop on native-ACP agents first (opencode/pi); treat wrapped agents as lower-trust until adapter maturity demonstrated (aligns with M3 sequencing) |
-| git worktrees | isolation         | low                         | standard                             |
-| SQLite        | state             | low                         | standard                             |
+| Component              | Role              | Risk                         | Mitigation                                                                                                                                 |
+| ---------------------- | ----------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| ACP                    | agent protocol    | low (durable, multi-vendor)  | target directly as fallback                                                                                                                |
+| ACPX                   | ACP client        | low (stability-committed)    | anti-corruption adapter, pin version                                                                                                       |
+| builder agent          | builder           | low                          | swappable via ACP; chosen at init                                                                                                          |
+| validator agent        | validator         | low                          | swappable via ACP; chosen at init                                                                                                          |
+| wrapped-agent adapters | agent compat shim | med (upstream lag per agent) | prove loop on native-ACP agents first; treat wrapped agents as lower-trust until adapter maturity demonstrated (aligns with M3 sequencing) |
+| git worktrees          | isolation         | low                          | standard                                                                                                                                   |
+| SQLite                 | state             | low                          | standard                                                                                                                                   |
 
 ## 10. Build sequencing
 
-- M0 — vertical slice / go-no-go. Daemon spawns opencode via the ACPX adapter on a Ready task, runs headless in a worktree to completion, hands the diff to pi as validator, and routes pass/fail through the state machine. No UI yet. This proves or kills the whole design.
+- M0 — vertical slice / go-no-go. Daemon spawns the configured builder via the ACPX adapter on a Ready task, runs headless in a worktree to completion, hands the diff to the configured validator, and routes pass/fail through the state machine. No UI yet. This proves or kills the whole design.
 - M1 — control plane. Kanban board (web), task state in SQLite, worktree lifecycle, PR creation and merge.
 - M2 — the gate, first-class. Two-level verification, decorrelated validator, retry/escalation routing. This is the differentiator; invest here.
 - M3 — more agents. claude, codex, gemini, kimi via ACP. Mostly config, not code.
@@ -178,4 +176,4 @@ Boundary test files: the set of files constituting the boundary test suite. Thes
 - no-mistakes (kunchenguid) — local git proxy that runs an AI validation pipeline in a disposable worktree and forwards a clean PR only after checks pass. The gate model to steal.
 - ACPX / OpenClaw (openclaw org) — headless ACP client and agent gateway. Independent open source, not OpenAI-backed.
 - ACP (Zed) — the agent-editor protocol standard; the durable substrate.
-- opencode, pi — the first two executors.
+- opencode, pi — early executors used to prove the loop; any ACPX-supported agent is now a config choice.

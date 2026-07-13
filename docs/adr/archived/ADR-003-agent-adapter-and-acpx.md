@@ -2,6 +2,8 @@
 
 ## Status
 
+Superseded in part by ADR-019 (open `AgentId`) and ADR-023 (ACPX-as-sole-substrate, no defaults). Decisions 2, 6, and 7 are retracted by ADR-023; Decisions 1, 3, 4, 5 stand.
+
 Accepted — 2026-07-07
 
 ## Context

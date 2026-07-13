@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { initGlobalConfig, initRepoState, getRepoStateDir } from "../daemon/config.js";
 import { openDb } from "../db/index.js";
-import { resolveAgentId, type GlobalConfig } from "../worktree/config.js";
+import { type AgentRole, type GlobalConfig } from "../worktree/config.js";
 import {
   ACPX_ACCEPT_RANGE,
   ACPX_INSTALL_PIN,
@@ -15,11 +15,15 @@ import {
   formatCheckLine,
   generateConfig,
   getGlobalConfigPath,
+  isProbeUsable,
   machineAlreadyConfigured,
   mergeConfig,
+  probeAgentCandidates,
   readGlobalConfig,
+  renderProbeLine,
   writeGlobalConfig,
   type AgentCheckResult,
+  type AgentProbe,
   type CheckResult,
   type CommandRunner,
   type EnvView,
@@ -27,12 +31,48 @@ import {
 
 export type YesNoPrompt = (question: string) => Promise<boolean>;
 
+export type AgentSelectPrompt = (
+  role: AgentRole,
+  candidates: AgentProbe[],
+  defaultId?: string,
+) => Promise<string>;
+
 function defaultYesNo(question: string): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(`${question} [y/N] `, (answer) => {
       rl.close();
       resolve(/^[yY]/.test(answer.trim()));
+    });
+  });
+}
+
+function defaultAgentSelect(
+  role: AgentRole,
+  candidates: AgentProbe[],
+  defaultId?: string,
+): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    const promptLabel = `Agent for ${role}${defaultId ? ` [default: ${defaultId}]` : ""}: `;
+    rl.question(promptLabel, (answer) => {
+      rl.close();
+      const trimmed = answer.trim();
+      if (trimmed.length === 0 && defaultId) {
+        resolve(defaultId);
+        return;
+      }
+      const num = Number(trimmed);
+      if (Number.isInteger(num) && num >= 1 && num <= candidates.length) {
+        resolve(candidates[num - 1].agentId);
+        return;
+      }
+      const match = candidates.find((c) => c.agentId === trimmed);
+      if (match) {
+        resolve(match.agentId);
+        return;
+      }
+      resolve(trimmed);
     });
   });
 }
@@ -48,6 +88,7 @@ export interface InitOptions {
   configPath?: string;
   runCmd?: CommandRunner;
   prompt?: YesNoPrompt;
+  agentSelect?: AgentSelectPrompt;
   env?: EnvView;
   acpxBin?: string;
   versionRange?: string;
@@ -135,22 +176,72 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
     return { ok: false, skippedMachine: false };
   }
 
-  // Phase 3 — agent discovery
+  // Phase 3 — agent discovery / chooser (ADR-023 Decision 4)
+  //
+  // Marshal ships no per-role defaults. If the existing config already has
+  // both builder and validator, init probes those two agents unchanged (the
+  // existing-config path). Otherwise init runs an interactive chooser that
+  // probes the full ACPX built-in registry and prompts for each missing role.
+  // In --non-interactive mode the first handshake-OK candidate is used.
   const existing = readGlobalConfig(configPath) ?? {};
-  const builderId = resolveAgentId("builder", existing);
-  const validatorId = resolveAgentId("validator", existing);
+  const configuredBuilder = existing.agents?.builder;
+  const configuredValidator = existing.agents?.validator;
+  const configuredSpecAuthor = existing.agents?.specAuthor;
   const tmp = mkdtempSync(join(tmpdir(), "marshal-preflight-"));
-  const agentResults: AgentCheckResult[] = [];
-  for (const { role, id } of [
-    { role: "builder" as const, id: builderId },
-    { role: "validator" as const, id: validatorId },
-  ]) {
-    const result = await checkAgent(runCmd, id, acpxBin, role, tmp);
-    agentResults.push(result);
-    print(formatCheckLine(result.installed));
-    print(formatCheckLine(result.handshake));
-    if (!nonInteractive) {
-      await maybeInstallAgent(result, runCmd, prompt);
+
+  let builderId: string;
+  let validatorId: string;
+  let specAuthorId: string | undefined;
+  let agentChecksOk = true;
+
+  if (configuredBuilder && configuredValidator) {
+    // Existing-config path: probe the configured agents (unchanged behavior).
+    builderId = configuredBuilder;
+    validatorId = configuredValidator;
+    specAuthorId = configuredSpecAuthor;
+    const agentResults: AgentCheckResult[] = [];
+    for (const { role, id } of [
+      { role: "builder" as const, id: builderId },
+      { role: "validator" as const, id: validatorId },
+    ]) {
+      const result = await checkAgent(runCmd, id, acpxBin, role, tmp);
+      agentResults.push(result);
+      print(formatCheckLine(result.installed));
+      print(formatCheckLine(result.handshake));
+      if (!nonInteractive) {
+        await maybeInstallAgent(result, runCmd, prompt);
+      }
+    }
+    agentChecksOk = agentResults.every((a) => a.installed.status !== "fail");
+  } else {
+    // Chooser: at least one of builder/validator is missing. Probe the ACPX
+    // built-in registry and let the user (or the non-interactive heuristic)
+    // pick an agent for each missing role.
+    const probes = await probeAgentCandidates(runCmd, acpxBin, tmp);
+    for (let i = 0; i < probes.length; i++) {
+      print(renderProbeLine(probes[i], i + 1));
+    }
+    const okProbes = probes.filter(isProbeUsable);
+    if (okProbes.length === 0) {
+      print(
+        "✗ no agents responded to the ACP handshake probe. Install at least one agent (see https://acpx.sh/agents.html) and re-run `marshal init`.",
+      );
+      return { ok: false, skippedMachine: false };
+    }
+
+    if (nonInteractive) {
+      const first = okProbes[0].agentId;
+      builderId = configuredBuilder ?? first;
+      validatorId = configuredValidator ?? first;
+      specAuthorId = configuredSpecAuthor ?? builderId;
+      print(
+        `— non-interactive mode: chose \`${first}\` for missing role(s) based on the first successful ACP handshake probe; override via ~/.marshal/config.json`,
+      );
+    } else {
+      const select = options.agentSelect ?? defaultAgentSelect;
+      builderId = configuredBuilder ?? (await select("builder", probes));
+      validatorId = configuredValidator ?? (await select("validator", probes));
+      specAuthorId = configuredSpecAuthor ?? (await select("specAuthor", probes, builderId));
     }
   }
 
@@ -175,6 +266,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
     versionRange,
     builder: builderId,
     validator: validatorId,
+    specAuthor: specAuthorId,
   });
   const merged =
     existing && Object.keys(existing).length > 0 ? mergeConfig(existing, generated) : generated;
@@ -214,7 +306,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   const checksOk =
     phase1.every((r) => r.status !== "fail") &&
     phase2.every((r) => r.status !== "fail") &&
-    agentResults.every((a) => a.installed.status !== "fail");
+    agentChecksOk;
 
   if (checksOk) printReady();
   return { ok: checksOk, skippedMachine: false };
@@ -264,12 +356,13 @@ async function maybeInstallPnpm(
   }
 }
 
-async function maybeInstallAcpx(
-  prompt: YesNoPrompt,
-  versionRange: string,
-): Promise<void> {
+async function maybeInstallAcpx(prompt: YesNoPrompt, versionRange: string): Promise<void> {
   const cmd = `npm i -g acpx@${versionRange}`;
-  if (await prompt(`acpx not found. Run this command in your terminal:\n\n  ${cmd}\n\nThen press Enter to continue`)) {
+  if (
+    await prompt(
+      `acpx not found. Run this command in your terminal:\n\n  ${cmd}\n\nThen press Enter to continue`,
+    )
+  ) {
     print(`✓ ${cmd}`);
   }
 }
@@ -313,8 +406,8 @@ export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolea
   const acpxBin = options.acpxBin ?? "acpx";
 
   const existing = readGlobalConfig(configPath) ?? {};
-  const builderId = resolveAgentId("builder", existing);
-  const validatorId = resolveAgentId("validator", existing);
+  const builderId = existing.agents?.builder;
+  const validatorId = existing.agents?.validator;
 
   let ok = true;
 
@@ -331,6 +424,18 @@ export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolea
     { role: "builder" as const, id: builderId },
     { role: "validator" as const, id: validatorId },
   ]) {
+    if (!id) {
+      print(
+        formatCheckLine({
+          label: `agents.${role}`,
+          status: "fail",
+          detail: `not configured in ${configPath}`,
+          fix: `set agents.${role} in ~/.marshal/config.json (see https://acpx.sh/agents.html)`,
+        }),
+      );
+      ok = false;
+      continue;
+    }
     // ADR-022 Decision 2: handshake probe is the authoritative auth signal;
     // no provider env presence check is emitted here.
     const result = await checkAgent(runCmd, id, acpxBin, role, tmp);

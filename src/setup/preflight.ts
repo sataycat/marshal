@@ -216,8 +216,10 @@ async function checkAgentInstalled(
     return fail(
       agentId,
       `agent not available via acpx: ${(r.stderr || r.stdout).trim()}`,
-      hint ? `npm i -g ${hint.pkg}` : `install the '${agentId}' agent per its docs`,
-      hint?.docs,
+      hint
+        ? `ensure \`${hint.acpxCommand}\` runs (acpx adapter command)`
+        : `install the '${agentId}' agent per its docs`,
+      hint?.docs ?? ACPX_AUTH_DOCS,
     );
   }
   return ok(agentId, r.stdout.trim());
@@ -260,6 +262,44 @@ async function checkAgentHandshake(
 }
 
 // -----------------------------------------------------------------------------
+// Phase 3 chooser: probe the ACPX built-in registry (ADR-023 Decision 4)
+// -----------------------------------------------------------------------------
+
+export interface AgentProbe {
+  agentId: string;
+  installed: CheckResult;
+  handshake: CheckResult;
+}
+
+export async function probeAgentCandidates(
+  runCmd: CommandRunner,
+  acpxBin: string,
+  tmpDir: string,
+): Promise<AgentProbe[]> {
+  const ids = Object.keys(AGENT_INSTALL_HINTS);
+  const probes: AgentProbe[] = [];
+  for (const agentId of ids) {
+    const installed = await checkAgentInstalled(runCmd, agentId, acpxBin);
+    const handshake = await checkAgentHandshake(runCmd, agentId, acpxBin, tmpDir);
+    probes.push({ agentId, installed, handshake });
+  }
+  return probes;
+}
+
+export function renderProbeLine(probe: AgentProbe, index: number): string {
+  const status = probe.handshake.status;
+  const icon = status === "ok" ? "✓" : status === "warning" ? "⚠" : "✗";
+  return `  [${index}] ${probe.agentId.padEnd(12)} ${icon} handshake ${status}`;
+}
+
+export function isProbeUsable(probe: AgentProbe): boolean {
+  return (
+    probe.installed.status !== "fail" &&
+    (probe.handshake.status === "ok" || probe.handshake.status === "warning")
+  );
+}
+
+// -----------------------------------------------------------------------------
 // Env view (read-only) — kept for opt-in / consent flags only, NOT for auth.
 // Per ADR-022 Decision 2, Marshal no longer inspects env vars for provider auth.
 // -----------------------------------------------------------------------------
@@ -296,10 +336,15 @@ export function generateConfig(detected: {
   versionRange: string;
   builder: string;
   validator: string;
+  specAuthor?: string;
 }): GlobalConfig {
   return {
     acpx: { bin: detected.acpxBin || "acpx", version: detected.versionRange },
-    agents: { builder: detected.builder, validator: detected.validator },
+    agents: {
+      builder: detected.builder,
+      validator: detected.validator,
+      ...(detected.specAuthor ? { specAuthor: detected.specAuthor } : {}),
+    },
     policy: { maxRetries: DEFAULT_MAX_RETRIES },
   };
 }

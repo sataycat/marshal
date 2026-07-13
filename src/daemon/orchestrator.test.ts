@@ -3,7 +3,14 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { Agent, AgentEvent, AgentId, AgentSession, PromptOptions, SpawnOptions } from "../agent/types.js";
+import type {
+  Agent,
+  AgentEvent,
+  AgentId,
+  AgentSession,
+  PromptOptions,
+  SpawnOptions,
+} from "../agent/types.js";
 import { WorktreeManager } from "../worktree/manager.js";
 import { createTask, getTask, transitionTask } from "../tasks/store.js";
 import { freezeTask } from "../tasks/freeze.js";
@@ -40,6 +47,15 @@ function initGitRepo(root: string): void {
 
 function initMarshalState(root: string): void {
   mkdirSync(join(root, ".marshal"), { recursive: true });
+}
+
+function initAgentConfig(root: string): void {
+  const cfgPath = join(root, ".marshal", "config.json");
+  writeFileSync(
+    cfgPath,
+    JSON.stringify({ agents: { builder: "opencode", validator: "pi", specAuthor: "opencode" } }),
+  );
+  process.env.MARSHAL_GLOBAL_CONFIG = cfgPath;
 }
 
 function gitHead(worktreePath: string): string {
@@ -151,6 +167,7 @@ describe("runOnce", () => {
     worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
+    initAgentConfig(repoRoot);
     manager = new WorktreeManager(repoRoot, { worktreeRoot });
   });
 
@@ -326,10 +343,7 @@ describe("runOnce", () => {
   });
 
   it("skips without claiming when the frozen spec file is missing", async () => {
-    createTask(
-      { slug: "not-frozen", title: "Not Frozen", specMarkdown: "## Goal\nx\n" },
-      repoRoot,
-    );
+    createTask({ slug: "not-frozen", title: "Not Frozen", specMarkdown: "## Goal\nx\n" }, repoRoot);
     transitionTask("not-frozen", "ready", repoRoot);
 
     const agent = new FakeAgent();
@@ -356,6 +370,31 @@ describe("runOnce", () => {
     expect(getTask("older-task", repoRoot).status).toBe("validating");
     expect(getTask("newer-task", repoRoot).status).toBe("ready");
   });
+
+  // ADR-023 Decision 2 regression test: the builder path must resolve its
+  // agent id via resolveAgentId("builder"), not a hard-coded constant.
+  it("uses resolveAgentId('builder') for the builder agent, not a hard-coded constant", async () => {
+    writeFileSync(
+      process.env.MARSHAL_GLOBAL_CONFIG!,
+      JSON.stringify({ agents: { builder: "codex", validator: "pi", specAuthor: "opencode" } }),
+    );
+    const agent = new FakeAgent({
+      events: [{ type: "done", stopReason: "end_turn" }],
+      onSpawn: (session) => {
+        mkdirSync(join(session.cwd, "src"), { recursive: true });
+        writeFileSync(join(session.cwd, "src", "feature.ts"), "export const x = 1;\n");
+      },
+    });
+    createReadyFrozenTask("builder-resolve", "## Goal\nResolve builder.\n");
+
+    const result = await runOnce({ root: repoRoot, agent, manager });
+
+    expect(result?.status).toBe("built");
+    expect(agent.spawnCalls[0].agentId).toBe("codex");
+
+    const log = new RunLog(repoRoot);
+    expect(log.getRun(result!.runId)?.agentId).toBe("codex");
+  });
 });
 
 describe("buildTask", () => {
@@ -368,6 +407,7 @@ describe("buildTask", () => {
     worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
+    initAgentConfig(repoRoot);
     manager = new WorktreeManager(repoRoot, { worktreeRoot });
   });
 
@@ -461,7 +501,9 @@ describe("renderValidatorPrompt", () => {
     const task = makeTask();
     const prompt = renderValidatorPrompt(task, "+added line\n-old line\n", "main", 2);
 
-    expect(prompt).toContain('validating the implementation of task "Validator Task" (slug: v-task)');
+    expect(prompt).toContain(
+      'validating the implementation of task "Validator Task" (slug: v-task)',
+    );
     expect(prompt).toContain("## Spec");
     expect(prompt).toContain("Be correct.");
     expect(prompt).toContain("## Diff");
@@ -492,10 +534,7 @@ describe("detectTrunkRef", () => {
     initGitRepo(repoRoot);
     const worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-trunk-wt-"));
     const manager = new WorktreeManager(repoRoot, { worktreeRoot });
-    const task = createTask(
-      { slug: "trunk-task", title: "T", specMarkdown: "x" },
-      repoRoot,
-    );
+    const task = createTask({ slug: "trunk-task", title: "T", specMarkdown: "x" }, repoRoot);
     transitionTask("trunk-task", "ready", repoRoot);
     freezeTask("trunk-task", repoRoot, manager);
     transitionTask("trunk-task", "building", repoRoot);
@@ -535,6 +574,7 @@ describe("validateTask", () => {
     worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
+    initAgentConfig(repoRoot);
     manager = new WorktreeManager(repoRoot, { worktreeRoot });
   });
 
@@ -629,7 +669,10 @@ describe("validateTask", () => {
     log.finishRun(runId, "done", { commitSha: buildCommit });
 
     const agent = new FakeAgent({
-      events: [{ type: "text", text: "MARSHAL_GATE: pass\n" }, { type: "done", stopReason: "end_turn" }],
+      events: [
+        { type: "text", text: "MARSHAL_GATE: pass\n" },
+        { type: "done", stopReason: "end_turn" },
+      ],
     });
 
     const result = await validateTask("gate-custom", {
@@ -788,10 +831,7 @@ describe("validateTask", () => {
   });
 
   it("skips when there is no successful builder run to validate", async () => {
-    createTask(
-      { slug: "no-build", title: "No build", specMarkdown: "## Goal\nx\n" },
-      repoRoot,
-    );
+    createTask({ slug: "no-build", title: "No build", specMarkdown: "## Goal\nx\n" }, repoRoot);
     transitionTask("no-build", "ready", repoRoot);
     freezeTask("no-build", repoRoot, manager);
     transitionTask("no-build", "building", repoRoot);
@@ -821,6 +861,7 @@ describe("runOnce (validator dispatch)", () => {
     worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
+    initAgentConfig(repoRoot);
     manager = new WorktreeManager(repoRoot, { worktreeRoot });
   });
 
@@ -828,7 +869,12 @@ describe("runOnce (validator dispatch)", () => {
     delete process.env.MARSHAL_GLOBAL_CONFIG;
   });
 
-  function seedValidatingTask(slug: string, specMarkdown: string, repoRoot: string, manager: WorktreeManager) {
+  function seedValidatingTask(
+    slug: string,
+    specMarkdown: string,
+    repoRoot: string,
+    manager: WorktreeManager,
+  ) {
     const task = createTask({ slug, title: `Task ${slug}`, specMarkdown }, repoRoot);
     transitionTask(slug, "ready", repoRoot);
     freezeTask(slug, repoRoot, manager);
@@ -950,23 +996,41 @@ describe("runOnce (validator dispatch)", () => {
     seedValidatingTask("v-retry-cap", "## Goal\nv.\n", repoRoot, manager);
 
     const failAgent = new FakeAgent({
-      events: [{ type: "text", text: "MARSHAL_GATE: fail attempt\n" }, { type: "done", stopReason: "end_turn" }],
+      events: [
+        { type: "text", text: "MARSHAL_GATE: fail attempt\n" },
+        { type: "done", stopReason: "end_turn" },
+      ],
     });
 
-    const first = await runOnce({ root: repoRoot, agent: failAgent, manager, validatorAgentId: "pi" });
+    const first = await runOnce({
+      root: repoRoot,
+      agent: failAgent,
+      manager,
+      validatorAgentId: "pi",
+    });
     expect(first?.status).toBe("validation_failed");
     expect(getTask("v-retry-cap", repoRoot).status).toBe("building");
     expect(getTask("v-retry-cap", repoRoot).retry_count).toBe(1);
     expect(getTask("v-retry-cap", repoRoot).last_failure).toBe("attempt");
 
     transitionTask("v-retry-cap", "validating", repoRoot);
-    const second = await runOnce({ root: repoRoot, agent: failAgent, manager, validatorAgentId: "pi" });
+    const second = await runOnce({
+      root: repoRoot,
+      agent: failAgent,
+      manager,
+      validatorAgentId: "pi",
+    });
     expect(second?.status).toBe("validation_failed");
     expect(getTask("v-retry-cap", repoRoot).status).toBe("building");
     expect(getTask("v-retry-cap", repoRoot).retry_count).toBe(2);
 
     transitionTask("v-retry-cap", "validating", repoRoot);
-    const third = await runOnce({ root: repoRoot, agent: failAgent, manager, validatorAgentId: "pi" });
+    const third = await runOnce({
+      root: repoRoot,
+      agent: failAgent,
+      manager,
+      validatorAgentId: "pi",
+    });
     expect(third?.status).toBe("validation_failed");
     expect(getTask("v-retry-cap", repoRoot).status).toBe("review");
     expect(getTask("v-retry-cap", repoRoot).retry_count).toBe(2);
@@ -977,7 +1041,10 @@ describe("runOnce (validator dispatch)", () => {
     seedValidatingTask("v-pass-reset", "## Goal\nv.\n", repoRoot, manager);
 
     const failAgent = new FakeAgent({
-      events: [{ type: "text", text: "MARSHAL_GATE: fail once\n" }, { type: "done", stopReason: "end_turn" }],
+      events: [
+        { type: "text", text: "MARSHAL_GATE: fail once\n" },
+        { type: "done", stopReason: "end_turn" },
+      ],
     });
 
     await runOnce({ root: repoRoot, agent: failAgent, manager, validatorAgentId: "pi" });
@@ -985,9 +1052,17 @@ describe("runOnce (validator dispatch)", () => {
 
     transitionTask("v-pass-reset", "validating", repoRoot);
     const passAgent = new FakeAgent({
-      events: [{ type: "text", text: "MARSHAL_GATE: pass\n" }, { type: "done", stopReason: "end_turn" }],
+      events: [
+        { type: "text", text: "MARSHAL_GATE: pass\n" },
+        { type: "done", stopReason: "end_turn" },
+      ],
     });
-    const result = await runOnce({ root: repoRoot, agent: passAgent, manager, validatorAgentId: "pi" });
+    const result = await runOnce({
+      root: repoRoot,
+      agent: passAgent,
+      manager,
+      validatorAgentId: "pi",
+    });
 
     expect(result?.status).toBe("validated");
     expect(getTask("v-pass-reset", repoRoot).status).toBe("review");
@@ -999,7 +1074,10 @@ describe("runOnce (validator dispatch)", () => {
     seedValidatingTask("v-zero-retries", "## Goal\nv.\n", repoRoot, manager);
 
     const failAgent = new FakeAgent({
-      events: [{ type: "text", text: "MARSHAL_GATE: fail no retries\n" }, { type: "done", stopReason: "end_turn" }],
+      events: [
+        { type: "text", text: "MARSHAL_GATE: fail no retries\n" },
+        { type: "done", stopReason: "end_turn" },
+      ],
     });
 
     const result = await runOnce({
@@ -1027,6 +1105,7 @@ describe("runOnce event bus", () => {
     worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-bus-wt-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
+    initAgentConfig(repoRoot);
     manager = new WorktreeManager(repoRoot, { worktreeRoot });
   });
 

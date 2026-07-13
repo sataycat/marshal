@@ -219,6 +219,11 @@ describe("spec chat HTTP contract", () => {
     const worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-spec-api-wt-"));
     initGitRepo(repoRoot);
     mkdirSync(join(repoRoot, ".marshal"), { recursive: true });
+    // ADR-023: specAuthor must be configured — resolveAgentId throws on missing.
+    const cfgDir = mkdtempSync(join(tmpdir(), "marshal-spec-api-cfg-"));
+    const cfgPath = join(cfgDir, "config.json");
+    process.env.MARSHAL_GLOBAL_CONFIG = cfgPath;
+    writeFileSync(cfgPath, JSON.stringify({ agents: { specAuthor: "opencode" } }));
     bus = new EventBus();
     agent = new FakeSpecAgent([
       { type: "text", text: "Here are gaps...\n\n" },

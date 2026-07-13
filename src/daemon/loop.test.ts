@@ -3,7 +3,14 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { Agent, AgentEvent, AgentId, AgentSession, PromptOptions, SpawnOptions } from "../agent/types.js";
+import type {
+  Agent,
+  AgentEvent,
+  AgentId,
+  AgentSession,
+  PromptOptions,
+  SpawnOptions,
+} from "../agent/types.js";
 import { WorktreeManager } from "../worktree/manager.js";
 import { createTask, getTask, transitionTask } from "../tasks/store.js";
 import { freezeTask } from "../tasks/freeze.js";
@@ -23,6 +30,15 @@ function initMarshalState(root: string): void {
   mkdirSync(join(root, ".marshal"), { recursive: true });
 }
 
+function initAgentConfig(root: string): void {
+  const cfgPath = join(root, ".marshal", "config.json");
+  writeFileSync(
+    cfgPath,
+    JSON.stringify({ agents: { builder: "codex", validator: "claude", specAuthor: "opencode" } }),
+  );
+  process.env.MARSHAL_GLOBAL_CONFIG = cfgPath;
+}
+
 class FakeAgent implements Agent {
   spawnCalls: { cwd: string; agentId: AgentId; opts: SpawnOptions }[] = [];
   closeCalls: AgentSession[] = [];
@@ -30,11 +46,13 @@ class FakeAgent implements Agent {
   private onSpawn?: (session: AgentSession) => void;
   private spawnThrows?: Error;
 
-  constructor(config: {
-    events?: AgentEvent[];
-    onSpawn?: (session: AgentSession) => void;
-    spawnThrows?: Error;
-  } = {}) {
+  constructor(
+    config: {
+      events?: AgentEvent[];
+      onSpawn?: (session: AgentSession) => void;
+      spawnThrows?: Error;
+    } = {},
+  ) {
     this.events = config.events ?? [{ type: "done", stopReason: "end_turn" }];
     this.onSpawn = config.onSpawn;
     this.spawnThrows = config.spawnThrows;
@@ -131,6 +149,7 @@ describe("startDaemon", () => {
     worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-daemon-wt-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
+    initAgentConfig(repoRoot);
     manager = new WorktreeManager(repoRoot, { worktreeRoot });
   });
 
@@ -197,8 +216,9 @@ describe("startDaemon", () => {
 
     expect(getTask("daemon-e2e", repoRoot).status).toBe("review");
     expect(agent.spawnCalls.length).toBeGreaterThanOrEqual(2);
-    expect(agent.spawnCalls[0].agentId).toBe("opencode");
-    expect(agent.spawnCalls[1].agentId).toBe("pi");
+    // ADR-023 Decision 2: builder/validator ids come from the config, not constants.
+    expect(agent.spawnCalls[0].agentId).toBe("codex");
+    expect(agent.spawnCalls[1].agentId).toBe("claude");
   }, 10000);
 
   it("idles without spawning when no task is ready", async () => {

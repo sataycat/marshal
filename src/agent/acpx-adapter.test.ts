@@ -98,24 +98,24 @@ function sessionFixture(cwd: string): AgentSession {
   return { agentId: "opencode", cwd, name: "marshal-opencode", recordId: "rec-marshal-opencode" };
 }
 
+let fakeBinPath: string;
+
+beforeAll(() => {
+  const dir = mkdtempSync(join(tmpdir(), "marshal-agent-"));
+  fakeBinPath = join(dir, "acpx.cjs");
+  writeFileSync(fakeBinPath, FAKE_ACPX, { mode: 0o755 });
+  chmodSync(fakeBinPath, 0o755);
+});
+
+afterEach(() => {
+  delete process.env.FAKE_ACPX_EVENTS;
+  delete process.env.FAKE_ACPX_STDERR;
+  delete process.env.FAKE_ACPX_EXIT_CODE;
+  delete process.env.FAKE_ACPX_VERSION;
+  delete process.env.FAKE_ACPX_LOG;
+});
+
 describe("AcpxAgentAdapter", () => {
-  let fakeBinPath: string;
-
-  beforeAll(() => {
-    const dir = mkdtempSync(join(tmpdir(), "marshal-agent-"));
-    fakeBinPath = join(dir, "acpx.cjs");
-    writeFileSync(fakeBinPath, FAKE_ACPX, { mode: 0o755 });
-    chmodSync(fakeBinPath, 0o755);
-  });
-
-  afterEach(() => {
-    delete process.env.FAKE_ACPX_EVENTS;
-    delete process.env.FAKE_ACPX_STDERR;
-    delete process.env.FAKE_ACPX_EXIT_CODE;
-    delete process.env.FAKE_ACPX_VERSION;
-    delete process.env.FAKE_ACPX_LOG;
-  });
-
   it("spawns a session by ensuring an ACPX session", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "marshal-cwd-"));
     const adapter = makeAdapter({ binPath: fakeBinPath, versionRange: ">=0.12.0 <0.13.0" });
@@ -273,5 +273,35 @@ describe("AcpxAgentAdapter", () => {
     );
 
     warnSpy.mockRestore();
+  });
+});
+
+// ADR-023 Decision 7: pin the ADR-019 pass-through contract against regressions
+// like the orchestrator's hard-coded BUILDER_AGENT_ID. The literal agent id is
+// just a positional token for the stub acpx shim; "codex" and "claude" exercise
+// the same spawn/prompt/cancel/close round-trip as "opencode".
+describe.each(["codex", "claude"])("AcpxAgentAdapter pass-through (%s)", (agentId) => {
+  it("spawns, prompts, cancels, and closes with a custom agent id", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "marshal-cwd-"));
+    const adapter = makeAdapter({ binPath: fakeBinPath, versionRange: ">=0.12.0 <0.13.0" });
+
+    const session = await adapter.spawn(cwd, agentId, { sessionName: `marshal-${agentId}` });
+    expect(session.agentId).toBe(agentId);
+    expect(session.name).toBe(`marshal-${agentId}`);
+    expect(session.recordId).toMatch(new RegExp(`^rec-marshal-${agentId}`));
+
+    process.env.FAKE_ACPX_EVENTS = JSON.stringify([
+      { jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn" } },
+    ]);
+    const events = await collect(adapter.prompt(session, "hi"));
+    expect(events.some((e) => e.type === "done")).toBe(true);
+
+    const logFile = join(tmpdir(), `roundtrip-${agentId}.log`);
+    process.env.FAKE_ACPX_LOG = logFile;
+    await adapter.cancel(session);
+    expect(readFileSync(logFile, "utf8")).toContain(`CANCEL ${agentId}`);
+
+    await adapter.close(session);
+    expect(readFileSync(logFile, "utf8")).toContain(`CLOSE ${agentId}`);
   });
 });

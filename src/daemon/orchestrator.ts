@@ -31,7 +31,6 @@ export interface RunOnceResult {
   reason?: string;
 }
 
-const BUILDER_AGENT_ID = "opencode" as const;
 const BUILDER_TIMEOUT_SECONDS = 1800;
 const BUILDER_PERMISSION_MODE = "approve-all" as const;
 const VALIDATOR_TIMEOUT_SECONDS = 1800;
@@ -155,6 +154,7 @@ export interface BuildTaskOptions {
   root?: string;
   agent?: Agent;
   manager?: WorktreeManager;
+  builderAgentId?: ReturnType<typeof resolveAgentId>;
   bus?: EventBus;
 }
 
@@ -167,11 +167,12 @@ export async function buildTask(
 
   const manager = options.manager ?? new WorktreeManager(root ?? cwd());
   const agent = options.agent ?? new AcpxAgentAdapter();
+  const builderAgentId = options.builderAgentId ?? resolveAgentId("builder");
   const runLog = new RunLog(root, options.bus);
 
   const worktree = manager.create(slug);
   const prompt = renderBuilderPrompt(task);
-  const runId = runLog.startRun(task.id, "builder", BUILDER_AGENT_ID, prompt);
+  const runId = runLog.startRun(task.id, "builder", builderAgentId, prompt);
 
   const spawnOpts: SpawnOptions = {
     sessionName: `marshal-${slug}-builder`,
@@ -182,7 +183,7 @@ export async function buildTask(
   let session: AgentSession | undefined;
   try {
     try {
-      session = await agent.spawn(worktree.path, BUILDER_AGENT_ID, spawnOpts);
+      session = await agent.spawn(worktree.path, builderAgentId, spawnOpts);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error({ err, slug, runId }, "Builder spawn failed");
@@ -242,6 +243,7 @@ export interface RunOnceOptions {
   root?: string;
   agent?: Agent;
   manager?: WorktreeManager;
+  builderAgentId?: ReturnType<typeof resolveAgentId>;
   validatorAgentId?: ReturnType<typeof resolveAgentId>;
   maxRetries?: number;
   bus?: EventBus;
@@ -269,9 +271,7 @@ export function renderValidatorPrompt(
 ): string {
   const maxLines = options.diffMaxLines ?? DIFF_MAX_LINES;
   const truncatedNote =
-    totalDiffLines > maxLines
-      ? ` (truncated to ${maxLines} of ${totalDiffLines} lines)`
-      : "";
+    totalDiffLines > maxLines ? ` (truncated to ${maxLines} of ${totalDiffLines} lines)` : "";
 
   return [
     `You are validating the implementation of task "${task.title}" (slug: ${task.slug}).`,
@@ -303,14 +303,11 @@ export function renderValidatorPrompt(
   ].join("\n");
 }
 
-function computeTruncatedDiff(worktreePath: string, trunkRef: string): { diff: string; totalLines: number } {
-  const raw = gitInWorktree(worktreePath, [
-    "diff",
-    `${trunkRef}...HEAD`,
-    "--",
-    ".",
-    ":!specs",
-  ]);
+function computeTruncatedDiff(
+  worktreePath: string,
+  trunkRef: string,
+): { diff: string; totalLines: number } {
+  const raw = gitInWorktree(worktreePath, ["diff", `${trunkRef}...HEAD`, "--", ".", ":!specs"]);
   const lines = raw.split("\n");
   if (lines.length <= DIFF_MAX_LINES) {
     return { diff: raw, totalLines: lines.length };
@@ -440,10 +437,7 @@ export async function validateTask(
       return { slug, runId, commitSha: buildCommit, status: "validated" };
     }
 
-    const reason =
-      gate.result === "fail"
-        ? gate.reason
-        : "no gate decision emitted";
+    const reason = gate.result === "fail" ? gate.reason : "no gate decision emitted";
     runLog.finishRun(runId, "error", { error: reason });
     logger.info({ slug, runId, reason }, "Validator failed");
     return {
@@ -464,9 +458,7 @@ export async function validateTask(
   }
 }
 
-export async function runOnce(
-  options: RunOnceOptions = {},
-): Promise<RunOnceResult | null> {
+export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResult | null> {
   const root = options.root;
 
   const db = openDb(root);
@@ -520,6 +512,7 @@ export async function runOnce(
       root,
       agent: options.agent,
       manager,
+      builderAgentId: options.builderAgentId,
       bus: options.bus,
     });
 

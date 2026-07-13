@@ -48,7 +48,7 @@ import { runSpecAuthorTurn, SpecChatClosedError } from "./spec-chat.js";
 import { listSpecMessages, type SpecMessage } from "../tasks/spec-store.js";
 import { publishSpecMessage } from "./bus.js";
 import type { Agent } from "../agent/types.js";
-import { resolveAgentId } from "../worktree/config.js";
+import { resolveAgentId, MissingAgentIdError } from "../worktree/config.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -314,6 +314,9 @@ function mapDomainError(err: unknown): ApiError {
   }
   if (err instanceof SpecChatClosedError) {
     return new ApiError(409, err.message, "spec_chat_closed");
+  }
+  if (err instanceof MissingAgentIdError) {
+    return new ApiError(400, err.message, "agent_not_configured");
   }
   logger.error({ err }, "Unexpected error in task HTTP handler");
   return new ApiError(500, "Internal server error", "internal_error");
