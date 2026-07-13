@@ -23,7 +23,7 @@ export const DEFAULT_VERSION_RANGE = ">=0.12.0 <0.13.0";
 // install hints when it is the one performing or recommending the install.
 // Pinned (not a range) so fresh installs are reproducible; the install path
 // is the thing Marshal controls, the accept range is the thing the user controls.
-export const ACPX_INSTALL_PIN = "0.12.1";
+export const ACPX_INSTALL_PIN = "0.12.0";
 const DEFAULT_TIMEOUT_SECONDS = 1800;
 
 export interface AcpxAgentAdapterOptions {

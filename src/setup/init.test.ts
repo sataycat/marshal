@@ -322,7 +322,7 @@ describe("runInit", () => {
   });
 
   it("install hint uses the exact install pin, not the wide accept range", async () => {
-    // The install-offer prompt must surface `npm i -g acpx@0.12.1` (the pin),
+    // The install-offer prompt must surface `npm i -g acpx@0.12.0` (the pin),
     // never the loose `>=0.12.0 <0.13.0` range, so fresh installs are
     // reproducible.
     const runCmd = fakeRunner((bin) => {
@@ -346,7 +346,7 @@ describe("runInit", () => {
       prompt,
     });
 
-    expect(prompts.some((q) => /acpx@0\.12\.1/.test(q))).toBe(true);
+    expect(prompts.some((q) => /acpx@0\.12\.0/.test(q))).toBe(true);
     expect(prompts.some((q) => /acpx@>=0\.12\.0/.test(q))).toBe(false);
   });
 });
