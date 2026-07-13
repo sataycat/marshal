@@ -17,7 +17,25 @@ function getArg(flag) {
   const idx = args.indexOf(flag);
   return idx !== -1 && args[idx + 1] ? args[idx + 1] : undefined;
 }
-const agent = args[0];
+// Skip global options (flags starting with --) to find the agent name
+function findAgent() {
+  let i = 0;
+  const BOOLEAN_FLAGS = new Set(['--json-strict', '--verbose', '--suppress-reads', '--no-wait', '--approve-all', '--approve-reads', '--deny-all']);
+  while (i < args.length) {
+    const a = args[i];
+    if (BOOLEAN_FLAGS.has(a)) {
+      i++;
+    } else if (a.startsWith('--') || (a.startsWith('-') && a !== '-s')) {
+      i += 2;
+    } else if (a === '-s') {
+      i += 2;
+    } else {
+      return a;
+    }
+  }
+  return null;
+}
+const agent = findAgent();
 if (args[0] === '--version') {
   console.log(process.env.FAKE_ACPX_VERSION || '0.12.0');
   process.exit(0);

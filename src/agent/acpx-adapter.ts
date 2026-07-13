@@ -83,16 +83,16 @@ export class AcpxAgentAdapter implements Agent {
     await this.ensureVersion();
 
     const args = [
-      agentId,
-      "sessions",
-      "ensure",
-      "--name",
-      name,
       "--cwd",
       cwd,
       "--format",
       "json",
       "--json-strict",
+      agentId,
+      "sessions",
+      "ensure",
+      "--name",
+      name,
     ];
 
     const { code, stdout, stderr } = await runCommand(this.binPath, args);
@@ -216,7 +216,7 @@ export class AcpxAgentAdapter implements Agent {
   }
 
   async cancel(session: AgentSession): Promise<void> {
-    const args = [session.agentId, "cancel", "-s", session.name, "--cwd", session.cwd];
+    const args = ["--cwd", session.cwd, session.agentId, "cancel", "-s", session.name];
     const { code, stdout, stderr } = await runCommand(this.binPath, args);
     if (code !== 0) {
       throw acpxCommandError("cancel", code!, stderr || stdout);
@@ -224,7 +224,7 @@ export class AcpxAgentAdapter implements Agent {
   }
 
   async close(session: AgentSession): Promise<void> {
-    const args = [session.agentId, "sessions", "close", session.name, "--cwd", session.cwd];
+    const args = ["--cwd", session.cwd, session.agentId, "sessions", "close", session.name];
     const { code, stdout, stderr } = await runCommand(this.binPath, args);
     if (code !== 0) {
       throw acpxCommandError("sessions close", code!, stderr || stdout);
@@ -238,9 +238,6 @@ function defaultSessionName(agentId: AgentId): string {
 
 function buildPromptArgs(session: AgentSession, opts: PromptOptions): string[] {
   const args: string[] = [
-    session.agentId,
-    "-s",
-    session.name,
     "--cwd",
     session.cwd,
     "--format",
@@ -262,6 +259,9 @@ function buildPromptArgs(session: AgentSession, opts: PromptOptions): string[] {
   if (opts.systemPrompt) {
     args.push("--system-prompt", opts.systemPrompt);
   }
+
+  args.push(session.agentId);
+  args.push("-s", session.name);
 
   if (opts.noWait) {
     args.push("--no-wait");

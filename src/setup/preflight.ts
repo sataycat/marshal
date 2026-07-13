@@ -207,7 +207,7 @@ async function checkAgentInstalled(
   agentId: string,
   acpxBin: string,
 ): Promise<CheckResult> {
-  const r = await runCmd(acpxBin, [agentId, "--version"]);
+  const r = await runCmd(acpxBin, [agentId, "--help"]);
   if (r.notFound) {
     return fail(agentId, "acpx not installed");
   }
@@ -230,15 +230,15 @@ async function checkAgentHandshake(
   tmpDir: string,
 ): Promise<CheckResult> {
   const r = await runCmd(acpxBin, [
-    agentId,
-    "exec",
     "--cwd",
     tmpDir,
-    "hello",
     "--timeout",
     "15",
     "--format",
     "quiet",
+    agentId,
+    "exec",
+    "hello",
   ]);
   if (r.notFound) {
     return warn(`${agentId} handshake`, "acpx not installed");

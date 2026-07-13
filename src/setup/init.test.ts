@@ -26,8 +26,10 @@ function fullPassRunner(): CommandRunner {
     if (bin === "pnpm") return ok("9.0.0\n");
     if (bin === "which" && args[0] === "acpx") return ok("/usr/local/bin/acpx\n");
     if (bin === "acpx" && args[0] === "--version") return ok("0.12.1\n");
-    if (bin === "acpx" && args[1] === "--version") return ok("1.0.0\n");
-    if (bin === "acpx" && args[1] === "exec") return ok("hi\n");
+    // Agent installed check: acpx <agent> --help
+    if (bin === "acpx" && args[1] === "--help") return ok("1.0.0\n");
+    // Handshake: acpx --cwd <dir> --timeout 15 --format quiet <agent> exec hello
+    if (bin === "acpx" && args[0] === "--cwd" && args.includes("exec")) return ok("hi\n");
     return "notfound";
   });
 }

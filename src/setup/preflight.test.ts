@@ -139,10 +139,10 @@ describe("checkAcpx", () => {
 });
 
 describe("checkAgent", () => {
-  it("passes when the agent responds to --version and the handshake", async () => {
+  it("passes when the agent responds to --help and the handshake", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--version") return ok("1.0.0\n");
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "exec") return ok("hi\n");
+      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help") return ok("opencode 1.0.0\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello") return ok("hi\n");
       return "notfound";
     });
     const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
@@ -153,7 +153,7 @@ describe("checkAgent", () => {
 
   it("fails install with the curated npm package hint for a known agent", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--version")
+      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help")
         return err(1, "no such agent");
       return "notfound";
     });
@@ -166,8 +166,8 @@ describe("checkAgent", () => {
 
   it("warns (does not fail) when the handshake fails — likely auth — and surfaces the agent's docs", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--version") return ok("1.0.0\n");
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "exec")
+      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help") return ok("1.0.0\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello")
         return err(1, "auth error");
       return "notfound";
     });
@@ -184,9 +184,9 @@ describe("checkAgent", () => {
 
   it("falls back to the ACPX docs link for an unknown agent whose handshake fails", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "custom-agent" && args[1] === "--version")
+      if (bin === "acpx" && args[0] === "custom-agent" && args[1] === "--help")
         return ok("1.0.0\n");
-      if (bin === "acpx" && args[0] === "custom-agent" && args[1] === "exec")
+      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello")
         return err(1, "auth error");
       return "notfound";
     });
@@ -198,7 +198,7 @@ describe("checkAgent", () => {
 
   it("asks the user to install manually for an unknown agent id", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "custom-agent" && args[1] === "--version")
+      if (bin === "acpx" && args[0] === "custom-agent" && args[1] === "--help")
         return err(1, "no such agent");
       return "notfound";
     });
@@ -212,8 +212,8 @@ describe("checkAgent", () => {
 describe("ADR-022 Decision 2 — preflight no longer references provider auth env vars", () => {
   it("checkAgentHandshake drops the legacy pre-ADR-022 docs string", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--version") return ok("1.0.0\n");
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "exec") return err(1, "boom");
+      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help") return ok("1.0.0\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello") return err(1, "boom");
       return "notfound";
     });
     const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
