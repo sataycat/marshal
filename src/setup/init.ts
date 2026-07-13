@@ -65,26 +65,27 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   const installPin = options.installPin ?? ACPX_INSTALL_PIN;
   const acpxBin = options.acpxBin ?? "acpx";
 
-  if (machineAlreadyConfigured(configPath)) {
-    print("✓ machine already configured");
-    initRepoState(repoRoot);
-    openDb(repoRoot);
-    print(`✓ repo initialized at ${getRepoStateDir(repoRoot)}`);
-    printReady();
-    return { ok: true, skippedMachine: true };
-  }
+  const alreadyConfigured = machineAlreadyConfigured(configPath);
 
-  // Phase 1 — system prerequisites.
-  const phase1 = await checkSystemPrerequisites(runCmd);
-  for (const r of phase1) print(formatCheckLine(r));
-  if (phase1.some((r) => r.status === "fail")) {
-    return { ok: false, skippedMachine: false };
+  // Phase 1 — system prerequisites. Skipped on the fast path: a prior
+  // onboarding already validated node/git/pnpm, and those don't disappear
+  // between runs. acpx (Phase 2) is still re-checked because it can be
+  // uninstalled independently.
+  let phase1: Awaited<ReturnType<typeof checkSystemPrerequisites>> = [];
+  if (!alreadyConfigured) {
+    phase1 = await checkSystemPrerequisites(runCmd);
+    for (const r of phase1) print(formatCheckLine(r));
+    if (phase1.some((r) => r.status === "fail")) {
+      return { ok: false, skippedMachine: false };
+    }
   }
 
   // Phase 2 — acpx hard-gate (ADR-024 Decision 1). If acpx is missing or
   // outside the accept range with a `fail` status, print the install command
   // and stop. No in-process `npm i -g` attempt, no fake `✓` line, no
-  // re-probe loop, no continuation into agent probes.
+  // re-probe loop, no continuation into agent probes. This runs even on the
+  // fast path: a config that references `acpx` is not proof the binary is
+  // still installed.
   const phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
   for (const r of phase2) print(formatCheckLine(r));
   if (phase2.some((r) => r.status === "fail")) {
@@ -92,6 +93,15 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
       `✗ acpx is required and is missing. Install with \`npm i -g acpx@${installPin}\` and re-run \`marshal init\`.`,
     );
     return { ok: false, skippedMachine: false };
+  }
+
+  if (alreadyConfigured) {
+    print("✓ machine already configured");
+    initRepoState(repoRoot);
+    openDb(repoRoot);
+    print(`✓ repo initialized at ${getRepoStateDir(repoRoot)}`);
+    printReady();
+    return { ok: true, skippedMachine: true };
   }
 
   // Phase 3 — agent probing is REMOVED from init (ADR-024 Decision 3).

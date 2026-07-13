@@ -76,7 +76,12 @@ describe("runInit", () => {
         agents: { builder: "opencode", validator: "pi" },
       }),
     );
-    const runCmd = fakeRunner(() => "notfound");
+    // acpx is re-checked even on the fast path; system prereqs are skipped.
+    const runCmd = fakeRunner((bin, args) => {
+      if (bin === "which" && args[0] === "acpx") return ok("/usr/local/bin/acpx\n");
+      if (bin === "acpx" && args[0] === "--version") return ok("0.12.1\n");
+      return "notfound";
+    });
 
     const result = await runInit({
       repoRoot,
@@ -87,6 +92,30 @@ describe("runInit", () => {
     expect(result.ok).toBe(true);
     expect(result.skippedMachine).toBe(true);
     expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
+  });
+
+  // ADR-024 Decision 1: acpx is a hard gate even when a config from a prior
+  // run is already on disk. The fast path must not declare "ready" if the
+  // acpx binary has since been uninstalled.
+  it("halts on the fast path when acpx is missing despite an existing config", async () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        acpx: { bin: "acpx", version: ">=0.12.0 <0.13.0" },
+        agents: { builder: "opencode", validator: "pi" },
+      }),
+    );
+    const runCmd = fakeRunner(() => "notfound");
+
+    const { out, ret } = await captureStdout(() =>
+      runInit({ repoRoot, configPath, runCmd }),
+    );
+
+    expect(ret.ok).toBe(false);
+    expect(ret.skippedMachine).toBe(false);
+    expect(out).toContain("npm i -g acpx@0.12.0");
+    expect(out).not.toContain("machine already configured");
+    expect(out).not.toContain("Marshal is ready");
   });
 
   // ADR-024 Decision 3: init is always non-interactive. No prompts, no flags.
