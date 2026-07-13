@@ -6,7 +6,8 @@ import { initGlobalConfig, initRepoState, getRepoStateDir } from "../daemon/conf
 import { openDb } from "../db/index.js";
 import { resolveAgentId, type GlobalConfig } from "../worktree/config.js";
 import {
-  ACPX_PINNED_VERSION,
+  ACPX_ACCEPT_RANGE,
+  ACPX_INSTALL_PIN,
   checkAcpx,
   checkAgent,
   checkSystemPrerequisites,
@@ -50,6 +51,7 @@ export interface InitOptions {
   env?: EnvView;
   acpxBin?: string;
   versionRange?: string;
+  installPin?: string;
 }
 
 export interface InitResult {
@@ -84,7 +86,8 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   const configPath = options.configPath ?? getGlobalConfigPath();
   const nonInteractive = options.nonInteractive === true;
   const yesFlag = options.yes === true || envYes(env);
-  const versionRange = options.versionRange ?? ACPX_PINNED_VERSION;
+  const versionRange = options.versionRange ?? ACPX_ACCEPT_RANGE;
+  const installPin = options.installPin ?? ACPX_INSTALL_PIN;
   const acpxBin = options.acpxBin ?? "acpx";
 
   if (!nonInteractive && machineAlreadyConfigured(configPath)) {
@@ -108,11 +111,28 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   }
 
   // Phase 2
-  const phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
+  let phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
   for (const r of phase2) print(formatCheckLine(r));
   const acpxMissing = phase2.some((r) => r.status === "fail");
   if (acpxMissing && !nonInteractive) {
-    await maybeInstallAcpx(runCmd, prompt, versionRange);
+    await maybeInstallAcpx(runCmd, prompt, installPin);
+    // Re-probe so the rest of the flow (and the short-circuit below) sees the
+    // post-install state rather than the pre-install snapshot.
+    phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
+    for (const r of phase2) print(formatCheckLine(r));
+  }
+  // acpx is a hard dependency: typed `fail` (not `warning`) in preflight. If it
+  // is still failing here — either the install was declined (interactive), the
+  // install attempt failed, or we are in --non-interactive mode where no
+  // install is offered — stop now. Running the Phase 3 agent probes against a
+  // missing acpx would only produce noise (every agent would `fail`/`warn` with
+  // "acpx not installed"), and Phase 5/6 must not write `~/.marshal/config.json`
+  // or `.marshal/state.db` for a machine that cannot run the loop.
+  if (phase2.some((r) => r.status === "fail")) {
+    print(
+      `✗ acpx is required and is still missing. Install with \`npm i -g acpx@${installPin}\` and re-run \`marshal init\`.`,
+    );
+    return { ok: false, skippedMachine: false };
   }
 
   // Phase 3 — agent discovery
@@ -289,7 +309,7 @@ async function runInstall(runCmd: CommandRunner, command: string): Promise<void>
 export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolean }> {
   const runCmd = options.runCmd ?? defaultRunCommand;
   const configPath = options.configPath ?? getGlobalConfigPath();
-  const versionRange = options.versionRange ?? ACPX_PINNED_VERSION;
+  const versionRange = options.versionRange ?? ACPX_ACCEPT_RANGE;
   const acpxBin = options.acpxBin ?? "acpx";
 
   const existing = readGlobalConfig(configPath) ?? {};

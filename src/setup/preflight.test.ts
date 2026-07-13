@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  ACPX_PINNED_VERSION,
+  ACPX_ACCEPT_RANGE,
+  ACPX_INSTALL_PIN,
   checkAcpx,
   checkAgent,
   checkSystemPrerequisites,
@@ -99,16 +100,16 @@ describe("checkAcpx", () => {
       if (bin === "acpx" && args[0] === "--version") return ok("0.12.1\n");
       return "notfound";
     });
-    const results = await checkAcpx(run, { binPath: "acpx", versionRange: ACPX_PINNED_VERSION });
+    const results = await checkAcpx(run, { binPath: "acpx", versionRange: ACPX_ACCEPT_RANGE });
     expect(results.every((r) => r.status === "ok")).toBe(true);
   });
 
-  it("fails when acpx is not on PATH", async () => {
+  it("fails when acpx is not on PATH and recommends the install pin", async () => {
     const run = fakeRunner(() => "notfound");
-    const results = await checkAcpx(run, { binPath: "acpx", versionRange: ACPX_PINNED_VERSION });
+    const results = await checkAcpx(run, { binPath: "acpx", versionRange: ACPX_ACCEPT_RANGE });
     const path = results.find((r) => r.label === "acpx")!;
     expect(path.status).toBe("fail");
-    expect(path.fix).toContain("npm i -g acpx@");
+    expect(path.fix).toBe(`npm i -g acpx@${ACPX_INSTALL_PIN}`);
   });
 
   it("warns when acpx version is outside the range", async () => {

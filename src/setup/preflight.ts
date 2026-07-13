@@ -2,7 +2,11 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
-import { DEFAULT_VERSION_RANGE, satisfiesVersionRange } from "../agent/acpx-adapter.js";
+import {
+  ACPX_INSTALL_PIN,
+  DEFAULT_VERSION_RANGE,
+  satisfiesVersionRange,
+} from "../agent/acpx-adapter.js";
 import { DEFAULT_MAX_RETRIES, type AgentRole, type GlobalConfig } from "../worktree/config.js";
 import { ACPX_AUTH_DOCS, AGENT_INSTALL_HINTS } from "./hints.js";
 
@@ -50,7 +54,13 @@ export const defaultRunCommand: CommandRunner = (bin, args) =>
   });
 
 export const REQUIRED_NODE_MAJOR = 18;
-export const ACPX_PINNED_VERSION = DEFAULT_VERSION_RANGE;
+
+// `ACPX_ACCEPT_RANGE` is what an already-installed acpx must satisfy; it is
+// passed to `checkAcpx` and written into `config.acpx.version`. `ACPX_INSTALL_PIN`
+// is the exact version string used in `npm i -g acpx@...` install hints. See
+// ADR-023 Decision 6 and the doc comment in `acpx-adapter.ts`.
+export const ACPX_ACCEPT_RANGE = DEFAULT_VERSION_RANGE;
+export { ACPX_INSTALL_PIN };
 
 function ok(label: string, detail?: string): CheckResult {
   return { label, status: "ok", detail };
@@ -137,7 +147,7 @@ async function checkAcpxPath(runCmd: CommandRunner, binPath: string): Promise<Ch
     return fail(
       "acpx",
       "not on PATH",
-      `npm i -g acpx@${ACPX_PINNED_VERSION}`,
+      `npm i -g acpx@${ACPX_INSTALL_PIN}`,
       "https://github.com/openclaw/acpx",
     );
   }
@@ -150,7 +160,7 @@ async function checkAcpxVersion(
 ): Promise<CheckResult> {
   const r = await runCmd(opts.binPath, ["--version"]);
   if (r.notFound) {
-    return fail("acpx version", "acpx not installed", `npm i -g acpx@${opts.versionRange}`);
+    return fail("acpx version", "acpx not installed", `npm i -g acpx@${ACPX_INSTALL_PIN}`);
   }
   if (r.code !== 0) {
     return fail("acpx version", `acpx --version failed: ${(r.stderr || r.stdout).trim()}`);
@@ -160,7 +170,7 @@ async function checkAcpxVersion(
     return warn(
       "acpx version",
       `found ${version}, expected ${opts.versionRange}`,
-      `npm i -g acpx@${opts.versionRange}`,
+      `npm i -g acpx@${ACPX_INSTALL_PIN}`,
     );
   }
   return ok("acpx version", version);

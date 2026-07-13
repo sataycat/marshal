@@ -14,7 +14,16 @@ import type {
 // Removed. ACPX takes the agent id as a positional CLI argument, so the id
 // IS the token. There is no registry to consult.
 
+// Acceptance range: the semver range an ALREADY-installed acpx binary must
+// satisfy for Marshal to use it. Kept wide within a minor so users who installed
+// acpx themselves (e.g. `npm i -g acpx@0.12.3`) are not forced to downgrade.
 export const DEFAULT_VERSION_RANGE = ">=0.12.0 <0.13.0";
+
+// Install pin: the exact version string Marshal puts in `npm i -g acpx@...`
+// install hints when it is the one performing or recommending the install.
+// Pinned (not a range) so fresh installs are reproducible; the install path
+// is the thing Marshal controls, the accept range is the thing the user controls.
+export const ACPX_INSTALL_PIN = "0.12.1";
 const DEFAULT_TIMEOUT_SECONDS = 1800;
 
 export interface AcpxAgentAdapterOptions {

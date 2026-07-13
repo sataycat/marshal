@@ -250,6 +250,105 @@ describe("runInit", () => {
 
     expect(prompts.some((q) => /Install with `npm i -g acpx@/.test(q))).toBe(true);
   });
+
+  // Short-circuit: acpx is a hard dependency. When it is still failing after
+  // Phase 2 (declined install / failed install / non-interactive), init must
+  // stop before the Phase 3 agent probes (which would all fail with "acpx not
+  // installed" noise) and before Phase 5/6 (which would write config + state.db
+  // for a machine that cannot run the loop).
+  it("short-circuits before Phase 3 when acpx is missing in non-interactive mode", async () => {
+    const calls: string[] = [];
+    const runCmd = fakeRunner((bin, args) => {
+      calls.push(`${bin} ${args.join(" ")}`);
+      if (bin === "node") return ok("v20.10.0\n");
+      if (bin === "git") return ok("git version 2.40.0\n");
+      if (bin === "pnpm") return ok("9.0.0\n");
+      return "notfound";
+    });
+
+    const { out, ret } = await captureStdout(() =>
+      runInit({
+        repoRoot,
+        configPath,
+        runCmd,
+        env: {},
+        nonInteractive: true,
+      }),
+    );
+
+    expect(ret.ok).toBe(false);
+    expect(ret.skippedMachine).toBe(false);
+    expect(out).toContain("acpx is required and is still missing");
+    // No Phase 3 probe: the only `acpx <id> --version` / `acpx <id> exec`
+    // invocations should be the Phase 2 `acpx --version` check.
+    expect(calls.some((c) => /^acpx opencode /.test(c))).toBe(false);
+    expect(calls.some((c) => /^acpx pi /.test(c))).toBe(false);
+    // No files written.
+    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
+    expect(existsSync(configPath)).toBe(false);
+  });
+
+  it("short-circuits when the user declines the acpx install offer interactively", async () => {
+    const calls: string[] = [];
+    const runCmd = fakeRunner((bin, args) => {
+      calls.push(`${bin} ${args.join(" ")}`);
+      if (bin === "node") return ok("v20.10.0\n");
+      if (bin === "git") return ok("git version 2.40.0\n");
+      if (bin === "pnpm") return ok("9.0.0\n");
+      return "notfound";
+    });
+    const prompt = async (): Promise<boolean> => false; // decline every prompt
+
+    const { out, ret } = await captureStdout(() =>
+      runInit({
+        repoRoot,
+        configPath,
+        runCmd,
+        env: {},
+        nonInteractive: false,
+        prompt,
+      }),
+    );
+
+    expect(ret.ok).toBe(false);
+    expect(out).toContain("acpx is required and is still missing");
+    // Phase 2 should run (which acpx / acpx --version), but Phase 3 must not.
+    expect(calls.some((c) => /^which acpx/.test(c))).toBe(true);
+    expect(calls.some((c) => /^acpx --version/.test(c))).toBe(true);
+    expect(calls.some((c) => /^acpx opencode /.test(c))).toBe(false);
+    expect(calls.some((c) => /^acpx pi /.test(c))).toBe(false);
+    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
+    expect(existsSync(configPath)).toBe(false);
+  });
+
+  it("install hint uses the exact install pin, not the wide accept range", async () => {
+    // The install-offer prompt must surface `npm i -g acpx@0.12.1` (the pin),
+    // never the loose `>=0.12.0 <0.13.0` range, so fresh installs are
+    // reproducible.
+    const runCmd = fakeRunner((bin) => {
+      if (bin === "node") return ok("v20.10.0\n");
+      if (bin === "git") return ok("git version 2.40.0\n");
+      if (bin === "pnpm") return ok("9.0.0\n");
+      return "notfound";
+    });
+    const prompts: string[] = [];
+    const prompt = async (q: string): Promise<boolean> => {
+      prompts.push(q);
+      return false;
+    };
+
+    await runInit({
+      repoRoot,
+      configPath,
+      runCmd,
+      env: {},
+      nonInteractive: false,
+      prompt,
+    });
+
+    expect(prompts.some((q) => /acpx@0\.12\.1/.test(q))).toBe(true);
+    expect(prompts.some((q) => /acpx@>=0\.12\.0/.test(q))).toBe(false);
+  });
 });
 
 // ADR-022 Decision 2: no provider env var name may appear in the preflight
