@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -9,7 +9,6 @@ import {
   ACPX_PINNED_VERSION,
   checkAcpx,
   checkAgent,
-  checkAuthEnv,
   checkSystemPrerequisites,
   defaultRunCommand,
   formatCheckLine,
@@ -39,6 +38,11 @@ function defaultYesNo(question: string): Promise<boolean> {
 
 export interface InitOptions {
   nonInteractive?: boolean;
+  // ADR-022 Decision 3: explicit, programmatic consent to write files
+  // (`~/.marshal/config.json` and `.marshal/state.db`). Only honored when
+  // `nonInteractive` is true; in interactive mode the user is asked via the
+  // prompt instead.
+  yes?: boolean;
   repoRoot?: string;
   configPath?: string;
   runCmd?: CommandRunner;
@@ -53,6 +57,21 @@ export interface InitResult {
   skippedMachine: boolean;
 }
 
+// ADR-022 Decision 1: the repo is considered "already initialized" when a
+// state database is already on disk. In that case the merged prompt is skipped
+// and Phase 6 runs as a no-op idempotent call, preserving the fast re-run.
+function repoAlreadyInitialized(repoRoot: string): boolean {
+  return existsSync(join(getRepoStateDir(repoRoot), "state.db"));
+}
+
+// ADR-022 Decision 3: env opt-in recognized in --non-interactive mode so CI
+// pipelines can consent to writes without a TTY. Marshal no longer reads any
+// other env vars from the user; in particular it does not inspect provider
+// auth env vars (Decision 2).
+function envYes(env: EnvView): boolean {
+  return env.MARSHAL_INIT_YES === "1";
+}
+
 function print(line: string): void {
   process.stdout.write(`${line}\n`);
 }
@@ -64,6 +83,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   const repoRoot = options.repoRoot ?? process.cwd();
   const configPath = options.configPath ?? getGlobalConfigPath();
   const nonInteractive = options.nonInteractive === true;
+  const yesFlag = options.yes === true || envYes(env);
   const versionRange = options.versionRange ?? ACPX_PINNED_VERSION;
   const acpxBin = options.acpxBin ?? "acpx";
 
@@ -114,55 +134,91 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
     }
   }
 
-  // Phase 4 — auth environment
-  for (const result of agentResults) {
-    const auth = checkAuthEnv(result.agentId, env);
-    if (auth) {
-      print(formatCheckLine(auth));
-    } else {
-      print(`⚠ ${result.agentId} auth — unknown agent; ensure its auth is configured per its docs`);
-    }
-  }
+  // ADR-022 Decision 2: no Phase 4 "auth environment" check. The authoritative
+  // "can this agent run" signal is the ACP handshake probe surfaced above.
+  // Marshal no longer names or inspects provider env vars.
 
-  // Phase 5 — config generation
+  // Phases 5+6 (merged, ADR-022 Decision 1). A single user-visible step governs
+  // both writing `~/.marshal/config.json` (when not present / when a merge is
+  // proposed) and creating `.marshal/state.db` + the repo state dir. On
+  // already-initialized repos the prompt is skipped and Phase 6 runs as a
+  // no-op idempotent create-if-missing; the fast re-run property is preserved
+  // where it actually matters.
+  const repoNeedsInit = !repoAlreadyInitialized(repoRoot);
+  const machineNeedsConfig = !machineAlreadyConfigured(configPath);
+  const needsPrompt = machineNeedsConfig || repoNeedsInit;
+
+  // Generate+merge the config snapshot even when not writing it, so the
+  // preview is shown in non-interactive mode for diagnostic visibility.
+  const generated = generateConfig({
+    acpxBin,
+    versionRange,
+    builder: builderId,
+    validator: validatorId,
+  });
+  const merged =
+    existing && Object.keys(existing).length > 0 ? mergeConfig(existing, generated) : generated;
+
   if (nonInteractive) {
-    if (machineAlreadyConfigured(configPath)) {
-      print(`✓ config present at ${configPath}`);
+    // ADR-022 Decision 3: write nothing unless `--yes` / `MARSHAL_INIT_YES=1`.
+    if (yesFlag) {
+      writeInitFiles(machineNeedsConfig, merged, configPath, repoRoot);
     } else {
-      print(`✗ config missing at ${configPath} (init writes config only when interactive)`);
+      if (machineNeedsConfig) {
+        print(`✗ config missing at ${configPath} (re-run with --yes to write it)`);
+      } else {
+        print(`✓ config present at ${configPath}`);
+      }
+      if (repoNeedsInit) {
+        print(`✗ repo not initialized at ${getRepoStateDir(repoRoot)} (re-run with --yes to init)`);
+      }
+      print("— non-interactive mode: no files written (pass --yes to write)");
+    }
+  } else if (needsPrompt) {
+    printConfigPreview(merged, configPath);
+    const confirmed = await prompt(
+      "Initialize Marshal in this repo (writes ~/.marshal/config.json and .marshal/state.db)?",
+    );
+    if (confirmed) {
+      writeInitFiles(machineNeedsConfig, merged, configPath, repoRoot);
+    } else {
+      print("— initialization skipped; no files written");
     }
   } else {
-    const generated = generateConfig({
-      acpxBin,
-      versionRange,
-      builder: builderId,
-      validator: validatorId,
-    });
-    const merged =
-      existing && Object.keys(existing).length > 0 ? mergeConfig(existing, generated) : generated;
-    printConfigPreview(merged, configPath);
-    const confirmed = await prompt("Write this config?");
-    if (confirmed) {
-      writeGlobalConfig(merged, configPath);
-      print(`✓ config written to ${configPath}`);
-    } else {
-      print("— config not written");
-    }
+    // Both already initialized — Phase 6 runs as an idempotent no-op.
+    initRepoState(repoRoot);
+    openDb(repoRoot);
+    print(`✓ repo initialized at ${getRepoStateDir(repoRoot)}`);
   }
 
-  // Phase 6 — repo init (always runs)
-  initGlobalConfig();
-  initRepoState(repoRoot);
-  openDb(repoRoot);
-  print(`✓ repo initialized at ${getRepoStateDir(repoRoot)}`);
-
-  const ok =
+  const checksOk =
     phase1.every((r) => r.status !== "fail") &&
     phase2.every((r) => r.status !== "fail") &&
     agentResults.every((a) => a.installed.status !== "fail");
 
-  if (ok) printReady();
-  return { ok, skippedMachine: false };
+  if (checksOk) printReady();
+  return { ok: checksOk, skippedMachine: false };
+}
+
+// Shared write path for the merged Phase 5+6 (ADR-022 Decision 1): writes the
+// global config (only when needed), then initializes the repo state dir and
+// opens the database.
+function writeInitFiles(
+  machineNeedsConfig: boolean,
+  config: GlobalConfig,
+  configPath: string,
+  repoRoot: string,
+): void {
+  if (machineNeedsConfig) {
+    writeGlobalConfig(config, configPath);
+    print(`✓ config written to ${configPath}`);
+  } else {
+    print(`✓ config present at ${configPath}`);
+  }
+  initGlobalConfig();
+  initRepoState(repoRoot);
+  openDb(repoRoot);
+  print(`✓ repo initialized at ${getRepoStateDir(repoRoot)}`);
 }
 
 function printReady(): void {
@@ -232,7 +288,6 @@ async function runInstall(runCmd: CommandRunner, command: string): Promise<void>
 
 export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolean }> {
   const runCmd = options.runCmd ?? defaultRunCommand;
-  const env: EnvView = options.env ?? process.env;
   const configPath = options.configPath ?? getGlobalConfigPath();
   const versionRange = options.versionRange ?? ACPX_PINNED_VERSION;
   const acpxBin = options.acpxBin ?? "acpx";
@@ -256,15 +311,11 @@ export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolea
     { role: "builder" as const, id: builderId },
     { role: "validator" as const, id: validatorId },
   ]) {
+    // ADR-022 Decision 2: handshake probe is the authoritative auth signal;
+    // no provider env presence check is emitted here.
     const result = await checkAgent(runCmd, id, acpxBin, role, tmp);
     print(formatCheckLine(result.installed));
     print(formatCheckLine(result.handshake));
-    const auth = checkAuthEnv(result.agentId, env);
-    if (auth) {
-      print(formatCheckLine(auth));
-    } else {
-      print(`⚠ ${result.agentId} auth — unknown agent; ensure its auth is configured per its docs`);
-    }
   }
 
   if (machineAlreadyConfigured(configPath)) {

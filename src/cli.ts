@@ -25,10 +25,17 @@ program
   .description("Run onboarding preflight and initialize marshal state in the current repo")
   .option(
     "--non-interactive",
-    "Run all checks; no installs, no config writes; exit non-zero on failure",
+    "Run all checks; no installs, no prompts; writes nothing without --yes",
   )
-  .action(async (options: { nonInteractive?: boolean }) => {
-    const result = await runInit({ nonInteractive: options.nonInteractive });
+  .option(
+    "--yes",
+    "Consent to writing ~/.marshal/config.json and .marshal/state.db (honored only with --non-interactive; in interactive mode the prompt is asked instead)",
+  )
+  .action(async (options: { nonInteractive?: boolean; yes?: boolean }) => {
+    const result = await runInit({
+      nonInteractive: options.nonInteractive,
+      yes: options.yes,
+    });
     if (!result.ok) {
       process.exitCode = 1;
     }

@@ -6,7 +6,6 @@ import {
   ACPX_PINNED_VERSION,
   checkAcpx,
   checkAgent,
-  checkAuthEnv,
   checkSystemPrerequisites,
   formatCheckLine,
   generateConfig,
@@ -164,7 +163,7 @@ describe("checkAgent", () => {
     expect(result.installed.docs).toBe("https://github.com/nicholasgriffintn/opencode");
   });
 
-  it("warns (does not fail) when the handshake fails — likely auth", async () => {
+  it("warns (does not fail) when the handshake fails — likely auth — and surfaces the agent's docs", async () => {
     const run = fakeRunner((bin, args) => {
       if (bin === "acpx" && args[0] === "opencode" && args[1] === "--version") return ok("1.0.0\n");
       if (bin === "acpx" && args[0] === "opencode" && args[1] === "exec")
@@ -176,6 +175,24 @@ describe("checkAgent", () => {
     expect(result.installed.status).toBe("ok");
     expect(result.handshake.status).toBe("warning");
     expect(result.handshake.detail).toContain("auth");
+    expect(result.handshake.detail).toContain("auth error");
+    // ADR-022 Decision 2: docs are the agent's own, never a provider console URL.
+    expect(result.handshake.docs).toBe("https://github.com/nicholasgriffintn/opencode");
+    expect(result.handshake.docs).not.toContain("openai.com");
+  });
+
+  it("falls back to the ACPX docs link for an unknown agent whose handshake fails", async () => {
+    const run = fakeRunner((bin, args) => {
+      if (bin === "acpx" && args[0] === "custom-agent" && args[1] === "--version")
+        return ok("1.0.0\n");
+      if (bin === "acpx" && args[0] === "custom-agent" && args[1] === "exec")
+        return err(1, "auth error");
+      return "notfound";
+    });
+    const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
+    const result = await checkAgent(run, "custom-agent", "acpx", "builder", tmp);
+    expect(result.handshake.status).toBe("warning");
+    expect(result.handshake.docs).toBe("https://github.com/openclaw/acpx");
   });
 
   it("asks the user to install manually for an unknown agent id", async () => {
@@ -191,20 +208,16 @@ describe("checkAgent", () => {
   });
 });
 
-describe("checkAuthEnv", () => {
-  it("is ok when the expected env var is present", () => {
-    expect(checkAuthEnv("opencode", { OPENAI_API_KEY: "sk-x" })?.status).toBe("ok");
-  });
-
-  it("warns when the expected env var is missing", () => {
-    const r = checkAuthEnv("pi", {});
-    expect(r?.status).toBe("warning");
-    expect(r?.detail).toContain("ANTHROPIC_API_KEY");
-    expect(r?.docs).toBe("https://console.anthropic.com/settings/keys");
-  });
-
-  it("returns null for an unknown agent", () => {
-    expect(checkAuthEnv("custom-agent", {})).toBeNull();
+describe("ADR-022 Decision 2 — preflight no longer references provider auth env vars", () => {
+  it("checkAgentHandshake drops the legacy pre-ADR-022 docs string", async () => {
+    const run = fakeRunner((bin, args) => {
+      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--version") return ok("1.0.0\n");
+      if (bin === "acpx" && args[0] === "opencode" && args[1] === "exec") return err(1, "boom");
+      return "notfound";
+    });
+    const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
+    const result = await checkAgent(run, "opencode", "acpx", "builder", tmp);
+    expect(result.handshake.docs).not.toMatch(/see the agent's auth docs/);
   });
 });
 

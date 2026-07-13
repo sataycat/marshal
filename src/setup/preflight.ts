@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { DEFAULT_VERSION_RANGE, satisfiesVersionRange } from "../agent/acpx-adapter.js";
 import { DEFAULT_MAX_RETRIES, type AgentRole, type GlobalConfig } from "../worktree/config.js";
-import { AGENT_AUTH_ENV, AGENT_INSTALL_HINTS, PROVIDER_KEY_LINKS } from "./hints.js";
+import { ACPX_AUTH_DOCS, AGENT_INSTALL_HINTS } from "./hints.js";
 
 export type CheckStatus = "ok" | "missing" | "warning" | "fail";
 
@@ -234,34 +234,27 @@ async function checkAgentHandshake(
     return warn(`${agentId} handshake`, "acpx not installed");
   }
   if (r.code !== 0) {
-    return warn(
-      `${agentId} handshake`,
-      `agent did not respond (likely auth): ${(r.stderr || r.stdout).trim() || "exit " + r.code}`,
-      undefined,
-      "see the agent's auth docs",
-    );
+    // ADR-022 Decision 2: this is the authoritative "can this agent run" probe.
+    // Surface the agent's own stderr/stdout verbatim and point at the agent's
+    // docs (curated hint) or the ACPX docs as a fallback. Marshal never names a
+    // provider env var — auth diagnosis lives with the agent and ACPX, where it
+    // belongs.
+    const hint = AGENT_INSTALL_HINTS[agentId];
+    const docs = hint?.docs ?? ACPX_AUTH_DOCS;
+    const detail = `agent did not respond (likely auth): ${
+      (r.stderr || r.stdout).trim() || `exit ${r.code}`
+    }`;
+    return warn(`${agentId} handshake`, detail, undefined, docs);
   }
   return ok(`${agentId} handshake`, "responded");
 }
 
 // -----------------------------------------------------------------------------
-// Phase 4: auth environment
+// Env view (read-only) — kept for opt-in / consent flags only, NOT for auth.
+// Per ADR-022 Decision 2, Marshal no longer inspects env vars for provider auth.
 // -----------------------------------------------------------------------------
 
 export type EnvView = Record<string, string | undefined>;
-
-export function checkAuthEnv(agentId: string, env: EnvView): CheckResult | null {
-  const keys = AGENT_AUTH_ENV[agentId];
-  if (!keys) {
-    return null;
-  }
-  const missing = keys.filter((k) => env[k] === undefined);
-  if (missing.length === 0) {
-    return ok(`${agentId} auth`, keys.join(", "));
-  }
-  const docs = missing.map((k) => PROVIDER_KEY_LINKS[k]).filter(Boolean)[0];
-  return warn(`${agentId} auth`, `missing ${missing.join(", ")}`, `export ${missing[0]}=...`, docs);
-}
 
 // -----------------------------------------------------------------------------
 // Phase 5: config generation / merge

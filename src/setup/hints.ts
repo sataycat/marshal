@@ -1,8 +1,13 @@
-// Advisory install/auth hints consulted only by the onboarding preflight
+// Advisory install hints consulted only by the onboarding preflight
 // (`marshal init` / `marshal doctor`). This is NOT a runtime allowlist: ADR-019
 // keeps the agent-id model open, and the adapter passes any id straight through
 // to ACPX. Adding an entry here just makes `init` able to offer an install
 // command and point at docs; omitting it means `init` says "install manually".
+//
+// Per ADR-022, Marshal does NOT track provider auth env vars. The authoritative
+// "can this agent run" signal is the ACP handshake probe in `checkAgentHandshake`
+// (`src/setup/preflight.ts`). Any provider key names found anywhere else in
+// this file are a regression of that decision.
 
 export interface AgentInstallHint {
   pkg: string;
@@ -19,16 +24,7 @@ export const AGENT_INSTALL_HINTS: Record<string, AgentInstallHint> = {
   codex: { pkg: "@openai/codex-acp", docs: "https://github.com/openai/codex" },
 };
 
-// Expected provider auth env vars per well-known agent family. Presence-only
-// check; absence is a guaranteed failure, presence is not validity.
-export const AGENT_AUTH_ENV: Record<string, string[]> = {
-  opencode: ["OPENAI_API_KEY"],
-  pi: ["ANTHROPIC_API_KEY"],
-  "claude-code": ["ANTHROPIC_API_KEY"],
-  codex: ["OPENAI_API_KEY"],
-};
-
-export const PROVIDER_KEY_LINKS: Record<string, string> = {
-  OPENAI_API_KEY: "https://platform.openai.com/api-keys",
-  ANTHROPIC_API_KEY: "https://console.anthropic.com/settings/keys",
-};
+// Fallback docs URL surfaced by the handshake probe when no install hint is
+// registered for the agent. The agent's own auth config owns the diagnostic;
+// Marshal only points at the protocol layer.
+export const ACPX_AUTH_DOCS = "https://github.com/openclaw/acpx";

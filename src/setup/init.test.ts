@@ -73,21 +73,51 @@ describe("runInit", () => {
     expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
   });
 
-  it("runs all phases without writing config in non-interactive mode", async () => {
+  // ADR-022 Decision 3: --non-interactive alone writes nothing.
+  it("non-interactive mode writes nothing without --yes", async () => {
     const result = await runInit({
       repoRoot,
       configPath,
       runCmd: fullPassRunner(),
-      env: { OPENAI_API_KEY: "sk-x", ANTHROPIC_API_KEY: "sk-y" },
+      env: {},
       nonInteractive: true,
     });
 
     expect(result.ok).toBe(true);
     expect(existsSync(configPath)).toBe(false);
+    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
+  });
+
+  it("non-interactive --yes reproduces the old run-everything behavior", async () => {
+    const result = await runInit({
+      repoRoot,
+      configPath,
+      runCmd: fullPassRunner(),
+      env: {},
+      nonInteractive: true,
+      yes: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(existsSync(configPath)).toBe(true);
     expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
   });
 
-  it("still initializes repo state in non-interactive mode even when acpx is missing", async () => {
+  it("non-interactive mode honors MARSHAL_INIT_YES=1 as consent", async () => {
+    const result = await runInit({
+      repoRoot,
+      configPath,
+      runCmd: fullPassRunner(),
+      env: { MARSHAL_INIT_YES: "1" },
+      nonInteractive: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(existsSync(configPath)).toBe(true);
+    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
+  });
+
+  it("reports not-ok in non-interactive mode when acpx is missing, writes nothing without --yes", async () => {
     const runCmd = fakeRunner((bin) => {
       if (bin === "node") return ok("v20.10.0\n");
       if (bin === "git") return ok("git version 2.40.0\n");
@@ -104,7 +134,8 @@ describe("runInit", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
+    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
+    expect(existsSync(configPath)).toBe(false);
   });
 
   it("writes config on confirm in interactive mode and preserves existing keys", async () => {
@@ -112,14 +143,14 @@ describe("runInit", () => {
     const prompts: string[] = [];
     const prompt = async (q: string): Promise<boolean> => {
       prompts.push(q);
-      return /Write this config/.test(q);
+      return /Initialize Marshal in this repo/.test(q);
     };
 
     const result = await runInit({
       repoRoot,
       configPath,
       runCmd: fullPassRunner(),
-      env: { OPENAI_API_KEY: "sk-x", ANTHROPIC_API_KEY: "sk-y" },
+      env: {},
       nonInteractive: false,
       prompt,
     });
@@ -132,9 +163,16 @@ describe("runInit", () => {
     expect(written.agents.builder).toBe("claude-code");
     expect(written.agents.validator).toBe("pi");
     expect(written.acpx.version).toBe(">=0.12.0 <0.13.0");
+    // ADR-022 Decision 1: single merged prompt names both write targets.
+    expect(prompts.some((q) => /~\/.marshal\/config\.json/.test(q))).toBe(true);
+    expect(prompts.some((q) => /\.marshal\/state\.db/.test(q))).toBe(true);
+    // Old "Write this config?" copy must be gone.
+    expect(prompts.some((q) => /^Write this config\?$/.test(q))).toBe(false);
   });
 
-  it("does not write config when the user declines", async () => {
+  // ADR-022 Decision 1: declining the merged prompt writes nothing —
+  // neither ~/.marshal/config.json nor .marshal/state.db.
+  it("writes nothing — no config, no repo state — when the user declines the merged prompt", async () => {
     const prompt = async (): Promise<boolean> => false;
 
     await runInit({
@@ -147,6 +185,44 @@ describe("runInit", () => {
     });
 
     expect(existsSync(configPath)).toBe(false);
+    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
+    expect(existsSync(join(repoRoot, ".marshal"))).toBe(false);
+  });
+
+  it("re-running init when the machine is already configured and the repo state exists takes the fast path (no prompt)", async () => {
+    // Machine already configured.
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        acpx: { bin: "acpx", version: ">=0.12.0 <0.13.0" },
+        agents: { builder: "opencode", validator: "pi" },
+      }),
+    );
+    // Repo state already present.
+    const stateDir = join(repoRoot, ".marshal");
+    await import("node:fs").then((m) => m.mkdirSync(stateDir, { recursive: true }));
+    await import("node:fs").then((m) =>
+      m.writeFileSync(join(stateDir, "state.db"), Buffer.from("")),
+    );
+
+    const prompts: string[] = [];
+    const prompt = async (q: string): Promise<boolean> => {
+      prompts.push(q);
+      return false;
+    };
+
+    const result = await runInit({
+      repoRoot,
+      configPath,
+      runCmd: fullPassRunner(),
+      env: {},
+      nonInteractive: false,
+      prompt,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.skippedMachine).toBe(true);
+    expect(prompts.some((q) => /Initialize Marshal/.test(q))).toBe(false);
     expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
   });
 
@@ -176,6 +252,84 @@ describe("runInit", () => {
   });
 });
 
+// ADR-022 Decision 2: no provider env var name may appear in the preflight
+// output surfaced by `init` or `doctor`. Regressions here are a direct
+// violation of the open agent-ID model.
+function captureStdout<T>(fn: () => Promise<T>): Promise<{ out: string; ret: T }> {
+  return (async () => {
+    let out = "";
+    const orig = process.stdout.write.bind(process.stdout);
+    (process.stdout as NodeJS.WriteStream).write = ((chunk: unknown) => {
+      out += typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8");
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      const ret = await fn();
+      return { out, ret };
+    } finally {
+      process.stdout.write = orig;
+    }
+  })();
+}
+
+describe("ADR-022 Decision 2 — init/doctor output never names provider env vars", () => {
+  let repoRoot: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), "marshal-init-noenv-"));
+    const dir = mkdtempSync(join(tmpdir(), "marshal-init-noenv-cfg-"));
+    configPath = join(dir, "config.json");
+    process.env.MARSHAL_GLOBAL_CONFIG = configPath;
+  });
+
+  it("init interactive output contains no OPENAI_API_KEY / ANTHROPIC_API_KEY", async () => {
+    const prompt = async (): Promise<boolean> => false;
+    const { out } = await captureStdout(() =>
+      runInit({
+        repoRoot,
+        configPath,
+        runCmd: fullPassRunner(),
+        env: {},
+        nonInteractive: false,
+        prompt,
+      }),
+    );
+    expect(out).not.toMatch(/OPENAI_API_KEY/);
+    expect(out).not.toMatch(/ANTHROPIC_API_KEY/);
+  });
+
+  it("init --non-interactive --yes output contains no OPENAI_API_KEY / ANTHROPIC_API_KEY", async () => {
+    const { out } = await captureStdout(() =>
+      runInit({
+        repoRoot,
+        configPath,
+        runCmd: fullPassRunner(),
+        env: {},
+        nonInteractive: true,
+        yes: true,
+      }),
+    );
+    expect(out).not.toMatch(/OPENAI_API_KEY/);
+    expect(out).not.toMatch(/ANTHROPIC_API_KEY/);
+  });
+
+  it("doctor output contains no OPENAI_API_KEY / ANTHROPIC_API_KEY", async () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        acpx: { bin: "acpx", version: ">=0.12.0 <0.13.0" },
+        agents: { builder: "opencode", validator: "pi" },
+      }),
+    );
+    const { out } = await captureStdout(() =>
+      runDoctor({ repoRoot, configPath, runCmd: fullPassRunner(), env: {} }),
+    );
+    expect(out).not.toMatch(/OPENAI_API_KEY/);
+    expect(out).not.toMatch(/ANTHROPIC_API_KEY/);
+  });
+});
+
 describe("runDoctor", () => {
   let repoRoot: string;
   let configPath: string;
@@ -199,7 +353,7 @@ describe("runDoctor", () => {
       repoRoot,
       configPath,
       runCmd: fullPassRunner(),
-      env: { OPENAI_API_KEY: "sk-x", ANTHROPIC_API_KEY: "sk-y" },
+      env: {},
     });
     expect(result.ok).toBe(true);
     // doctor never initializes repo state.
