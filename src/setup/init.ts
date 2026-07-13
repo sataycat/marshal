@@ -18,7 +18,6 @@ import {
   mergeConfig,
   readGlobalConfig,
   writeGlobalConfig,
-  type AgentCheckResult,
   type CommandRunner,
 } from "./preflight.js";
 
@@ -36,9 +35,6 @@ export interface InitResult {
   skippedMachine: boolean;
 }
 
-// ADR-022 Decision 1: the repo is considered "already initialized" when a
-// state database is already on disk. In that case the write step is skipped
-// and Phase 6 runs as a no-op idempotent call, preserving the fast re-run.
 function repoAlreadyInitialized(repoRoot: string): boolean {
   return existsSync(join(getRepoStateDir(repoRoot), "state.db"));
 }
@@ -47,16 +43,12 @@ function print(line: string): void {
   process.stdout.write(`${line}\n`);
 }
 
-// ADR-024 Decision 3: `marshal init` is always non-interactive. No prompts,
-// no --yes / --non-interactive flags, no consent gates. The user runs
-// `marshal init` to initialize; that is the consent. The flow is:
-//   Phase 1: system prereqs (node, git, pnpm). fail → exit non-zero.
-//   Phase 2: acpx check. fail → print install command + docs, exit non-zero.
-//   Phase 3: agent probing is REMOVED from init (ADR-024 Decision 3). Init
-//            writes the config with AGENT_ID_DEFAULTS and initializes repo
-//            state. Agent verification is `marshal doctor`'s job.
-//   Phase 4/5/6 (merged): generate config, merge with existing, write
-//            ~/.marshal/config.json + .marshal/state.db unconditionally.
+/**
+ * Non-interactive init flow (ADR-024):
+ *   1. System prereqs (node, git, pnpm) — skipped if already configured.
+ *   2. acpx hard-gate — fail → single install message, exit non-zero.
+ *   3. Generate/merge config + initialize repo state.
+ */
 export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   const runCmd = options.runCmd ?? defaultRunCommand;
   const repoRoot = options.repoRoot ?? process.cwd();
@@ -67,10 +59,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
 
   const alreadyConfigured = machineAlreadyConfigured(configPath);
 
-  // Phase 1 — system prerequisites. Skipped on the fast path: a prior
-  // onboarding already validated node/git/pnpm, and those don't disappear
-  // between runs. acpx (Phase 2) is still re-checked because it can be
-  // uninstalled independently.
+  // Phase 1 — system prerequisites (skipped on fast path).
   let phase1: Awaited<ReturnType<typeof checkSystemPrerequisites>> = [];
   if (!alreadyConfigured) {
     phase1 = await checkSystemPrerequisites(runCmd);
@@ -80,21 +69,18 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
     }
   }
 
-  // Phase 2 — acpx hard-gate (ADR-024 Decision 1). If acpx is missing or
-  // outside the accept range with a `fail` status, print the install command
-  // and stop. No in-process `npm i -g` attempt, no fake `✓` line, no
-  // re-probe loop, no continuation into agent probes. This runs even on the
-  // fast path: a config that references `acpx` is not proof the binary is
-  // still installed.
+  // Phase 2 — acpx hard-gate. Print a single message on failure instead of
+  // echoing each sub-check (path + version) redundantly.
   const phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
-  for (const r of phase2) print(formatCheckLine(r));
   if (phase2.some((r) => r.status === "fail")) {
     print(
-      `✗ acpx is required and is missing. Install with \`npm i -g acpx@${installPin}\` and re-run \`marshal init\`.`,
+      `✗ acpx is required. Install with \`npm i -g acpx@${installPin}\` and re-run \`marshal init\`.`,
     );
     return { ok: false, skippedMachine: false };
   }
+  for (const r of phase2) print(formatCheckLine(r));
 
+  // Fast path — machine already configured, just ensure repo state.
   if (alreadyConfigured) {
     print("✓ machine already configured");
     initRepoState(repoRoot);
@@ -104,13 +90,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
     return { ok: true, skippedMachine: true };
   }
 
-  // Phase 3 — agent probing is REMOVED from init (ADR-024 Decision 3).
-  // Init writes the config with AGENT_ID_DEFAULTS; agent verification is
-  // `marshal doctor`'s job.
-
-  // Phases 5+6 (merged, ADR-022 Decision 1 + ADR-024 Decision 3). Generate
-  // the config from defaults (or preserve existing config values), merge,
-  // and write unconditionally — no prompt, no preview, no consent gate.
+  // Phase 3 — generate config from defaults, merge with existing, write.
   const existing = readGlobalConfig(configPath) ?? {};
   const builderId = existing.agents?.builder ?? AGENT_ID_DEFAULTS.builder;
   const validatorId = existing.agents?.validator ?? AGENT_ID_DEFAULTS.validator;
@@ -132,22 +112,15 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   if (machineNeedsConfig || repoNeedsInit) {
     writeInitFiles(machineNeedsConfig, merged, configPath, repoRoot);
   } else {
-    // Both already initialized — Phase 6 runs as an idempotent no-op.
     initRepoState(repoRoot);
     openDb(repoRoot);
     print(`✓ repo initialized at ${getRepoStateDir(repoRoot)}`);
   }
 
-  const checksOk =
-    phase1.every((r) => r.status !== "fail") && phase2.every((r) => r.status !== "fail");
-
-  if (checksOk) printReady();
-  return { ok: checksOk, skippedMachine: false };
+  printReady();
+  return { ok: true, skippedMachine: false };
 }
 
-// Shared write path for the merged Phase 5+6 (ADR-022 Decision 1): writes the
-// global config (only when needed), then initializes the repo state dir and
-// opens the database.
 function writeInitFiles(
   machineNeedsConfig: boolean,
   config: GlobalConfig,
