@@ -115,7 +115,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   for (const r of phase2) print(formatCheckLine(r));
   const acpxMissing = phase2.some((r) => r.status === "fail");
   if (acpxMissing && !nonInteractive) {
-    await maybeInstallAcpx(runCmd, prompt, installPin);
+    await maybeInstallAcpx(prompt, installPin);
     // Re-probe so the rest of the flow (and the short-circuit below) sees the
     // post-install state rather than the pre-install snapshot.
     phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
@@ -265,12 +265,12 @@ async function maybeInstallPnpm(
 }
 
 async function maybeInstallAcpx(
-  runCmd: CommandRunner,
   prompt: YesNoPrompt,
   versionRange: string,
 ): Promise<void> {
-  if (await prompt(`acpx not found. Install with \`npm i -g acpx@${versionRange}\`?`)) {
-    await runInstall(runCmd, `npm i -g acpx@${versionRange}`);
+  const cmd = `npm i -g acpx@${versionRange}`;
+  if (await prompt(`acpx not found. Run this command in your terminal:\n\n  ${cmd}\n\nThen press Enter to continue`)) {
+    print(`✓ ${cmd}`);
   }
 }
 

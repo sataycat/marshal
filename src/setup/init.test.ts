@@ -250,7 +250,7 @@ describe("runInit", () => {
       prompt,
     });
 
-    expect(prompts.some((q) => /Install with `npm i -g acpx@/.test(q))).toBe(true);
+    expect(prompts.some((q) => /npm i -g acpx@/.test(q))).toBe(true);
   });
 
   // Short-circuit: acpx is a hard dependency. When it is still failing after
