@@ -1,0 +1,425 @@
+# Human Testing Guide
+
+This guide is a practical, end-to-end manual test plan for Marshal across all implemented surfaces:
+
+- CLI onboarding and daily operations
+- Daemon HTTP + WebSocket API
+- Web board + spec authoring chat + review/merge
+- Reliability and edge conditions
+
+It is written for local-first testing on one machine.
+
+## 1. Test scope and assumptions
+
+### In scope (implemented)
+
+- `marshal init` / `marshal doctor`
+- task lifecycle (`backlog -> ready -> building -> validating -> review -> done`)
+- escape hatches (`building -> ready`, `building -> backlog`, `validating -> backlog`, `review -> backlog`)
+- run history APIs
+- spec authoring chat (`/spec-messages`, `/spec`)
+- diff review and local merge (`/diff`, `/merge`)
+- SPA static serving and WebSocket live updates
+
+### Out of scope (not current product behavior)
+
+- multi-user auth/RBAC
+- exposed non-localhost daemon as a supported default
+- GitHub PR creation flow as a required path for daily operation
+
+## 2. Environment setup
+
+### Prerequisites
+
+1. Node.js >= 18
+2. git
+3. pnpm (recommended; missing pnpm is warning-level in onboarding)
+4. `acpx` plus configured builder/validator/spec author agents
+
+### Build
+
+```sh
+pnpm install
+pnpm run build:all
+```
+
+### Test repo bootstrap
+
+Use a throwaway git repo for manual runs:
+
+```sh
+mkdir -p /tmp/marshal-manual && cd /tmp/marshal-manual
+git init -b main
+git config user.email "you@example.com"
+git config user.name "You"
+echo "# Manual Marshal Repo" > README.md
+git add README.md
+git commit -m "init"
+```
+
+## 3. Onboarding tests (CLI surface)
+
+### 3.1 Happy path: first-time init
+
+```sh
+marshal init
+```
+
+Expected:
+
+- machine preflight output printed
+- repo initialized
+- `.marshal/state.db` exists
+- `~/.marshal/config.json` exists or is updated (interactive path)
+
+### 3.2 Fast path: already configured machine
+
+Run `marshal init` again in the same repo.
+
+Expected:
+
+- output indicates machine already configured
+- repo init still succeeds
+
+### 3.3 Doctor: read-only diagnostics
+
+```sh
+marshal doctor
+```
+
+Expected:
+
+- no repo mutation
+- clear pass/warn/fail lines
+- useful remediation hints when checks fail
+
+### 3.4 Negative onboarding checks
+
+1. Temporarily hide `acpx` from `PATH`, run `marshal doctor`
+2. unset provider API keys, run `marshal doctor`
+3. if possible, run with older Node major (<18)
+
+Expected:
+
+- missing `acpx` is a **fail**
+- missing auth env is **warning**
+- old Node major is **fail**
+
+## 4. Core lifecycle tests (CLI + daemon loop)
+
+### 4.1 Create task in backlog
+
+```sh
+marshal task create --slug manual-smoke --title "Manual smoke" --spec "## Goal\nDo thing\n"
+marshal task show manual-smoke
+```
+
+Expected: task exists in `backlog`.
+
+### 4.2 Freeze spec to ready
+
+```sh
+marshal task ready manual-smoke
+marshal task show manual-smoke
+```
+
+Expected:
+
+- status becomes `ready`
+- worktree and task branch created
+- frozen spec file committed under `specs/`
+
+### 4.3 Build + validate loop
+
+```sh
+marshal daemon run-once
+marshal task show manual-smoke
+marshal daemon run-once
+marshal task show manual-smoke
+```
+
+Expected:
+
+- first cycle: `ready -> building -> validating` path (or `building` on build error)
+- second cycle: validator routes to `review` on pass or back to `building` on fail
+
+### 4.4 Retry and escalation behavior
+
+Force validator failures (using your harness prompts/config).
+
+Expected:
+
+- failures increment retry count
+- task bounces to `building` until retry cap
+- after cap, task escalates to `review` with `last_failure`
+
+### 4.5 Escape hatches
+
+Exercise:
+
+```sh
+marshal task transition manual-smoke ready
+marshal task transition manual-smoke building
+marshal task transition manual-smoke backlog
+```
+
+Also test `validating -> backlog` from a validating task.
+
+Expected:
+
+- transition succeeds only for valid edges
+- retry state resets on escape-hatch transitions
+
+## 5. HTTP API tests (contract-level)
+
+Start daemon:
+
+```sh
+marshal daemon start --interval 5000
+```
+
+In another shell, discover port:
+
+```sh
+cat .marshal/daemon.port
+```
+
+Assume `PORT=$(cat .marshal/daemon.port)`.
+
+### 5.1 Health and basic routes
+
+```sh
+curl -s http://127.0.0.1:$PORT/api/health
+```
+
+Expected: `{"status":"ok","version":"..."}`.
+
+### 5.2 Task CRUD and validation
+
+1. `POST /api/tasks` valid payload
+2. `GET /api/tasks`
+3. `GET /api/tasks/:slug`
+4. `POST /api/tasks/:slug/transition`
+5. `POST /api/tasks/:slug/ready`
+
+Negative checks:
+
+- malformed JSON => `400 invalid_json`
+- unknown body field => `400 unknown_field`
+- missing required field => `422 missing_field`
+- unknown status => `422 unknown_status`
+- invalid transition => `409 invalid_transition`
+
+### 5.3 Runs APIs
+
+Test:
+
+- `GET /api/tasks/:slug/runs`
+- `GET /api/runs/:id`
+- `GET /api/runs/:id/events?limit=...&after_seq=...`
+
+Negative checks:
+
+- non-numeric run id => `400 invalid_run_id`
+- unknown run => `404 run_not_found`
+- `limit > 500` => `422 invalid_limit`
+- malformed `after_seq` => `400 invalid_query`
+
+### 5.4 Spec APIs
+
+Backlog task:
+
+- `GET /api/tasks/:slug/spec-messages`
+- `POST /api/tasks/:slug/spec-messages` with user content
+- `POST /api/tasks/:slug/spec` with `spec_markdown`
+
+Negative checks:
+
+- empty content/spec => `422 invalid_field`
+- unknown fields => `400 unknown_field`
+- non-backlog task => `409 spec_chat_closed`
+
+### 5.5 Diff and merge APIs
+
+Review task:
+
+- `GET /api/tasks/:slug/diff`
+- `POST /api/tasks/:slug/merge`
+
+Negative checks:
+
+- task not in review => `409 not_review`
+- merge conflict => `409 merge_conflict`, task remains `review`
+
+## 6. Web board tests (daily-driving UX)
+
+### 6.1 Startup and rendering
+
+1. Ensure web bundle built (`pnpm run build:web`)
+2. Run daemon and open `http://127.0.0.1:$PORT/`
+
+Expected:
+
+- board loads with columns by task status
+- task cards show title/slug/status metadata
+- selecting card opens detail panel
+
+### 6.2 New task flow
+
+1. Open New Task modal
+2. Create with title only
+3. Create with title + spec markdown
+4. Try empty title
+
+Expected:
+
+- successful tasks appear in backlog quickly
+- empty title shows error feedback
+
+### 6.3 Task detail actions
+
+Verify action visibility by state:
+
+- backlog: Freeze only
+- ready: no manual action
+- building: re-queue/send-back (confirm required)
+- validating: send-back (confirm required)
+- review: approve/merge + send-back
+- done: no action
+
+Expected:
+
+- optimistic update feel
+- on failure, UI rolls back and shows an error
+
+### 6.4 Spec authoring chat
+
+For backlog task:
+
+1. Send message
+2. Confirm assistant reply appears
+3. If assistant emits ` ```marshal-spec ` block, click **Update Spec**
+4. Freeze task from panel
+
+Expected:
+
+- messages persist and render in order
+- latest proposed spec can be applied
+- freeze transitions task to `ready`
+
+### 6.5 Review diff + merge
+
+For review task:
+
+1. Open diff panel and verify rendered hunks
+2. Use Approve & Merge
+
+Expected:
+
+- merged task becomes `done`
+- worktree/branch cleaned up
+
+## 7. WebSocket and live-update tests
+
+### 7.1 Socket connect snapshot
+
+Connect to `ws://127.0.0.1:$PORT/ws`.
+
+Expected:
+
+- first event `connected` with task snapshot
+
+### 7.2 Broadcast events
+
+While socket connected, create/transition tasks via API or UI.
+
+Expected:
+
+- `task.created`, `task.transitioned`, `task.updated` events arrive
+- two clients connected simultaneously see same broadcast
+
+### 7.3 Connection robustness
+
+Terminate a WS client abruptly.
+
+Expected:
+
+- daemon remains healthy (`/api/health` still 200)
+
+## 8. Static serving and routing tests
+
+### 8.1 Bundle present
+
+Expected:
+
+- `/` serves SPA `index.html`
+- unknown non-API route falls back to SPA entry
+- `/assets/*` serves static assets with correct MIME
+
+### 8.2 Bundle absent
+
+Temporarily remove/rename `web/dist` and hit `/`.
+
+Expected:
+
+- `404` with clear "Web bundle not built" guidance
+
+### 8.3 Safety checks
+
+- `/api/*` must not be swallowed by SPA fallback
+- `/assets/../...` traversal attempts must not expose files
+
+## 9. Reliability and operational edge tests
+
+### 9.1 Daemon port-file lifecycle
+
+On `marshal daemon start`:
+
+- `.marshal/daemon.port` created with bound port
+
+On clean shutdown (SIGINT/SIGTERM):
+
+- `.marshal/daemon.port` removed
+
+### 9.2 Port conflicts / bind failures
+
+Start daemon on an occupied port.
+
+Expected:
+
+- startup fails clearly
+- no stale `.marshal/daemon.port` left behind
+
+### 9.3 Stale port file
+
+Write bogus `.marshal/daemon.port`, then start daemon.
+
+Expected:
+
+- daemon overwrites with actual live port
+
+### 9.4 Merge conflict recovery
+
+Force diverged base vs task branch and attempt merge.
+
+Expected:
+
+- `merge_conflict`
+- task stays `review`
+- source checkout is not left in unresolved `UU` state
+
+## 10. Suggested regression cadence
+
+### Per PR (fast smoke)
+
+1. onboarding fast path (`init`, `doctor`)
+2. one full backlog->review loop
+3. web board create + freeze + one transition
+4. API negative checks (unknown field + invalid transition)
+
+### Before release
+
+1. full checklist in sections 3-9
+2. both CLI-only and web-driven daily-driving paths
+3. retry-cap + merge-conflict paths
+4. WS multi-client broadcast path
