@@ -6,20 +6,37 @@ M0 is the headless vertical slice — no UI, just CLI commands and logs. See [`d
 
 ## Requirements
 
-- Node.js (ES2022)
-- pnpm (`pnpm@11.10.0` is pinned via `packageManager`)
+- Node.js ≥ 18 (ES2022)
+- A C++ toolchain (`python3`, `make`, `g++` or `clang`) for `better-sqlite3`'s native build (prebuilt binaries cover the common platforms; see ADR-021)
 - git
 - [acpx](https://github.com/openclaw/acpx) on PATH (the ACP client the daemon shells out to)
 - A builder agent and a validator agent reachable through ACPX (M0 ships with `opencode` as builder and `pi` as validator)
 
 ## Install
 
+Marshal ships as an npm package installed from GitHub (the GitHub shorthand form — see [ADR-021](docs/adr/archived/ADR-021-cli-distribution.md)):
+
+```sh
+npm i -g sataycat/marshal
+```
+
+This clones `github.com/sataycat/marshal`, runs npm's install lifecycle (compiling `better-sqlite3` for your platform), and runs a `postinstall` build that produces `dist/` so the `marshal` binary on PATH is ready to go.
+
+Then run onboarding:
+
+```sh
+marshal init
+marshal task create --slug my-feature --title "My feature" --spec-file spec.md
+```
+
+### From source (development)
+
 ```sh
 pnpm install
 pnpm run build
 ```
 
-This produces `dist/` and makes `bin/marshal` runnable. To use `marshal` from anywhere, link or install the package globally (`npm link` from the repo root).
+This produces `dist/` and makes `bin/marshal` runnable. To use `marshal` from anywhere during development, link the package globally (`npm link` from the repo root).
 
 ## Configuration
 

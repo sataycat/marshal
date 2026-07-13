@@ -1,10 +1,26 @@
 {
   "name": "marshal",
   "version": "0.0.1",
+  "description": "Local-first, agent-agnostic coding-agent orchestrator with a build-verify-review loop.",
   "bin": {
     "marshal": "./bin/marshal"
   },
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sataycat/marshal.git"
+  },
+  "homepage": "https://github.com/sataycat/marshal",
+  "bugs": "https://github.com/sataycat/marshal/issues",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
     "build:web": "pnpm --filter marshal-web run build",
@@ -14,7 +30,9 @@
     "test:all": "pnpm run test && pnpm run test:web",
     "check": "tsc --noEmit",
     "check:web": "pnpm --filter marshal-web run check",
-    "check:all": "pnpm run check && pnpm run check:web"
+    "check:all": "pnpm run check && pnpm run check:web",
+    "prepublishOnly": "pnpm run build",
+    "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.8",

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-07-12
+Accepted — 2026-07-13 (implemented in `package.json`, `scripts/postinstall.js`, `README.md`, `LICENSE`)
 
 ## Context
 
