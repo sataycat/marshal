@@ -69,7 +69,22 @@ cd your-repo
 marshal init
 ```
 
-Creates `.marshal/` (state directory + SQLite database).
+`marshal init` is the one onboarding command (ADR-020). It runs a preflight across the machine and the repo:
+
+1. **System prerequisites** — `node >=18`, `git`, `pnpm` (warns if missing).
+2. **ACPX** — checks `acpx` on PATH and that its version is in the pinned range (`>=0.12.0 <0.13.0`); offers to install if missing.
+3. **Agent discovery** — for the configured `builder` and `validator` (defaults `opencode` / `pi`), probes `acpx <agent> --version` and a one-shot handshake; offers to install known agents.
+4. **Auth environment** — presence-checks the expected provider env vars (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`); warns on missing.
+5. **Config generation** — writes `~/.marshal/config.json` from the detected state (merges into an existing partial config, leaving existing keys untouched).
+6. **Repo init** — creates `.marshal/` (state directory + SQLite database).
+
+Re-running `marshal init` on a machine whose `~/.marshal/config.json` already has `acpx` + both agent roles skips phases 1–5 (`✓ machine already configured`) and only initializes the repo. `marshal init --non-interactive` runs every check, performs no installs/config writes, and exits non-zero on any failure (for CI/scripts).
+
+Diagnose a broken setup without mutating anything:
+
+```sh
+marshal doctor
+```
 
 ### 2. Author a task
 
@@ -139,7 +154,8 @@ backlog -> ready -> building -> validating -> review -> done
 ## CLI reference
 
 ```
-marshal init
+marshal init [--non-interactive]
+marshal doctor
 marshal task list
 marshal task create --slug <slug> --title <title> [--spec <markdown> | --spec-file <path>]
 marshal task show <slug>

@@ -4,7 +4,14 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { Agent, AgentEvent, AgentId, AgentSession, PromptOptions, SpawnOptions } from "../src/agent/types.js";
+import type {
+  Agent,
+  AgentEvent,
+  AgentId,
+  AgentSession,
+  PromptOptions,
+  SpawnOptions,
+} from "../src/agent/types.js";
 import { WorktreeManager } from "../src/worktree/manager.js";
 import { getTask, transitionTask } from "../src/tasks/store.js";
 import { RunLog } from "../src/daemon/run-log.js";
@@ -82,7 +89,11 @@ describe("M0 loop integration (CLI + orchestrator)", () => {
     globalConfigPath = join(worktreeRoot, "global-config.json");
     writeFileSync(
       globalConfigPath,
-      JSON.stringify({ worktree: { root: worktreeRoot } }),
+      JSON.stringify({
+        acpx: { bin: "acpx", version: ">=0.12.0 <0.13.0" },
+        agents: { builder: "opencode", validator: "pi" },
+        worktree: { root: worktreeRoot },
+      }),
     );
     process.env.MARSHAL_GLOBAL_CONFIG = globalConfigPath;
 
@@ -99,7 +110,10 @@ describe("M0 loop integration (CLI + orchestrator)", () => {
 
     // 2. Create a task with a spec via the CLI.
     const specFile = join(repoRoot, "spec.md");
-    writeFileSync(specFile, "## Goal\nAdd a feature module.\n\n## Acceptance Criteria\n- src/feature.ts exists.\n");
+    writeFileSync(
+      specFile,
+      "## Goal\nAdd a feature module.\n\n## Acceptance Criteria\n- src/feature.ts exists.\n",
+    );
     const createOut = runCli(
       ["task", "create", "--slug", "m0-smoke", "--title", "M0 smoke", "--spec-file", specFile],
       repoRoot,
@@ -269,7 +283,16 @@ describe("M0 loop integration (CLI + orchestrator)", () => {
     const specFile = join(repoRoot, "spec.md");
     writeFileSync(specFile, "## Goal\nNever satisfied.\n");
     runCli(
-      ["task", "create", "--slug", "m0-escalate", "--title", "M0 escalate", "--spec-file", specFile],
+      [
+        "task",
+        "create",
+        "--slug",
+        "m0-escalate",
+        "--title",
+        "M0 escalate",
+        "--spec-file",
+        specFile,
+      ],
       repoRoot,
     );
     runCli(["task", "ready", "m0-escalate"], repoRoot);

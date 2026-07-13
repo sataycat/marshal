@@ -3,11 +3,10 @@ import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getRepoStateDir, initGlobalConfig, initRepoState } from "./daemon/config.js";
 import { startHttpServer } from "./daemon/http.js";
 import { formatRunOnceResult, startDaemon } from "./daemon/loop.js";
 import { runOnce } from "./daemon/orchestrator.js";
-import { openDb } from "./db/index.js";
+import { runDoctor, runInit } from "./setup/init.js";
 import { registerTaskCommands } from "./tasks/commands.js";
 import { WorktreeManager } from "./worktree/manager.js";
 import { loadGlobalConfig } from "./worktree/config.js";
@@ -23,12 +22,26 @@ const program = new Command()
 
 program
   .command("init")
-  .description("Initialize marshal state in the current repo")
-  .action(() => {
-    initGlobalConfig();
-    initRepoState();
-    openDb();
-    console.log("Marshal initialized at %s", getRepoStateDir());
+  .description("Run onboarding preflight and initialize marshal state in the current repo")
+  .option(
+    "--non-interactive",
+    "Run all checks; no installs, no config writes; exit non-zero on failure",
+  )
+  .action(async (options: { nonInteractive?: boolean }) => {
+    const result = await runInit({ nonInteractive: options.nonInteractive });
+    if (!result.ok) {
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("doctor")
+  .description("Run read-only preflight checks (no installs, no config writes, no repo init)")
+  .action(async () => {
+    const result = await runDoctor();
+    if (!result.ok) {
+      process.exitCode = 1;
+    }
   });
 
 const task = program.command("task").description("Task management");

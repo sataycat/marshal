@@ -14,7 +14,7 @@ import type {
 // Removed. ACPX takes the agent id as a positional CLI argument, so the id
 // IS the token. There is no registry to consult.
 
-const DEFAULT_VERSION_RANGE = ">=0.12.0 <0.13.0";
+export const DEFAULT_VERSION_RANGE = ">=0.12.0 <0.13.0";
 const DEFAULT_TIMEOUT_SECONDS = 1800;
 
 export interface AcpxAgentAdapterOptions {
@@ -432,7 +432,7 @@ function compareVersions(a: [number, number, number], b: [number, number, number
   return 0;
 }
 
-function satisfiesVersionRange(version: string, range: string): boolean {
+export function satisfiesVersionRange(version: string, range: string): boolean {
   const parsed = parseVersion(version);
   const trimmed = range.trim();
 

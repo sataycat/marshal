@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const binPath = resolve(process.cwd(), "bin/marshal");
 
@@ -17,6 +17,28 @@ function run(args: string[], cwd?: string): { stdout: string; stderr: string } {
 }
 
 describe("CLI smoke tests", () => {
+  let globalConfigPath: string;
+
+  beforeEach(() => {
+    // `marshal init` runs the full interactive preflight when no machine-level
+    // config exists. Tests exercise the already-configured fast path (ADR-020
+    // Decision 1): a complete ~/.marshal/config.json collapses phases 1–5.
+    const globalDir = mkdtempSync(join(tmpdir(), "marshal-global-"));
+    globalConfigPath = join(globalDir, "config.json");
+    writeFileSync(
+      globalConfigPath,
+      JSON.stringify({
+        acpx: { bin: "acpx", version: ">=0.12.0 <0.13.0" },
+        agents: { builder: "opencode", validator: "pi" },
+      }),
+    );
+    process.env.MARSHAL_GLOBAL_CONFIG = globalConfigPath;
+  });
+
+  afterEach(() => {
+    delete process.env.MARSHAL_GLOBAL_CONFIG;
+  });
+
   it("prints version with --version", () => {
     const { stdout } = run(["--version"]);
     expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
@@ -25,7 +47,8 @@ describe("CLI smoke tests", () => {
   it("initializes repo state with init", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-"));
     const { stdout } = run(["init"], root);
-    expect(stdout).toContain("Marshal initialized");
+    expect(stdout).toContain("machine already configured");
+    expect(stdout).toContain("repo initialized");
     expect(existsSync(join(root, ".marshal"))).toBe(true);
     expect(existsSync(join(root, ".marshal", "state.db"))).toBe(true);
   });
@@ -56,9 +79,9 @@ describe("CLI smoke tests", () => {
 
     run(["init"], root);
 
-    const globalConfigPath = join(worktreeRoot, "global-config.json");
-    writeFileSync(globalConfigPath, JSON.stringify({ worktree: { root: worktreeRoot } }));
-    process.env.MARSHAL_GLOBAL_CONFIG = globalConfigPath;
+    const worktreeConfigPath = join(worktreeRoot, "global-config.json");
+    writeFileSync(worktreeConfigPath, JSON.stringify({ worktree: { root: worktreeRoot } }));
+    process.env.MARSHAL_GLOBAL_CONFIG = worktreeConfigPath;
 
     try {
       const createResult = run(["worktree", "create", "--task", "hello-world"], root);
@@ -94,15 +117,24 @@ describe("CLI smoke tests", () => {
 
     run(["init"], root);
 
-    const globalConfigPath = join(worktreeRoot, "global-config.json");
-    writeFileSync(globalConfigPath, JSON.stringify({ worktree: { root: worktreeRoot } }));
-    process.env.MARSHAL_GLOBAL_CONFIG = globalConfigPath;
+    const worktreeConfigPath = join(worktreeRoot, "global-config.json");
+    writeFileSync(worktreeConfigPath, JSON.stringify({ worktree: { root: worktreeRoot } }));
+    process.env.MARSHAL_GLOBAL_CONFIG = worktreeConfigPath;
 
     try {
       const specFile = join(root, "spec.md");
       writeFileSync(specFile, "## Goal\nBuild the thing.\n");
       run(
-        ["task", "create", "--slug", "frozen-thing", "--title", "Frozen thing", "--spec-file", specFile],
+        [
+          "task",
+          "create",
+          "--slug",
+          "frozen-thing",
+          "--title",
+          "Frozen thing",
+          "--spec-file",
+          specFile,
+        ],
         root,
       );
       run(["task", "ready", "frozen-thing"], root);
@@ -175,7 +207,9 @@ describe("CLI smoke tests", () => {
 
     const dbPath = join(root, ".marshal", "state.db");
     const db = new Database(dbPath);
-    const taskId = db.prepare("SELECT id FROM tasks WHERE slug = ?").get("bricked") as { id: number };
+    const taskId = db.prepare("SELECT id FROM tasks WHERE slug = ?").get("bricked") as {
+      id: number;
+    };
     db.prepare(
       "INSERT INTO runs (task_id, role, agent_id, status, error) VALUES (?, 'builder', 'opencode', 'error', ?)",
     ).run(taskId.id, "spawn failed: acpx missing");

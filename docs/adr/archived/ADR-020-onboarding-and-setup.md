@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-07-11
+Accepted — 2026-07-13 (implemented in `src/setup/`)
 
 ## Context
 
