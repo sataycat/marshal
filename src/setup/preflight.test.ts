@@ -142,56 +142,40 @@ describe("checkAcpx", () => {
 });
 
 describe("checkAgent", () => {
-  it("passes when the agent responds to --help and the handshake", async () => {
+  it("passes when the session probe succeeds (sessions new + close)", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help")
-        return ok("opencode 1.0.0\n");
-      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello")
-        return ok("hi\n");
+      // ADR-024 Decision 2: session probe via `acpx <agent> sessions new`.
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("new"))
+        return ok(JSON.stringify({ recordId: "rec-probe", name: "probe-session" }) + "\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("close"))
+        return ok("");
       return "notfound";
     });
     const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
     const result = await checkAgent(run, "opencode", "acpx", "builder", tmp);
-    expect(result.installed.status).toBe("ok");
     expect(result.handshake.status).toBe("ok");
   });
 
-  it("fails install with the curated acpx adapter command hint for a known agent", async () => {
+  it("warns (does not fail) when the session probe fails — and surfaces the agent's docs + fix", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help")
-        return err(1, "no such agent");
-      return "notfound";
-    });
-    const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
-    const result = await checkAgent(run, "opencode", "acpx", "builder", tmp);
-    expect(result.installed.status).toBe("fail");
-    expect(result.installed.fix).toContain("npx -y opencode-ai acp");
-    expect(result.installed.docs).toBe("https://opencode.ai");
-  });
-
-  it("warns (does not fail) when the handshake fails — likely auth — and surfaces the agent's docs", async () => {
-    const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help") return ok("1.0.0\n");
-      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello")
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("new"))
         return err(1, "auth error");
       return "notfound";
     });
     const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
     const result = await checkAgent(run, "opencode", "acpx", "builder", tmp);
-    expect(result.installed.status).toBe("ok");
     expect(result.handshake.status).toBe("warning");
-    expect(result.handshake.detail).toContain("auth");
     expect(result.handshake.detail).toContain("auth error");
     // ADR-022 Decision 2: docs are the agent's own, never a provider console URL.
     expect(result.handshake.docs).toBe("https://opencode.ai");
     expect(result.handshake.docs).not.toContain("openai.com");
+    // ADR-024 Decision 4: fix surfaces the acpxCommand for debugging.
+    expect(result.handshake.fix).toContain("npx -y opencode-ai acp");
   });
 
-  it("falls back to the ACPX docs link for an unknown agent whose handshake fails", async () => {
+  it("falls back to the ACPX docs link for an unknown agent whose session probe fails", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "custom-agent" && args[1] === "--help")
-        return ok("1.0.0\n");
-      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello")
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("new"))
         return err(1, "auth error");
       return "notfound";
     });
@@ -201,24 +185,45 @@ describe("checkAgent", () => {
     expect(result.handshake.docs).toBe("https://acpx.sh/agents.html");
   });
 
-  it("asks the user to install manually for an unknown agent id", async () => {
+  it("skips sessions close when sessions new fails (no session to close)", async () => {
+    const calls: string[] = [];
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "custom-agent" && args[1] === "--help")
-        return err(1, "no such agent");
+      calls.push(`${bin} ${args.join(" ")}`);
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("new"))
+        return err(1, "no adapter");
       return "notfound";
     });
     const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
-    const result = await checkAgent(run, "custom-agent", "acpx", "builder", tmp);
-    expect(result.installed.status).toBe("fail");
-    expect(result.installed.fix).toContain("install the 'custom-agent' agent");
+    await checkAgent(run, "opencode", "acpx", "builder", tmp);
+    // sessions new was called, but sessions close was NOT.
+    expect(calls.some((c) => c.includes("sessions new"))).toBe(true);
+    expect(calls.some((c) => c.includes("sessions close"))).toBe(false);
+  });
+
+  it("closes the session after a successful sessions new", async () => {
+    const calls: string[] = [];
+    const run = fakeRunner((bin, args) => {
+      calls.push(`${bin} ${args.join(" ")}`);
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("new"))
+        return ok(JSON.stringify({ recordId: "rec-probe", name: "probe-session" }) + "\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("close"))
+        return ok("");
+      return "notfound";
+    });
+    const tmp = mkdtempSync(join(tmpdir(), "marshal-agent-"));
+    await checkAgent(run, "opencode", "acpx", "builder", tmp);
+    expect(calls.some((c) => c.includes("sessions new"))).toBe(true);
+    expect(calls.some((c) => c.includes("sessions close probe-session"))).toBe(true);
   });
 });
 
 describe("probeAgentCandidates and renderProbeLine (ADR-023 Decision 4)", () => {
   it("probes every agent in the ACPX built-in registry", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[1] === "--help") return ok("1.0.0\n");
-      if (bin === "acpx" && args[0] === "--cwd" && args.includes("exec")) return ok("hi\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("new"))
+        return ok(JSON.stringify({ recordId: "rec-probe", name: "probe-session" }) + "\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("close"))
+        return ok("");
       return "notfound";
     });
     const tmp = mkdtempSync(join(tmpdir(), "marshal-probe-"));
@@ -230,25 +235,24 @@ describe("probeAgentCandidates and renderProbeLine (ADR-023 Decision 4)", () => 
     expect(probes.every((p) => isProbeUsable(p))).toBe(true);
   });
 
-  it("marks agents with a failing handshake as not usable", async () => {
+  it("marks agents with a failing session probe as warning (not ok)", async () => {
     const run = fakeRunner((bin, args) => {
-      // installed check fails → not usable
-      if (bin === "acpx" && args[1] === "--help") return err(1, "no such agent");
-      if (bin === "acpx" && args[0] === "--cwd" && args.includes("exec"))
-        return err(1, "auth error");
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("new"))
+        return err(1, "no adapter");
       return "notfound";
     });
     const tmp = mkdtempSync(join(tmpdir(), "marshal-probe-"));
     const probes = await probeAgentCandidates(run, "acpx", tmp);
-    // Every probe has a failed install → not usable.
-    expect(probes.every((p) => !isProbeUsable(p))).toBe(true);
+    // Every probe has a warning handshake (session probe failed).
+    expect(probes.every((p) => p.handshake.status === "warning")).toBe(true);
+    // None have an ok handshake.
+    expect(probes.every((p) => p.handshake.status !== "ok")).toBe(true);
   });
 
   it("renderProbeLine formats an indexed line with a status icon", () => {
     const line = renderProbeLine(
       {
         agentId: "codex",
-        installed: { label: "codex", status: "ok" },
         handshake: { label: "codex handshake", status: "ok" },
       },
       1,
@@ -261,8 +265,7 @@ describe("probeAgentCandidates and renderProbeLine (ADR-023 Decision 4)", () => 
 describe("ADR-022 Decision 2 — preflight no longer references provider auth env vars", () => {
   it("checkAgentHandshake drops the legacy pre-ADR-022 docs string", async () => {
     const run = fakeRunner((bin, args) => {
-      if (bin === "acpx" && args[0] === "opencode" && args[1] === "--help") return ok("1.0.0\n");
-      if (bin === "acpx" && args[0] === "--cwd" && args[args.length - 1] === "hello")
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("new"))
         return err(1, "boom");
       return "notfound";
     });

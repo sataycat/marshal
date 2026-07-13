@@ -51,7 +51,7 @@ Process model — explicit decision: one daemon process per repo, not one global
 
 - Substrate: ACP (Agent Client Protocol, Zed's JSON-RPC over stdio standard). Durable, multi-vendor, 25+ agents, registry launched Jan 2026, remote transports on the roadmap.
 - First client: ACPX (openclaw/acpx). Gives persistent + named sessions, prompt queueing, cancel, cwd sandboxing, permission modes, and structured typed output (thinking / tool calls / diffs). ACPX publishes a stability commitment for its CLI grammar, flag names, output shapes, and the no-envelope NDJSON stream (`acpx.sh/VISION.html` Principle 4); Marshal pins a semver range and treats ACPX as a versioned infrastructure dependency.
-- Starting agents: chosen by the user at `marshal init` time. Marshal ships no preferred agent; any agent in the ACPX built-in registry (`acpx.sh/agents.html`) or any custom `--agent <command>` works.
+- Starting agents: opencode and pi by default (`AGENT_ID_DEFAULTS` in `src/worktree/config.ts`). Configurable via `agents.{builder,validator,specAuthor}` in `~/.marshal/config.json`. Any agent in the ACPX built-in registry (`acpx.sh/agents.html`) or any custom `--agent <command>` works.
 - Note some agents are adapter-wrapped rather than native ACP, so expect occasional adapter lag; that is a property of the upstream adapters, not a reason for Marshal to defer supporting them.
 
 ### 3.4 Data and source of truth

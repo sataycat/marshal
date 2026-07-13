@@ -1,10 +1,9 @@
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { initGlobalConfig, initRepoState, getRepoStateDir } from "../daemon/config.js";
 import { openDb } from "../db/index.js";
-import { type AgentRole, type GlobalConfig } from "../worktree/config.js";
+import { AGENT_ID_DEFAULTS, type GlobalConfig } from "../worktree/config.js";
 import {
   ACPX_ACCEPT_RANGE,
   ACPX_INSTALL_PIN,
@@ -15,81 +14,18 @@ import {
   formatCheckLine,
   generateConfig,
   getGlobalConfigPath,
-  isProbeUsable,
   machineAlreadyConfigured,
   mergeConfig,
-  probeAgentCandidates,
   readGlobalConfig,
-  renderProbeLine,
   writeGlobalConfig,
   type AgentCheckResult,
-  type AgentProbe,
-  type CheckResult,
   type CommandRunner,
-  type EnvView,
 } from "./preflight.js";
 
-export type YesNoPrompt = (question: string) => Promise<boolean>;
-
-export type AgentSelectPrompt = (
-  role: AgentRole,
-  candidates: AgentProbe[],
-  defaultId?: string,
-) => Promise<string>;
-
-function defaultYesNo(question: string): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(`${question} [y/N] `, (answer) => {
-      rl.close();
-      resolve(/^[yY]/.test(answer.trim()));
-    });
-  });
-}
-
-function defaultAgentSelect(
-  role: AgentRole,
-  candidates: AgentProbe[],
-  defaultId?: string,
-): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    const promptLabel = `Agent for ${role}${defaultId ? ` [default: ${defaultId}]` : ""}: `;
-    rl.question(promptLabel, (answer) => {
-      rl.close();
-      const trimmed = answer.trim();
-      if (trimmed.length === 0 && defaultId) {
-        resolve(defaultId);
-        return;
-      }
-      const num = Number(trimmed);
-      if (Number.isInteger(num) && num >= 1 && num <= candidates.length) {
-        resolve(candidates[num - 1].agentId);
-        return;
-      }
-      const match = candidates.find((c) => c.agentId === trimmed);
-      if (match) {
-        resolve(match.agentId);
-        return;
-      }
-      resolve(trimmed);
-    });
-  });
-}
-
 export interface InitOptions {
-  nonInteractive?: boolean;
-  // ADR-022 Decision 3: explicit, programmatic consent to write files
-  // (`~/.marshal/config.json` and `.marshal/state.db`). Only honored when
-  // `nonInteractive` is true; in interactive mode the user is asked via the
-  // prompt instead.
-  yes?: boolean;
   repoRoot?: string;
   configPath?: string;
   runCmd?: CommandRunner;
-  prompt?: YesNoPrompt;
-  agentSelect?: AgentSelectPrompt;
-  env?: EnvView;
   acpxBin?: string;
   versionRange?: string;
   installPin?: string;
@@ -101,37 +37,35 @@ export interface InitResult {
 }
 
 // ADR-022 Decision 1: the repo is considered "already initialized" when a
-// state database is already on disk. In that case the merged prompt is skipped
+// state database is already on disk. In that case the write step is skipped
 // and Phase 6 runs as a no-op idempotent call, preserving the fast re-run.
 function repoAlreadyInitialized(repoRoot: string): boolean {
   return existsSync(join(getRepoStateDir(repoRoot), "state.db"));
-}
-
-// ADR-022 Decision 3: env opt-in recognized in --non-interactive mode so CI
-// pipelines can consent to writes without a TTY. Marshal no longer reads any
-// other env vars from the user; in particular it does not inspect provider
-// auth env vars (Decision 2).
-function envYes(env: EnvView): boolean {
-  return env.MARSHAL_INIT_YES === "1";
 }
 
 function print(line: string): void {
   process.stdout.write(`${line}\n`);
 }
 
+// ADR-024 Decision 3: `marshal init` is always non-interactive. No prompts,
+// no --yes / --non-interactive flags, no consent gates. The user runs
+// `marshal init` to initialize; that is the consent. The flow is:
+//   Phase 1: system prereqs (node, git, pnpm). fail → exit non-zero.
+//   Phase 2: acpx check. fail → print install command + docs, exit non-zero.
+//   Phase 3: agent probing is REMOVED from init (ADR-024 Decision 3). Init
+//            writes the config with AGENT_ID_DEFAULTS and initializes repo
+//            state. Agent verification is `marshal doctor`'s job.
+//   Phase 4/5/6 (merged): generate config, merge with existing, write
+//            ~/.marshal/config.json + .marshal/state.db unconditionally.
 export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   const runCmd = options.runCmd ?? defaultRunCommand;
-  const prompt = options.prompt ?? defaultYesNo;
-  const env: EnvView = options.env ?? process.env;
   const repoRoot = options.repoRoot ?? process.cwd();
   const configPath = options.configPath ?? getGlobalConfigPath();
-  const nonInteractive = options.nonInteractive === true;
-  const yesFlag = options.yes === true || envYes(env);
   const versionRange = options.versionRange ?? ACPX_ACCEPT_RANGE;
   const installPin = options.installPin ?? ACPX_INSTALL_PIN;
   const acpxBin = options.acpxBin ?? "acpx";
 
-  if (!nonInteractive && machineAlreadyConfigured(configPath)) {
+  if (machineAlreadyConfigured(configPath)) {
     print("✓ machine already configured");
     initRepoState(repoRoot);
     openDb(repoRoot);
@@ -140,127 +74,38 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
     return { ok: true, skippedMachine: true };
   }
 
-  // Phase 1
+  // Phase 1 — system prerequisites.
   const phase1 = await checkSystemPrerequisites(runCmd);
   for (const r of phase1) print(formatCheckLine(r));
   if (phase1.some((r) => r.status === "fail")) {
     return { ok: false, skippedMachine: false };
   }
-  // pnpm is only a warning; offer to install interactively.
-  if (!nonInteractive) {
-    await maybeInstallPnpm(phase1, runCmd, prompt);
-  }
 
-  // Phase 2
-  let phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
+  // Phase 2 — acpx hard-gate (ADR-024 Decision 1). If acpx is missing or
+  // outside the accept range with a `fail` status, print the install command
+  // and stop. No in-process `npm i -g` attempt, no fake `✓` line, no
+  // re-probe loop, no continuation into agent probes.
+  const phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
   for (const r of phase2) print(formatCheckLine(r));
-  const acpxMissing = phase2.some((r) => r.status === "fail");
-  if (acpxMissing && !nonInteractive) {
-    await maybeInstallAcpx(prompt, installPin);
-    // Re-probe so the rest of the flow (and the short-circuit below) sees the
-    // post-install state rather than the pre-install snapshot.
-    phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
-    for (const r of phase2) print(formatCheckLine(r));
-  }
-  // acpx is a hard dependency: typed `fail` (not `warning`) in preflight. If it
-  // is still failing here — either the install was declined (interactive), the
-  // install attempt failed, or we are in --non-interactive mode where no
-  // install is offered — stop now. Running the Phase 3 agent probes against a
-  // missing acpx would only produce noise (every agent would `fail`/`warn` with
-  // "acpx not installed"), and Phase 5/6 must not write `~/.marshal/config.json`
-  // or `.marshal/state.db` for a machine that cannot run the loop.
   if (phase2.some((r) => r.status === "fail")) {
     print(
-      `✗ acpx is required and is still missing. Install with \`npm i -g acpx@${installPin}\` and re-run \`marshal init\`.`,
+      `✗ acpx is required and is missing. Install with \`npm i -g acpx@${installPin}\` and re-run \`marshal init\`.`,
     );
     return { ok: false, skippedMachine: false };
   }
 
-  // Phase 3 — agent discovery / chooser (ADR-023 Decision 4)
-  //
-  // Marshal ships no per-role defaults. If the existing config already has
-  // both builder and validator, init probes those two agents unchanged (the
-  // existing-config path). Otherwise init runs an interactive chooser that
-  // probes the full ACPX built-in registry and prompts for each missing role.
-  // In --non-interactive mode the first handshake-OK candidate is used.
+  // Phase 3 — agent probing is REMOVED from init (ADR-024 Decision 3).
+  // Init writes the config with AGENT_ID_DEFAULTS; agent verification is
+  // `marshal doctor`'s job.
+
+  // Phases 5+6 (merged, ADR-022 Decision 1 + ADR-024 Decision 3). Generate
+  // the config from defaults (or preserve existing config values), merge,
+  // and write unconditionally — no prompt, no preview, no consent gate.
   const existing = readGlobalConfig(configPath) ?? {};
-  const configuredBuilder = existing.agents?.builder;
-  const configuredValidator = existing.agents?.validator;
-  const configuredSpecAuthor = existing.agents?.specAuthor;
-  const tmp = mkdtempSync(join(tmpdir(), "marshal-preflight-"));
+  const builderId = existing.agents?.builder ?? AGENT_ID_DEFAULTS.builder;
+  const validatorId = existing.agents?.validator ?? AGENT_ID_DEFAULTS.validator;
+  const specAuthorId = existing.agents?.specAuthor ?? AGENT_ID_DEFAULTS.specAuthor;
 
-  let builderId: string;
-  let validatorId: string;
-  let specAuthorId: string | undefined;
-  let agentChecksOk = true;
-
-  if (configuredBuilder && configuredValidator) {
-    // Existing-config path: probe the configured agents (unchanged behavior).
-    builderId = configuredBuilder;
-    validatorId = configuredValidator;
-    specAuthorId = configuredSpecAuthor;
-    const agentResults: AgentCheckResult[] = [];
-    for (const { role, id } of [
-      { role: "builder" as const, id: builderId },
-      { role: "validator" as const, id: validatorId },
-    ]) {
-      const result = await checkAgent(runCmd, id, acpxBin, role, tmp);
-      agentResults.push(result);
-      print(formatCheckLine(result.installed));
-      print(formatCheckLine(result.handshake));
-      if (!nonInteractive) {
-        await maybeInstallAgent(result, runCmd, prompt);
-      }
-    }
-    agentChecksOk = agentResults.every((a) => a.installed.status !== "fail");
-  } else {
-    // Chooser: at least one of builder/validator is missing. Probe the ACPX
-    // built-in registry and let the user (or the non-interactive heuristic)
-    // pick an agent for each missing role.
-    const probes = await probeAgentCandidates(runCmd, acpxBin, tmp);
-    for (let i = 0; i < probes.length; i++) {
-      print(renderProbeLine(probes[i], i + 1));
-    }
-    const okProbes = probes.filter(isProbeUsable);
-    if (okProbes.length === 0) {
-      print(
-        "✗ no agents responded to the ACP handshake probe. Install at least one agent (see https://acpx.sh/agents.html) and re-run `marshal init`.",
-      );
-      return { ok: false, skippedMachine: false };
-    }
-
-    if (nonInteractive) {
-      const first = okProbes[0].agentId;
-      builderId = configuredBuilder ?? first;
-      validatorId = configuredValidator ?? first;
-      specAuthorId = configuredSpecAuthor ?? builderId;
-      print(
-        `— non-interactive mode: chose \`${first}\` for missing role(s) based on the first successful ACP handshake probe; override via ~/.marshal/config.json`,
-      );
-    } else {
-      const select = options.agentSelect ?? defaultAgentSelect;
-      builderId = configuredBuilder ?? (await select("builder", probes));
-      validatorId = configuredValidator ?? (await select("validator", probes));
-      specAuthorId = configuredSpecAuthor ?? (await select("specAuthor", probes, builderId));
-    }
-  }
-
-  // ADR-022 Decision 2: no Phase 4 "auth environment" check. The authoritative
-  // "can this agent run" signal is the ACP handshake probe surfaced above.
-  // Marshal no longer names or inspects provider env vars.
-
-  // Phases 5+6 (merged, ADR-022 Decision 1). A single user-visible step governs
-  // both writing `~/.marshal/config.json` (when not present / when a merge is
-  // proposed) and creating `.marshal/state.db` + the repo state dir. On
-  // already-initialized repos the prompt is skipped and Phase 6 runs as a
-  // no-op idempotent create-if-missing; the fast re-run property is preserved
-  // where it actually matters.
-  const repoNeedsInit = !repoAlreadyInitialized(repoRoot);
-  const machineNeedsConfig = !machineAlreadyConfigured(configPath);
-  const needsPrompt = machineNeedsConfig || repoNeedsInit;
-
-  // Generate+merge the config snapshot even when not writing it, so the
-  // preview is shown in non-interactive mode for diagnostic visibility.
   const generated = generateConfig({
     acpxBin,
     versionRange,
@@ -271,31 +116,11 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   const merged =
     existing && Object.keys(existing).length > 0 ? mergeConfig(existing, generated) : generated;
 
-  if (nonInteractive) {
-    // ADR-022 Decision 3: write nothing unless `--yes` / `MARSHAL_INIT_YES=1`.
-    if (yesFlag) {
-      writeInitFiles(machineNeedsConfig, merged, configPath, repoRoot);
-    } else {
-      if (machineNeedsConfig) {
-        print(`✗ config missing at ${configPath} (re-run with --yes to write it)`);
-      } else {
-        print(`✓ config present at ${configPath}`);
-      }
-      if (repoNeedsInit) {
-        print(`✗ repo not initialized at ${getRepoStateDir(repoRoot)} (re-run with --yes to init)`);
-      }
-      print("— non-interactive mode: no files written (pass --yes to write)");
-    }
-  } else if (needsPrompt) {
-    printConfigPreview(merged, configPath);
-    const confirmed = await prompt(
-      "Initialize Marshal in this repo (writes ~/.marshal/config.json and .marshal/state.db)?",
-    );
-    if (confirmed) {
-      writeInitFiles(machineNeedsConfig, merged, configPath, repoRoot);
-    } else {
-      print("— initialization skipped; no files written");
-    }
+  const machineNeedsConfig = !machineAlreadyConfigured(configPath);
+  const repoNeedsInit = !repoAlreadyInitialized(repoRoot);
+
+  if (machineNeedsConfig || repoNeedsInit) {
+    writeInitFiles(machineNeedsConfig, merged, configPath, repoRoot);
   } else {
     // Both already initialized — Phase 6 runs as an idempotent no-op.
     initRepoState(repoRoot);
@@ -304,9 +129,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   }
 
   const checksOk =
-    phase1.every((r) => r.status !== "fail") &&
-    phase2.every((r) => r.status !== "fail") &&
-    agentChecksOk;
+    phase1.every((r) => r.status !== "fail") && phase2.every((r) => r.status !== "fail");
 
   if (checksOk) printReady();
   return { ok: checksOk, skippedMachine: false };
@@ -338,63 +161,6 @@ function printReady(): void {
   print('  marshal task create --slug my-feature --title "My feature" --spec-file spec.md');
 }
 
-function printConfigPreview(config: GlobalConfig, configPath: string): void {
-  print(`— config preview (${configPath}):`);
-  print(JSON.stringify(config, null, 2));
-}
-
-async function maybeInstallPnpm(
-  phase1: CheckResult[],
-  runCmd: CommandRunner,
-  prompt: YesNoPrompt,
-): Promise<void> {
-  const pnpm = phase1.find((r) => r.label === "pnpm");
-  if (pnpm && pnpm.status === "warning" && pnpm.fix) {
-    if (await prompt(`pnpm not found. Install with \`${pnpm.fix}\`?`)) {
-      await runInstall(runCmd, pnpm.fix);
-    }
-  }
-}
-
-async function maybeInstallAcpx(prompt: YesNoPrompt, versionRange: string): Promise<void> {
-  const cmd = `npm i -g acpx@${versionRange}`;
-  if (
-    await prompt(
-      `acpx not found. Run this command in your terminal:\n\n  ${cmd}\n\nThen press Enter to continue`,
-    )
-  ) {
-    print(`✓ ${cmd}`);
-  }
-}
-
-async function maybeInstallAgent(
-  result: AgentCheckResult,
-  runCmd: CommandRunner,
-  prompt: YesNoPrompt,
-): Promise<void> {
-  if (result.installed.status === "fail" && result.installed.fix) {
-    if (
-      await prompt(
-        `Agent '${result.agentId}' not available. Install with \`${result.installed.fix}\`?`,
-      )
-    ) {
-      await runInstall(runCmd, result.installed.fix);
-    }
-  }
-}
-
-async function runInstall(runCmd: CommandRunner, command: string): Promise<void> {
-  const parts = command.split(/\s+/);
-  const bin = parts[0];
-  const args = parts.slice(1);
-  const r = await runCmd(bin, args);
-  if (r.notFound || r.code !== 0) {
-    print(`✗ install failed: ${command} (${r.notFound ? "not found" : `exit ${r.code}`})`);
-    return;
-  }
-  print(`✓ installed via ${command}`);
-}
-
 // -----------------------------------------------------------------------------
 // doctor
 // -----------------------------------------------------------------------------
@@ -419,7 +185,7 @@ export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolea
   for (const r of phase2) print(formatCheckLine(r));
   if (phase2.some((r) => r.status === "fail")) ok = false;
 
-  const tmp = mkdtempSync(join(tmpdir(), "marshal-doctor-"));
+  const tmpDir = initTmpDir();
   for (const { role, id } of [
     { role: "builder" as const, id: builderId },
     { role: "validator" as const, id: validatorId },
@@ -436,10 +202,9 @@ export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolea
       ok = false;
       continue;
     }
-    // ADR-022 Decision 2: handshake probe is the authoritative auth signal;
-    // no provider env presence check is emitted here.
-    const result = await checkAgent(runCmd, id, acpxBin, role, tmp);
-    print(formatCheckLine(result.installed));
+    // ADR-024 Decision 2: session probe is the authoritative "can this agent
+    // run" signal. No provider env presence check is emitted here.
+    const result = await checkAgent(runCmd, id, acpxBin, role, tmpDir);
     print(formatCheckLine(result.handshake));
   }
 
@@ -452,4 +217,8 @@ export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolea
 
   print(ok ? "\nAll checks passed." : "\nSome checks failed.");
   return { ok };
+}
+
+function initTmpDir(): string {
+  return mkdtempSync(join(tmpdir(), "marshal-doctor-"));
 }

@@ -183,7 +183,6 @@ async function checkAcpxVersion(
 export interface AgentCheckResult {
   role: AgentRole;
   agentId: string;
-  installed: CheckResult;
   handshake: CheckResult;
 }
 
@@ -197,34 +196,16 @@ export async function checkAgent(
   return {
     role,
     agentId,
-    installed: await checkAgentInstalled(runCmd, agentId, acpxBin),
     handshake: await checkAgentHandshake(runCmd, agentId, acpxBin, tmpDir),
   };
 }
 
-async function checkAgentInstalled(
-  runCmd: CommandRunner,
-  agentId: string,
-  acpxBin: string,
-): Promise<CheckResult> {
-  const r = await runCmd(acpxBin, [agentId, "--help"]);
-  if (r.notFound) {
-    return fail(agentId, "acpx not installed");
-  }
-  if (r.code !== 0) {
-    const hint = AGENT_INSTALL_HINTS[agentId];
-    return fail(
-      agentId,
-      `agent not available via acpx: ${(r.stderr || r.stdout).trim()}`,
-      hint
-        ? `ensure \`${hint.acpxCommand}\` runs (acpx adapter command)`
-        : `install the '${agentId}' agent per its docs`,
-      hint?.docs ?? ACPX_AUTH_DOCS,
-    );
-  }
-  return ok(agentId, r.stdout.trim());
-}
-
+// ADR-024 Decision 2: the "is this agent linked and usable" check is a
+// zero-cost acpx session probe — `acpx <agent> sessions new` (ACP initialize +
+// session/new, no LLM prompt, zero tokens) followed by `sessions close` for
+// cleanup. This replaces the old `exec 'hello'` handshake (which consumed
+// tokens) and the `--help` pre-check (which used an undocumented probe
+// surface). If `sessions new` fails, `sessions close` is skipped.
 async function checkAgentHandshake(
   runCmd: CommandRunner,
   agentId: string,
@@ -235,12 +216,12 @@ async function checkAgentHandshake(
     "--cwd",
     tmpDir,
     "--timeout",
-    "15",
+    "10",
     "--format",
-    "quiet",
+    "json",
     agentId,
-    "exec",
-    "hello",
+    "sessions",
+    "new",
   ]);
   if (r.notFound) {
     return warn(`${agentId} handshake`, "acpx not installed");
@@ -253,12 +234,47 @@ async function checkAgentHandshake(
     // belongs.
     const hint = AGENT_INSTALL_HINTS[agentId];
     const docs = hint?.docs ?? ACPX_AUTH_DOCS;
-    const detail = `agent did not respond (likely auth): ${
+    const fix = hint
+      ? `ensure \`${hint.acpxCommand}\` runs (acpx adapter command)`
+      : `install the '${agentId}' agent per its docs`;
+    const detail = `agent not available via acpx: ${
       (r.stderr || r.stdout).trim() || `exit ${r.code}`
     }`;
-    return warn(`${agentId} handshake`, detail, undefined, docs);
+    return warn(`${agentId} handshake`, detail, fix, docs);
   }
-  return ok(`${agentId} handshake`, "responded");
+
+  // Clean up the probe session. If parsing fails or close fails, it is
+  // harmless — the session is ephemeral and pruned by acpx on next use.
+  const sessionName = parseProbeSessionId(r.stdout);
+  if (sessionName) {
+    await runCmd(acpxBin, [
+      "--cwd",
+      tmpDir,
+      agentId,
+      "sessions",
+      "close",
+      sessionName,
+    ]);
+  }
+
+  return ok(`${agentId} handshake`, "session created");
+}
+
+function parseProbeSessionId(stdout: string): string | null {
+  const line = stdout.split("\n").find((l) => l.trim().length > 0);
+  if (!line) return null;
+  try {
+    const record = JSON.parse(line) as Record<string, unknown>;
+    const name = record.name as string | undefined;
+    if (name) return name;
+    const recordId = record.recordId as string | undefined;
+    if (recordId) return recordId;
+    const id = record.id as string | undefined;
+    if (id) return id;
+  } catch {
+    // Non-JSON output; skip close.
+  }
+  return null;
 }
 
 // -----------------------------------------------------------------------------
@@ -267,7 +283,6 @@ async function checkAgentHandshake(
 
 export interface AgentProbe {
   agentId: string;
-  installed: CheckResult;
   handshake: CheckResult;
 }
 
@@ -279,9 +294,8 @@ export async function probeAgentCandidates(
   const ids = Object.keys(AGENT_INSTALL_HINTS);
   const probes: AgentProbe[] = [];
   for (const agentId of ids) {
-    const installed = await checkAgentInstalled(runCmd, agentId, acpxBin);
     const handshake = await checkAgentHandshake(runCmd, agentId, acpxBin, tmpDir);
-    probes.push({ agentId, installed, handshake });
+    probes.push({ agentId, handshake });
   }
   return probes;
 }
@@ -293,18 +307,8 @@ export function renderProbeLine(probe: AgentProbe, index: number): string {
 }
 
 export function isProbeUsable(probe: AgentProbe): boolean {
-  return (
-    probe.installed.status !== "fail" &&
-    (probe.handshake.status === "ok" || probe.handshake.status === "warning")
-  );
+  return probe.handshake.status === "ok" || probe.handshake.status === "warning";
 }
-
-// -----------------------------------------------------------------------------
-// Env view (read-only) — kept for opt-in / consent flags only, NOT for auth.
-// Per ADR-022 Decision 2, Marshal no longer inspects env vars for provider auth.
-// -----------------------------------------------------------------------------
-
-export type EnvView = Record<string, string | undefined>;
 
 // -----------------------------------------------------------------------------
 // Phase 5: config generation / merge

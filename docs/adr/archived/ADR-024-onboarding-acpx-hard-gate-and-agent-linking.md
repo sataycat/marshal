@@ -2,7 +2,11 @@
 
 ## Status
 
-Proposed — 2026-07-13. Also fixes a regression in `src/daemon/orchestrator.ts:34` where the builder path bypasses `resolveAgentId("builder")` (ADR-023 Decision 2). Retracts ADR-020 Phase 2's "offer to install acpx in-process" behavior.
+Accepted — 2026-07-13. Implemented in `src/setup/`, `src/worktree/config.ts`, `src/cli.ts`, and `tests/`. Moved to `docs/adr/archived/`.
+
+Decisions 4 (full `AGENT_INSTALL_HINTS` registry) and 5 (orchestrator `resolveAgentId("builder")` fix) were already implemented by ADR-023 before this ADR was applied; they required no additional work here. Decision 3's reference to `AGENT_ID_DEFAULTS` required reintroducing the constant in `src/worktree/config.ts` (ADR-023 Decision 3 had deleted it) — the constant is used only by `marshal init` to write a fresh config; `resolveAgentId` still throws `MissingAgentIdError` on missing config keys (ADR-023's runtime behavior is preserved).
+
+Retracts ADR-020 Phase 2's "offer to install acpx in-process" behavior.
 
 ## Context
 

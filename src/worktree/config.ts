@@ -78,11 +78,21 @@ export function loadGlobalConfig(): GlobalConfig {
 // as-is, and ACPX (or the agent's own auth handshake) is the source of
 // truth for whether it's actually usable. See ADR-019 / ADR-023.
 //
-// Per ADR-023 Decision 3, Marshal ships NO per-role defaults. Every role
-// must be explicitly configured in ~/.marshal/config.json; omitting a role
-// throws MissingAgentIdError at first real use (not at boot), so the daemon
-// starts fine without a config and only fails when a task actually tries to
-// build/validate/author a spec.
+// `resolveAgentId` has no silent defaults: if a role is missing from the
+// config it throws `MissingAgentIdError` at first real use (not at boot),
+// so the daemon starts fine without a config and only fails when a task
+// actually tries to build/validate/author a spec (ADR-023 Decision 3).
+//
+// `AGENT_ID_DEFAULTS` is the set of ids `marshal init` writes into a fresh
+// `~/.marshal/config.json` so the post-init state is immediately usable
+// (ADR-024 Decision 3). It is NOT consulted by `resolveAgentId` — the
+// config file is the single source of truth at runtime.
+export const AGENT_ID_DEFAULTS: Record<AgentRole, string> = {
+  builder: "opencode",
+  validator: "pi",
+  specAuthor: "opencode",
+};
+
 export function resolveAgentId(
   role: AgentRole,
   config: GlobalConfig = loadGlobalConfig(),

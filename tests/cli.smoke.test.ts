@@ -20,9 +20,11 @@ describe("CLI smoke tests", () => {
   let globalConfigPath: string;
 
   beforeEach(() => {
-    // `marshal init` runs the full interactive preflight when no machine-level
-    // config exists. Tests exercise the already-configured fast path (ADR-020
-    // Decision 1): a complete ~/.marshal/config.json collapses phases 1–5.
+    // `marshal init` is non-interactive (ADR-024 Decision 3): it checks
+    // prerequisites and acpx, writes config with AGENT_ID_DEFAULTS, and
+    // initializes repo state. Tests exercise the already-configured fast
+    // path (ADR-020 Decision 1): a complete ~/.marshal/config.json
+    // collapses phases 1–5.
     const globalDir = mkdtempSync(join(tmpdir(), "marshal-global-"));
     globalConfigPath = join(globalDir, "config.json");
     writeFileSync(

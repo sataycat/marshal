@@ -23,19 +23,8 @@ const program = new Command()
 program
   .command("init")
   .description("Run onboarding preflight and initialize marshal state in the current repo")
-  .option(
-    "--non-interactive",
-    "Run all checks; no installs, no prompts; writes nothing without --yes",
-  )
-  .option(
-    "--yes",
-    "Consent to writing ~/.marshal/config.json and .marshal/state.db (honored only with --non-interactive; in interactive mode the prompt is asked instead)",
-  )
-  .action(async (options: { nonInteractive?: boolean; yes?: boolean }) => {
-    const result = await runInit({
-      nonInteractive: options.nonInteractive,
-      yes: options.yes,
-    });
+  .action(async () => {
+    const result = await runInit();
     if (!result.ok) {
       process.exitCode = 1;
     }

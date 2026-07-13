@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runDoctor, runInit } from "./init.js";
+import { AGENT_ID_DEFAULTS } from "../worktree/config.js";
 import type { CommandResult, CommandRunner } from "./preflight.js";
 
 type Script = (bin: string, args: string[]) => CommandResult | "notfound";
@@ -19,6 +20,8 @@ function ok(stdout = ""): CommandResult {
   return { code: 0, stdout, stderr: "", notFound: false };
 }
 
+// ADR-024 Decision 3: init no longer probes agents. The runner only needs
+// to satisfy Phase 1 (node/git/pnpm) and Phase 2 (which acpx / acpx --version).
 function fullPassRunner(): CommandRunner {
   return fakeRunner((bin, args) => {
     if (bin === "node") return ok("v20.10.0\n");
@@ -26,10 +29,23 @@ function fullPassRunner(): CommandRunner {
     if (bin === "pnpm") return ok("9.0.0\n");
     if (bin === "which" && args[0] === "acpx") return ok("/usr/local/bin/acpx\n");
     if (bin === "acpx" && args[0] === "--version") return ok("0.12.1\n");
-    // Agent installed check: acpx <agent> --help
-    if (bin === "acpx" && args[1] === "--help") return ok("1.0.0\n");
-    // Handshake: acpx --cwd <dir> --timeout 15 --format quiet <agent> exec hello
-    if (bin === "acpx" && args[0] === "--cwd" && args.includes("exec")) return ok("hi\n");
+    return "notfound";
+  });
+}
+
+// Runner that also handles the session probe (for `marshal doctor` tests).
+function fullPassRunnerWithAgents(): CommandRunner {
+  return fakeRunner((bin, args) => {
+    if (bin === "node") return ok("v20.10.0\n");
+    if (bin === "git") return ok("git version 2.40.0\n");
+    if (bin === "pnpm") return ok("9.0.0\n");
+    if (bin === "which" && args[0] === "acpx") return ok("/usr/local/bin/acpx\n");
+    if (bin === "acpx" && args[0] === "--version") return ok("0.12.1\n");
+    // ADR-024 Decision 2: session probe via `acpx <agent> sessions new`.
+    if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("new"))
+      return ok(JSON.stringify({ recordId: "rec-probe", name: "probe-session" }) + "\n");
+    if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("close"))
+      return ok("");
     return "notfound";
   });
 }
@@ -66,8 +82,6 @@ describe("runInit", () => {
       repoRoot,
       configPath,
       runCmd,
-      env: {},
-      nonInteractive: false,
     });
 
     expect(result.ok).toBe(true);
@@ -75,209 +89,50 @@ describe("runInit", () => {
     expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
   });
 
-  // ADR-022 Decision 3: --non-interactive alone writes nothing.
-  it("non-interactive mode writes nothing without --yes", async () => {
+  // ADR-024 Decision 3: init is always non-interactive. No prompts, no flags.
+  // It writes config + repo state unconditionally when the machine is not
+  // already configured.
+  it("writes config and repo state with AGENT_ID_DEFAULTS on a fresh machine", async () => {
     const result = await runInit({
       repoRoot,
       configPath,
       runCmd: fullPassRunner(),
-      env: {},
-      nonInteractive: true,
     });
 
     expect(result.ok).toBe(true);
-    expect(existsSync(configPath)).toBe(false);
-    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
-  });
-
-  it("non-interactive --yes reproduces the old run-everything behavior", async () => {
-    const result = await runInit({
-      repoRoot,
-      configPath,
-      runCmd: fullPassRunner(),
-      env: {},
-      nonInteractive: true,
-      yes: true,
-    });
-
-    expect(result.ok).toBe(true);
+    expect(result.skippedMachine).toBe(false);
     expect(existsSync(configPath)).toBe(true);
     expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
-  });
 
-  it("non-interactive mode honors MARSHAL_INIT_YES=1 as consent", async () => {
-    const result = await runInit({
-      repoRoot,
-      configPath,
-      runCmd: fullPassRunner(),
-      env: { MARSHAL_INIT_YES: "1" },
-      nonInteractive: true,
-    });
-
-    expect(result.ok).toBe(true);
-    expect(existsSync(configPath)).toBe(true);
-    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
-  });
-
-  it("reports not-ok in non-interactive mode when acpx is missing, writes nothing without --yes", async () => {
-    const runCmd = fakeRunner((bin) => {
-      if (bin === "node") return ok("v20.10.0\n");
-      if (bin === "git") return ok("git version 2.40.0\n");
-      if (bin === "pnpm") return ok("9.0.0\n");
-      return "notfound";
-    });
-
-    const result = await runInit({
-      repoRoot,
-      configPath,
-      runCmd,
-      env: {},
-      nonInteractive: true,
-    });
-
-    expect(result.ok).toBe(false);
-    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
-    expect(existsSync(configPath)).toBe(false);
-  });
-
-  it("writes config on confirm in interactive mode and preserves existing keys", async () => {
-    writeFileSync(configPath, JSON.stringify({ agents: { builder: "claude-code" } }));
-    const prompts: string[] = [];
-    const prompt = async (q: string): Promise<boolean> => {
-      prompts.push(q);
-      return /Initialize Marshal in this repo/.test(q);
-    };
-    const agentSelect = async (
-      role: string,
-      _candidates: unknown[],
-      defaultId?: string,
-    ): Promise<string> => {
-      if (role === "validator") return "claude";
-      return defaultId ?? "opencode";
-    };
-
-    const result = await runInit({
-      repoRoot,
-      configPath,
-      runCmd: fullPassRunner(),
-      env: {},
-      nonInteractive: false,
-      prompt,
-      agentSelect,
-    });
-
-    expect(result.ok).toBe(true);
-    expect(existsSync(configPath)).toBe(true);
-    const written = JSON.parse(
-      await import("node:fs").then((m) => m.readFileSync(configPath, "utf8")),
-    );
-    expect(written.agents.builder).toBe("claude-code");
-    expect(written.agents.validator).toBe("claude");
-    expect(written.agents.specAuthor).toBe("claude-code");
+    const written = JSON.parse(readFileSync(configPath, "utf8"));
+    expect(written.agents.builder).toBe(AGENT_ID_DEFAULTS.builder);
+    expect(written.agents.validator).toBe(AGENT_ID_DEFAULTS.validator);
+    expect(written.agents.specAuthor).toBe(AGENT_ID_DEFAULTS.specAuthor);
     expect(written.acpx.version).toBe(">=0.12.0 <0.13.0");
-    // ADR-022 Decision 1: single merged prompt names both write targets.
-    expect(prompts.some((q) => /~\/.marshal\/config\.json/.test(q))).toBe(true);
-    expect(prompts.some((q) => /\.marshal\/state\.db/.test(q))).toBe(true);
-    // Old "Write this config?" copy must be gone.
-    expect(prompts.some((q) => /^Write this config\?$/.test(q))).toBe(false);
   });
 
-  // ADR-022 Decision 1: declining the merged prompt writes nothing —
-  // neither ~/.marshal/config.json nor .marshal/state.db.
-  it("writes nothing — no config, no repo state — when the user declines the merged prompt", async () => {
-    const prompt = async (): Promise<boolean> => false;
-    const agentSelect = async (
-      _role: string,
-      _candidates: unknown[],
-      defaultId?: string,
-    ): Promise<string> => defaultId ?? "codex";
-
-    await runInit({
-      repoRoot,
-      configPath,
-      runCmd: fullPassRunner(),
-      env: {},
-      nonInteractive: false,
-      prompt,
-      agentSelect,
-    });
-
-    expect(existsSync(configPath)).toBe(false);
-    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
-    expect(existsSync(join(repoRoot, ".marshal"))).toBe(false);
-  });
-
-  it("re-running init when the machine is already configured and the repo state exists takes the fast path (no prompt)", async () => {
-    // Machine already configured.
-    writeFileSync(
-      configPath,
-      JSON.stringify({
-        acpx: { bin: "acpx", version: ">=0.12.0 <0.13.0" },
-        agents: { builder: "opencode", validator: "pi" },
-      }),
-    );
-    // Repo state already present.
-    const stateDir = join(repoRoot, ".marshal");
-    await import("node:fs").then((m) => m.mkdirSync(stateDir, { recursive: true }));
-    await import("node:fs").then((m) =>
-      m.writeFileSync(join(stateDir, "state.db"), Buffer.from("")),
-    );
-
-    const prompts: string[] = [];
-    const prompt = async (q: string): Promise<boolean> => {
-      prompts.push(q);
-      return false;
-    };
+  it("preserves existing config keys and fills missing roles with defaults", async () => {
+    writeFileSync(configPath, JSON.stringify({ agents: { builder: "codex" } }));
 
     const result = await runInit({
       repoRoot,
       configPath,
       runCmd: fullPassRunner(),
-      env: {},
-      nonInteractive: false,
-      prompt,
     });
 
     expect(result.ok).toBe(true);
-    expect(result.skippedMachine).toBe(true);
-    expect(prompts.some((q) => /Initialize Marshal/.test(q))).toBe(false);
-    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
+    const written = JSON.parse(readFileSync(configPath, "utf8"));
+    // Existing key preserved.
+    expect(written.agents.builder).toBe("codex");
+    // Missing roles filled from defaults.
+    expect(written.agents.validator).toBe(AGENT_ID_DEFAULTS.validator);
+    expect(written.agents.specAuthor).toBe(AGENT_ID_DEFAULTS.specAuthor);
   });
 
-  it("offers to install acpx when missing in interactive mode", async () => {
+  // ADR-024 Decision 1: acpx is a hard gate. Missing acpx → one install
+  // command line, exit non-zero, no install attempt, no fake `✓`.
+  it("halts with one install-command line when acpx is missing", async () => {
     const runCmd = fakeRunner((bin) => {
-      if (bin === "node") return ok("v20.10.0\n");
-      if (bin === "git") return ok("git version 2.40.0\n");
-      if (bin === "pnpm") return ok("9.0.0\n");
-      return "notfound";
-    });
-    const prompts: string[] = [];
-    const prompt = async (q: string): Promise<boolean> => {
-      prompts.push(q);
-      return false;
-    };
-
-    await runInit({
-      repoRoot,
-      configPath,
-      runCmd,
-      env: {},
-      nonInteractive: false,
-      prompt,
-    });
-
-    expect(prompts.some((q) => /npm i -g acpx@/.test(q))).toBe(true);
-  });
-
-  // Short-circuit: acpx is a hard dependency. When it is still failing after
-  // Phase 2 (declined install / failed install / non-interactive), init must
-  // stop before the Phase 3 agent probes (which would all fail with "acpx not
-  // installed" noise) and before Phase 5/6 (which would write config + state.db
-  // for a machine that cannot run the loop).
-  it("short-circuits before Phase 3 when acpx is missing in non-interactive mode", async () => {
-    const calls: string[] = [];
-    const runCmd = fakeRunner((bin, args) => {
-      calls.push(`${bin} ${args.join(" ")}`);
       if (bin === "node") return ok("v20.10.0\n");
       if (bin === "git") return ok("git version 2.40.0\n");
       if (bin === "pnpm") return ok("9.0.0\n");
@@ -285,28 +140,22 @@ describe("runInit", () => {
     });
 
     const { out, ret } = await captureStdout(() =>
-      runInit({
-        repoRoot,
-        configPath,
-        runCmd,
-        env: {},
-        nonInteractive: true,
-      }),
+      runInit({ repoRoot, configPath, runCmd }),
     );
 
     expect(ret.ok).toBe(false);
     expect(ret.skippedMachine).toBe(false);
-    expect(out).toContain("acpx is required and is still missing");
-    // No Phase 3 probe: the only `acpx <id> --version` / `acpx <id> exec`
-    // invocations should be the Phase 2 `acpx --version` check.
-    expect(calls.some((c) => /^acpx opencode /.test(c))).toBe(false);
-    expect(calls.some((c) => /^acpx pi /.test(c))).toBe(false);
+    // The install command with the pinned version appears.
+    expect(out).toContain("npm i -g acpx@0.12.0");
+    // No fake `✓ npm i -g acpx` success marker (ADR-024 Issue A).
+    expect(out).not.toMatch(/✓ npm i -g acpx/);
     // No files written.
     expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
     expect(existsSync(configPath)).toBe(false);
   });
 
-  it("short-circuits when the user declines the acpx install offer interactively", async () => {
+  // ADR-024 Decision 1: no re-probe loop, no continuation into agent probes.
+  it("does not probe agents when acpx is missing", async () => {
     const calls: string[] = [];
     const runCmd = fakeRunner((bin, args) => {
       calls.push(`${bin} ${args.join(" ")}`);
@@ -315,57 +164,79 @@ describe("runInit", () => {
       if (bin === "pnpm") return ok("9.0.0\n");
       return "notfound";
     });
-    const prompt = async (): Promise<boolean> => false; // decline every prompt
 
-    const { out, ret } = await captureStdout(() =>
-      runInit({
-        repoRoot,
-        configPath,
-        runCmd,
-        env: {},
-        nonInteractive: false,
-        prompt,
-      }),
-    );
+    await runInit({ repoRoot, configPath, runCmd });
 
-    expect(ret.ok).toBe(false);
-    expect(out).toContain("acpx is required and is still missing");
-    // Phase 2 should run (which acpx / acpx --version), but Phase 3 must not.
+    // Phase 2 should run (which acpx / acpx --version), but no agent probes.
     expect(calls.some((c) => /^which acpx/.test(c))).toBe(true);
     expect(calls.some((c) => /^acpx --version/.test(c))).toBe(true);
-    expect(calls.some((c) => /^acpx opencode /.test(c))).toBe(false);
-    expect(calls.some((c) => /^acpx pi /.test(c))).toBe(false);
-    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
-    expect(existsSync(configPath)).toBe(false);
+    // No `acpx <agent> sessions new` calls.
+    expect(calls.some((c) => /sessions new/.test(c))).toBe(false);
   });
 
-  it("install hint uses the exact install pin, not the wide accept range", async () => {
-    // The install-offer prompt must surface `npm i -g acpx@0.12.0` (the pin),
-    // never the loose `>=0.12.0 <0.13.0` range, so fresh installs are
-    // reproducible.
+  // ADR-024 Decision 3: init does not probe agents at all (Phase 3 removed).
+  // Agent verification is `marshal doctor`'s job.
+  it("does not probe agents even when acpx is present", async () => {
+    const calls: string[] = [];
+    const runCmd = fakeRunner((bin, args) => {
+      calls.push(`${bin} ${args.join(" ")}`);
+      if (bin === "node") return ok("v20.10.0\n");
+      if (bin === "git") return ok("git version 2.40.0\n");
+      if (bin === "pnpm") return ok("9.0.0\n");
+      if (bin === "which" && args[0] === "acpx") return ok("/usr/local/bin/acpx\n");
+      if (bin === "acpx" && args[0] === "--version") return ok("0.12.1\n");
+      return "notfound";
+    });
+
+    await runInit({ repoRoot, configPath, runCmd });
+
+    // No `acpx <agent> sessions new` or `acpx <agent> exec` calls.
+    expect(calls.some((c) => /sessions new/.test(c))).toBe(false);
+    expect(calls.some((c) => /sessions close/.test(c))).toBe(false);
+  });
+
+  it("exits non-zero when Phase 1 fails (node missing)", async () => {
+    const runCmd = fakeRunner(() => "notfound");
+
+    const result = await runInit({ repoRoot, configPath, runCmd });
+
+    expect(result.ok).toBe(false);
+    expect(existsSync(configPath)).toBe(false);
+    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(false);
+  });
+
+  it("re-running init when the machine is already configured takes the fast path", async () => {
+    // First run: writes config + repo state.
+    await runInit({ repoRoot, configPath, runCmd: fullPassRunner() });
+    expect(existsSync(configPath)).toBe(true);
+    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
+
+    // Second run: fast path (machine already configured).
+    const { out, ret } = await captureStdout(() =>
+      runInit({ repoRoot, configPath, runCmd: fullPassRunner() }),
+    );
+
+    expect(ret.ok).toBe(true);
+    expect(ret.skippedMachine).toBe(true);
+    expect(out).toContain("machine already configured");
+  });
+
+  it("writes config with the exact install pin version, not the wide accept range", async () => {
     const runCmd = fakeRunner((bin) => {
       if (bin === "node") return ok("v20.10.0\n");
       if (bin === "git") return ok("git version 2.40.0\n");
       if (bin === "pnpm") return ok("9.0.0\n");
       return "notfound";
     });
-    const prompts: string[] = [];
-    const prompt = async (q: string): Promise<boolean> => {
-      prompts.push(q);
-      return false;
-    };
 
-    await runInit({
-      repoRoot,
-      configPath,
-      runCmd,
-      env: {},
-      nonInteractive: false,
-      prompt,
-    });
+    // This test verifies the install hint in the acpx-missing path uses the pin.
+    const { out } = await captureStdout(() =>
+      runInit({ repoRoot, configPath, runCmd }),
+    );
 
-    expect(prompts.some((q) => /acpx@0\.12\.0/.test(q))).toBe(true);
-    expect(prompts.some((q) => /acpx@>=0\.12\.0/.test(q))).toBe(false);
+    // The install command uses the pin (0.12.0), not the range (>=0.12.0 <0.13.0).
+    expect(out).toContain("acpx@0.12.0");
+    expect(out).not.toContain("acpx@>=0.12.0");
   });
 });
 
@@ -400,38 +271,9 @@ describe("ADR-022 Decision 2 — init/doctor output never names provider env var
     process.env.MARSHAL_GLOBAL_CONFIG = configPath;
   });
 
-  it("init interactive output contains no OPENAI_API_KEY / ANTHROPIC_API_KEY", async () => {
-    const prompt = async (): Promise<boolean> => false;
-    const agentSelect = async (
-      _role: string,
-      _candidates: unknown[],
-      defaultId?: string,
-    ): Promise<string> => defaultId ?? "codex";
+  it("init output contains no OPENAI_API_KEY / ANTHROPIC_API_KEY", async () => {
     const { out } = await captureStdout(() =>
-      runInit({
-        repoRoot,
-        configPath,
-        runCmd: fullPassRunner(),
-        env: {},
-        nonInteractive: false,
-        prompt,
-        agentSelect,
-      }),
-    );
-    expect(out).not.toMatch(/OPENAI_API_KEY/);
-    expect(out).not.toMatch(/ANTHROPIC_API_KEY/);
-  });
-
-  it("init --non-interactive --yes output contains no OPENAI_API_KEY / ANTHROPIC_API_KEY", async () => {
-    const { out } = await captureStdout(() =>
-      runInit({
-        repoRoot,
-        configPath,
-        runCmd: fullPassRunner(),
-        env: {},
-        nonInteractive: true,
-        yes: true,
-      }),
+      runInit({ repoRoot, configPath, runCmd: fullPassRunner() }),
     );
     expect(out).not.toMatch(/OPENAI_API_KEY/);
     expect(out).not.toMatch(/ANTHROPIC_API_KEY/);
@@ -446,7 +288,7 @@ describe("ADR-022 Decision 2 — init/doctor output never names provider env var
       }),
     );
     const { out } = await captureStdout(() =>
-      runDoctor({ repoRoot, configPath, runCmd: fullPassRunner(), env: {} }),
+      runDoctor({ repoRoot, configPath, runCmd: fullPassRunnerWithAgents() }),
     );
     expect(out).not.toMatch(/OPENAI_API_KEY/);
     expect(out).not.toMatch(/ANTHROPIC_API_KEY/);
@@ -475,8 +317,7 @@ describe("runDoctor", () => {
     const result = await runDoctor({
       repoRoot,
       configPath,
-      runCmd: fullPassRunner(),
-      env: {},
+      runCmd: fullPassRunnerWithAgents(),
     });
     expect(result.ok).toBe(true);
     // doctor never initializes repo state.
@@ -494,9 +335,41 @@ describe("runDoctor", () => {
       repoRoot,
       configPath,
       runCmd,
-      env: {},
     });
     expect(result.ok).toBe(false);
     expect(existsSync(join(repoRoot, ".marshal"))).toBe(false);
+  });
+
+  // ADR-024 Decision 2: doctor probes agents via the zero-cost session probe.
+  it("probes configured agents via sessions new + sessions close", async () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        acpx: { bin: "acpx", version: ">=0.12.0 <0.13.0" },
+        agents: { builder: "opencode", validator: "pi" },
+      }),
+    );
+    const calls: string[] = [];
+    const runCmd = fakeRunner((bin, args) => {
+      calls.push(`${bin} ${args.join(" ")}`);
+      if (bin === "node") return ok("v20.10.0\n");
+      if (bin === "git") return ok("git version 2.40.0\n");
+      if (bin === "pnpm") return ok("9.0.0\n");
+      if (bin === "which" && args[0] === "acpx") return ok("/usr/local/bin/acpx\n");
+      if (bin === "acpx" && args[0] === "--version") return ok("0.12.1\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("new"))
+        return ok(JSON.stringify({ recordId: "rec-probe", name: "probe-session" }) + "\n");
+      if (bin === "acpx" && args[0] === "--cwd" && args.includes("sessions") && args.includes("close"))
+        return ok("");
+      return "notfound";
+    });
+
+    const result = await runDoctor({ repoRoot, configPath, runCmd });
+    expect(result.ok).toBe(true);
+    // Both agents were probed via sessions new.
+    expect(calls.some((c) => /opencode sessions new/.test(c))).toBe(true);
+    expect(calls.some((c) => /pi sessions new/.test(c))).toBe(true);
+    // Both sessions were closed.
+    expect(calls.some((c) => /sessions close/.test(c))).toBe(true);
   });
 });

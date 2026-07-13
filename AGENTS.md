@@ -8,6 +8,8 @@ Read `docs/PROJECT.md` before starting any work. It defines the architecture, de
 
 When implementing features, also consult the relevant milestone file (`docs/M0-VERTICAL-SLICES.md`, `docs/M1-VERTICAL-SLICES.md`) and the applicable ADRs under `docs/adr/`.
 
+`marshal init` is non-interactive: it checks prerequisites and acpx, writes `~/.marshal/config.json` with `AGENT_ID_DEFAULTS`, and initializes repo state. If acpx is missing it prints the install command and halts. Agent verification is `marshal doctor`'s job (zero-cost session probe via `acpx <agent> sessions new` + `close`).
+
 ## Reference docs
 
 - `docs/PROJECT.md` — overall architecture, design tenets, state machine, milestone sequence
