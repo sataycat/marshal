@@ -1,9 +1,9 @@
 # ADR-0001: Daemon Webapp — Full-Featured Web Client
 
-**Status:** Proposed  
+**Status:** Proposed (sequencing revised — chat-first)  
 **Date:** 2024-07-14  
 **Parent:** —  
-**Children:** (to be filed)
+**Children:** ADR-0002 (Chat Session Management)
 
 ---
 
@@ -43,9 +43,21 @@ Build out the daemon webapp into a **fully-featured, responsive, lightweight web
 
 ### The Two Surfaces
 
-#### Board (evolution of current)
+**Delivery sequence: Chat first (Phase 1), Board second (Phase 2).** The chat UI is the immediate deliverable — it provides a usable ACP interface, enables dogfooding, and surfaces real workflow patterns that inform the kanban design. The board evolves from the existing minimal kanban once the chat-driven workflow is understood. See ADR-0002 for the chat session management model.
 
-The existing kanban board, evolved:
+#### Chat (Phase 1 — primary surface)
+
+A conversational interface that is the **sole Phase 1 UI surface**:
+
+- **Repo-level chat**: not scoped to a single task. For asking questions about the codebase, planning work, discussing architecture, or interacting with agents for ad-hoc tasks.
+- **Task-scoped chat** (Phase 2 bridge): the existing spec-authoring chat, upgraded to feel like a first-class conversation (streaming responses, markdown rendering, code blocks with syntax highlighting). Becomes a "thread with a task_slug" once the kanban arrives.
+- **Agent selector**: top-level dropdown for the active agent, with per-thread agent identity for history. See ADR-0002.
+- **Session management**: threads are Marshal-owned abstractions wrapping acpx sessions. Draft → Active → Closed lifecycle. See ADR-0002.
+- **Streaming**: messages stream via NDJSON from acpx, broadcast to the UI via the existing WebSocket bus.
+
+#### Board (Phase 2 — builds on chat foundation)
+
+The existing kanban board, evolved once chat-driven workflows reveal what the board needs to be:
 
 - **Responsive columns**: horizontal scroll on desktop, vertical stack on mobile.
 - **Task card enrichment**: show active run status (building/validating), time-in-state, retry count badge, last failure summary.
@@ -54,16 +66,16 @@ The existing kanban board, evolved:
 - **Empty states and loading skeletons**.
 - **Keyboard navigation**: arrow keys across columns/cards, Enter to open detail.
 
-#### Chat (new surface)
+#### Chat (Phase 2 — task-scoped, evolved from Phase 1 threads)
 
-A conversational interface alongside the board, inspired by OpenChamber:
+Once the kanban arrives, task-scoped threads emerge naturally from the Phase 1 chat model:
 
 - **Repo-level chat**: not scoped to a single task. For asking questions about the codebase, planning work, discussing architecture, or interacting with agents for ad-hoc tasks.
 - **Task-scoped chat**: the existing spec-authoring chat, upgraded to feel like a first-class conversation (streaming responses, markdown rendering, code blocks with syntax highlighting).
-- **Seamless switching**: chat panel can dock beside the board or open full-screen on mobile. Task-scoped chat is reachable from both the chat surface and the task detail.
-- **Agent-backed**: chat messages hit a daemon API endpoint that routes to an agent. The daemon manages the session; the webapp just renders the stream.
+- **Seamless switching**: chat panel can dock beside the board or open full-screen on mobile. Task-scoped threads are reachable from both the chat surface and the task detail.
+- **Agent-backed**: threads hit the daemon API which routes to acpx. The daemon manages session lifecycle; the webapp renders the stream. See ADR-0002 for the session model.
 
-> **API gap**: The current API has spec-chat (`/api/tasks/:slug/spec-messages`) but no repo-level chat endpoint. A child ADR will define the daemon-side API additions needed for general chat.
+> **API gap**: The current API has spec-chat (`/api/tasks/:slug/spec-messages`) but no repo-level chat endpoint. ADR-0002 defines the thread/session model; daemon-side API additions for threads will be implemented as part of Phase 1 delivery.
 
 ### Information Architecture
 
@@ -116,16 +128,17 @@ Mobile: single-panel with bottom nav
 
 ---
 
-## Child ADRs (to be filed)
+## Child ADRs
 
-| ID        | Topic                                     | Scope                                                         |
-| --------- | ----------------------------------------- | ------------------------------------------------------------- |
-| ADR-0001a | Client-side routing                       | Router library choice, route structure, URL design            |
-| ADR-0001b | Chat architecture                         | Daemon API additions, WS event extensions, streaming protocol |
-| ADR-0001c | Responsive layout system                  | Breakpoints, layout primitives, mobile navigation             |
-| ADR-0001d | Performance budget and Lighthouse targets | Bundle splitting, lazy loading, metrics tracking              |
-| ADR-0001e | Accessibility                             | ARIA roles, keyboard nav, screen reader support, focus mgmt   |
-| ADR-0001f | Syntax highlighting                       | Library choice for code blocks in chat + spec + diff          |
+| ID        | Topic                                     | Status                 | Scope                                                             |
+| --------- | ----------------------------------------- | ---------------------- | ----------------------------------------------------------------- |
+| ADR-0002  | Chat session management                   | Proposed               | Thread model, acpx integration, agent selector, lifecycle         |
+| ADR-0001a | Client-side routing                       | Pending                | Router library choice, route structure, URL design                |
+| ADR-0001b | ~~Chat architecture~~                     | Superseded by ADR-0002 | ~~Daemon API additions, WS event extensions, streaming protocol~~ |
+| ADR-0001c | Responsive layout system                  | Pending                | Breakpoints, layout primitives, mobile navigation                 |
+| ADR-0001d | Performance budget and Lighthouse targets | Pending                | Bundle splitting, lazy loading, metrics tracking                  |
+| ADR-0001e | Accessibility                             | Pending                | ARIA roles, keyboard nav, screen reader support, focus mgmt       |
+| ADR-0001f | Syntax highlighting                       | Pending                | Library choice for code blocks in chat + spec + diff              |
 
 ---
 
