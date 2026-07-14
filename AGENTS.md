@@ -4,18 +4,17 @@ Marshal is a local-first, agent-agnostic coding-agent orchestrator ("software fa
 
 ## Session start
 
-Read `docs/PROJECT.md` before starting any work. It defines the architecture, design tenets, state machine, and terminology (ACP, ACPX, Boundary gate, Builder, Validator, etc.).
+Read `docs/ARCHITECTURE.md` first. It is the consolidated reference for what the system is today: state machine, HTTP/WS API, worktree model, agent layer, build/validate flow, retry routing, onboarding preflight, and the file/module map.
 
-When implementing features, also consult the relevant milestone file (`docs/M0-VERTICAL-SLICES.md`, `docs/M1-VERTICAL-SLICES.md`) and the applicable ADRs under `docs/adr/`.
+Read `docs/PROJECT.md` for the design tenets, vision, and rationale. It answers _why_ the system is shaped the way it is; `ARCHITECTURE.md` answers _what_ and _where_.
 
 `marshal init` is non-interactive: it checks prerequisites and acpx, writes `~/.marshal/config.json` with `AGENT_ID_DEFAULTS`, and initializes repo state. If acpx is missing it prints the install command and halts. Agent verification is `marshal doctor`'s job (zero-cost session probe via `acpx <agent> sessions new` + `close`).
 
 ## Reference docs
 
-- `docs/PROJECT.md` — overall architecture, design tenets, state machine, milestone sequence
-- `docs/M0-VERTICAL-SLICES.md` — M0 milestones (daemon + CLI + worktree + builder/validator loop)
-- `docs/M1-VERTICAL-SLICES.md` — M1 milestones (HTTP API, WebSocket bus, web SPA, diff review, PRs, spec chat)
-- `docs/adr/` — architecture decision records. When an ADR is completed/accepted, move it from `docs/adr/ADR-XXX.md` to `docs/adr/archived/ADR-XXX.md`. Proposed/working ADRs stay at `docs/adr/`.
+- `docs/ARCHITECTURE.md` — consolidated reference (read first)
+- `docs/PROJECT.md` — design tenets, vision, state machine narrative, milestone sequence
+- `docs/HUMAN-TESTING-GUIDE.md` — manual QA guide
 
 # Toolchain
 

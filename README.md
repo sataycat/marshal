@@ -1,69 +1,114 @@
 # Marshal
 
-A local-first, agent-agnostic coding-agent orchestrator built around a build-verify-review loop: you author the spec, an agent builds autonomously in an isolated git worktree, a dedicated validator gate checks the result, and you review and merge.
+A local-first, agent-agnostic coding-agent orchestrator built around a build-verify-review loop: you author the spec, an agent builds autonomously in an isolated git worktree, a different agent runs the verification gate, and you review and merge.
 
-M0 is the headless vertical slice — no UI, just CLI commands and logs. See [`docs/PROJECT.md`](docs/PROJECT.md) for the full design and [`docs/M0-VERTICAL-SLICES.md`](docs/M0-VERTICAL-SLICES.md) for the slice breakdown.
+See [`docs/PROJECT.md`](docs/PROJECT.md) for the design tenets and vision, and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the consolidated reference (state machine, HTTP/WS API, agent layer, retry routing, onboarding, security).
 
 ## Requirements
 
-- Node.js ≥ 18 (ES2022)
-- A C++ toolchain (`python3`, `make`, `g++` or `clang`) for `better-sqlite3`'s native build (prebuilt binaries cover the common platforms; see ADR-021)
-- git
-- [acpx](https://github.com/openclaw/acpx) on PATH (the ACP client the daemon shells out to)
-- A builder agent and a validator agent reachable through ACPX (M0 ships with `opencode` as builder and `pi` as validator)
+- **Node.js ≥ 18** (ES2022).
+- **git**.
+- **A C++ toolchain** (`python3`, `make`, `g++` or `clang`) for `better-sqlite3`'s native build. Prebuilt binaries cover common platforms; the long tail needs the toolchain.
+- **[acpx](https://github.com/openclaw/acpx) on PATH** — the ACP client Marshal shells out to. Pin: `>=0.12.0 <0.13.0`.
+- **A builder agent and a validator agent reachable through ACPX.** Defaults: `opencode` (builder) and `pi` (validator). Any ACP-compatible agent works — see the [acpx agent registry](https://acpx.sh/agents.html).
 
 ## Install
-
-Marshal ships as an npm package installed from GitHub (the GitHub shorthand form — see [ADR-021](docs/adr/archived/ADR-021-cli-distribution.md)):
 
 ```sh
 npm i -g sataycat/marshal
 ```
 
-This clones `github.com/sataycat/marshal`, runs npm's install lifecycle (compiling `better-sqlite3` for your platform), and runs a `postinstall` build that produces `dist/` so the `marshal` binary on PATH is ready to go.
-
-Then run onboarding:
+This installs the `marshal` binary on PATH. Then onboard a repo:
 
 ```sh
+cd your-repo
 marshal init
-marshal task create --slug my-feature --title "My feature" --spec-file spec.md
 ```
 
-### From source (development)
+`marshal init` is non-interactive. It checks system prereqs and acpx, writes `~/.marshal/config.json` (with the default `opencode` / `pi` / `opencode` role assignments), and creates `.marshal/` for per-repo state. If acpx is missing it prints the install command and halts — it does not run installs itself.
+
+To verify a setup without mutating anything:
 
 ```sh
-pnpm install
-pnpm run build
+marshal doctor
 ```
 
-This produces `dist/` and makes `bin/marshal` runnable. To use `marshal` from anywhere during development, link the package globally (`npm link` from the repo root).
+## Quickstart
+
+```sh
+# 1. Create a task in the backlog.
+marshal task create --slug add-feature --title "Add the feature" --spec-file ./spec.md
+
+# 2. Freeze the spec and move to ready (creates the worktree + commits the spec).
+marshal task ready add-feature
+
+# 3. Run the loop.
+marshal daemon start              # long-running poll, every 5s
+# or
+marshal daemon run-once           # one cycle, then exit
+
+# 4. When the task reaches `review`, inspect and merge.
+marshal task show add-feature
+# In the web board, open http://127.0.0.1:7433/, click "Approve & Merge"
+# Or via API:
+curl -X POST http://127.0.0.1:7433/api/tasks/add-feature/merge
+```
+
+The daemon's HTTP + WebSocket API is at `http://127.0.0.1:7433/` (the port is configurable). The web board (a React SPA) is served from the same origin.
+
+## State machine
+
+```
+backlog -> ready -> building -> validating -> review -> done
+                     ^  |          ^  |
+                     |  |          |  +---> building (retry, up to maxRetries)
+                     |  |          |        +-> review (cap exceeded)
+                     |  |          +-> backlog (Send Back)
+                     |  +-> ready (re-queue), backlog (re-author)
+                     +----- (human-driven escape hatches; reset retry state)
+```
+
+See [`docs/ARCHITECTURE.md` §0.1](docs/ARCHITECTURE.md#01-task-state-machine) and §2.2 for the full table and the escape-hatch semantics.
+
+## CLI reference
+
+```
+marshal init
+marshal doctor
+marshal task list
+marshal task create   --slug <slug> --title <title> [--spec <md> | --spec-file <path>]
+marshal task show     <slug>
+marshal task ready    <slug>
+marshal task freeze   <slug>             # re-freeze after editing the spec
+marshal task transition <slug> <state>   # manual transition (incl. escape hatches)
+marshal worktree create  --task <slug>
+marshal worktree destroy --task <slug>
+marshal daemon run-once
+marshal daemon start [--interval <ms>] [--port <port>] [--host <addr>]
+```
+
+`marshal daemon start` exposes the HTTP + WebSocket API on the daemon port. `marshal daemon start --help` for the full flag list.
 
 ## Configuration
 
-### Global config (`~/.marshal/config.json`)
+### Global (`~/.marshal/config.json`)
 
 ```jsonc
 {
-  "worktree": {
-    "root": "~/.marshal/worktrees", // where task worktrees are created
-  },
-  "acpx": {
-    "bin": "acpx", // path to the acpx binary
-    "version": ">=0.12.0 <0.13.0", // expected acpx version range
-  },
+  "acpx": { "bin": "acpx", "version": ">=0.12.0 <0.13.0" },
   "agents": {
-    "builder": "opencode", // builder agent id
-    "validator": "claude-code", // validator agent id — any ACP-compatible agent that ACPX knows works here
+    "builder": "opencode", // any ACPX agent id
+    "validator": "pi", // any ACPX agent id
+    "specAuthor": "opencode",
   },
-  "policy": {
-    "maxRetries": 2, // validation retry cap before escalating to review
-  },
+  "policy": { "maxRetries": 2 },
+  "daemon": { "host": "127.0.0.1", "port": 7433 },
 }
 ```
 
-The `MARSHAL_GLOBAL_CONFIG` env var overrides the config file path (useful for tests).
+Any agent in the [acpx registry](https://acpx.sh/agents.html) works — `claude`, `codex`, `gemini`, `kimi`, etc. The defaults are written by `marshal init`; edit the file to override. See [`docs/ARCHITECTURE.md` §0.6](docs/ARCHITECTURE.md#06-config-keys) for the full key reference.
 
-### Per-repo config (`marshal.json`)
+### Per-repo (`marshal.json`)
 
 ```jsonc
 {
@@ -73,117 +118,7 @@ The `MARSHAL_GLOBAL_CONFIG` env var overrides the config file path (useful for t
 }
 ```
 
-A `.worktreeinclude` file in the repo root lists gitignored files to copy into worktrees (e.g. `.env.local`).
-
-## M0 workflow
-
-State is per-repo, discovered via the current working directory (same model as git).
-
-### 1. Initialize
-
-```sh
-cd your-repo
-marshal init
-```
-
-`marshal init` is the one onboarding command (ADR-020). It runs a preflight across the machine and the repo:
-
-1. **System prerequisites** — `node >=18`, `git`, `pnpm` (warns if missing).
-2. **ACPX** — checks `acpx` on PATH and that its version is in the pinned range (`>=0.12.0 <0.13.0`); offers to install if missing.
-3. **Agent discovery** — for the configured `builder` and `validator` (defaults `opencode` / `pi`), probes `acpx <agent> --version` and a one-shot handshake; offers to install known agents.
-4. **Auth environment** — presence-checks the expected provider env vars (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`); warns on missing.
-5. **Config generation** — writes `~/.marshal/config.json` from the detected state (merges into an existing partial config, leaving existing keys untouched).
-6. **Repo init** — creates `.marshal/` (state directory + SQLite database).
-
-Re-running `marshal init` on a machine whose `~/.marshal/config.json` already has `acpx` + both agent roles skips phases 1–5 (`✓ machine already configured`) and only initializes the repo. `marshal init --non-interactive` runs every check, performs no installs/config writes, and exits non-zero on any failure (for CI/scripts).
-
-Diagnose a broken setup without mutating anything:
-
-```sh
-marshal doctor
-```
-
-### 2. Author a task
-
-```sh
-marshal task create \
-  --slug add-feature \
-  --title "Add the feature" \
-  --spec "## Goal\nImplement the feature.\n\n## Acceptance Criteria\n- Tests pass."
-```
-
-Or point at a spec file:
-
-```sh
-marshal task create --slug add-feature --title "Add the feature" --spec-file ./spec.md
-```
-
-The task starts in `backlog`. Inspect it with `marshal task show add-feature`.
-
-### 3. Freeze the spec and mark ready
-
-```sh
-marshal task ready add-feature
-```
-
-This transitions the task to `ready`, renders the working spec to `specs/<NNNN>-<slug>.md`, commits it to a task branch (`marshal/task/<slug>-<descriptor>`), and creates the worktree. The frozen spec is the immutable contract for the build.
-
-### 4. Run the loop
-
-Pick up one ready/validating task and run a single orchestrator cycle:
-
-```sh
-marshal daemon run-once
-```
-
-Or run the daemon continuously (polls every 5s by default):
-
-```sh
-marshal daemon start
-marshal daemon start --interval 10000   # poll every 10s
-```
-
-The daemon is single-threaded (concurrency 1). Each cycle:
-
-- A `ready` task is claimed, transitioned to `building`, the builder agent (`opencode` by default) runs in the worktree against the frozen spec, changes are committed, and the task moves to `validating`.
-- A `validating` task is checked by the validator agent (`pi` by default). The validator emits a `MARSHAL_GATE: pass` or `MARSHAL_GATE: fail <reason>` sentinel. On pass the task moves to `review`; on fail it bounces to `building` (up to `maxRetries` times) and then escalates to `review`.
-
-Stop the daemon with `Ctrl-C` (SIGINT/SIGTERM).
-
-### 5. Review
-
-```sh
-marshal task show add-feature
-```
-
-When the task reaches `review`, inspect the diff in the task worktree and merge or send it back. Use `marshal task transition <slug> <state>` for manual state changes, including the escape hatches (`building -> ready`, `building -> backlog`, `validating -> backlog`).
-
-### Task states
-
-```
-backlog -> ready -> building -> validating -> review -> done
-                       |           |
-                       +-> ready   +-> building (retry)
-                       +-> backlog +-> backlog
-                                   +-> review (cap exceeded)
-```
-
-## CLI reference
-
-```
-marshal init [--non-interactive]
-marshal doctor
-marshal task list
-marshal task create --slug <slug> --title <title> [--spec <markdown> | --spec-file <path>]
-marshal task show <slug>
-marshal task ready <slug>
-marshal task freeze <slug>
-marshal task transition <slug> <state>
-marshal worktree create --task <slug>
-marshal worktree destroy --task <slug>
-marshal daemon run-once
-marshal daemon start [--interval <ms>]
-```
+A `.worktreeinclude` file in the repo root (gitignore syntax) lists gitignored files to copy into worktrees (e.g. `.env.local`).
 
 ## Development
 
@@ -196,31 +131,13 @@ pnpm run test         # vitest
 
 Pre-commit staged checks: `vp staged`.
 
-Architecture decisions are recorded in [`docs/adr/`](docs/adr/).
+## Web board (dev workflow)
 
-## Web board (M1)
-
-The daemon serves a React SPA (the Kanban board) from `web/dist/`. The `web/` directory is a separate pnpm workspace package (`marshal-web`, plain Vite + React).
+The web board is a Vite + React SPA in `web/`. The daemon serves the built bundle from `web/dist/` in production and proxies the API/WS to itself in dev.
 
 ```sh
 pnpm run build:web    # build the SPA into web/dist/
-pnpm run check:web    # type-check the SPA
-pnpm run test:web     # run the SPA tests
-# or the aggregates:
-pnpm run build:all
-pnpm run check:all
-pnpm run test:all
+pnpm --filter marshal-web run dev   # Vite dev server with proxy to the daemon
 ```
 
-If `web/dist/` has not been built, `GET /` returns a 404 explaining the bundle is missing; the daemon keeps running and the API/WebSocket stay available. See [`docs/adr/ADR-014-frontend-build-and-serve.md`](docs/adr/ADR-014-frontend-build-and-serve.md).
-
-### Dev workflow (Vite proxy)
-
-Run the daemon in one terminal and the Vite dev server in another:
-
-```sh
-marshal daemon start          # API + WebSocket on 127.0.0.1:7433
-pnpm --filter marshal-web run dev   # Vite on 127.0.0.1:5173, proxies /api and /ws
-```
-
-Open `http://127.0.0.1:5173/`. The SPA uses same-origin relative URLs (`/api`, `/ws`) so no code changes are needed between dev and production. In production, build the SPA and open `http://127.0.0.1:7433/` directly.
+If `web/dist/` has not been built, `GET /` returns a 404 explaining the bundle is missing; the daemon keeps running and the API/WebSocket stay available. See [`docs/ARCHITECTURE.md` §11](docs/ARCHITECTURE.md#11-frontend-web).

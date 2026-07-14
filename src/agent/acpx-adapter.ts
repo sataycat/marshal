@@ -279,7 +279,7 @@ function buildPromptArgs(session: AgentSession, opts: PromptOptions): string[] {
 
 function acpxNotInstalledError(): Error {
   return new Error(
-    "acpx is not installed. Install with `npm i -g acpx@latest` and see docs/adr/archived/ADR-023.md.",
+    "acpx is not installed. Install with `npm i -g acpx@latest` and see docs/ARCHITECTURE.md §5.7 (ACPX version pin).",
   );
 }
 
