@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { fetchTaskDetail, fetchTaskDiff, type DiffStats } from "../api/client";
-import { Markdown } from "../components/Markdown";
+import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
 import { useBoardContext } from "../board/BoardContext";
 import { actionsForStatus, confirmMessage, type BoardAction } from "../board/actions";
 import type { TaskDetail } from "../types";
@@ -160,7 +160,7 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
               )}
               <Separator />
               <h3 className="text-sm font-semibold">Spec</h3>
-              <Markdown className="spec leading-relaxed" src={detail.spec_markdown} />
+              <MarkdownWithCode className="spec leading-relaxed" src={detail.spec_markdown} />
               {detail.status === "backlog" && (
                 <SpecChatPanel
                   slug={slug}

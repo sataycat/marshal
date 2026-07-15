@@ -87,14 +87,11 @@ Tracks the 5-pass implementation of [ADR-0001a](docs/adr/ADR-0001a-frontend-infr
 7. Replace the `<div class="modal-backdrop">` confirm dialog with the new `Dialog` component; thread-list and command-palette get `Sheet`.
 8. Add a mobile bottom nav (`Tabs`/`Sheet` hybrid) visible below `md:` that toggles between Board / Chat / Detail surfaces; on `md:` and up, surfaces sit side-by-side.
 9. Trim `styles.css` to design tokens only (or delete entirely; design tokens can be CSS variables in the `@theme` block).
-10. Tests:
-    - Smoke render test for `AppShell`, `Dialog`, `Sheet` (will require `happy-dom` or `jsdom` in the vitest config; add to `web/package.json` dev deps).
-    - Update existing component tests if they asserted on class names.
 
 **Files touched**
 
 - `web/package.json` (deps + scripts)
-- `web/vite.config.ts` (Tailwind plugin; vitest `environment: "happy-dom"` for component tests)
+- `web/vite.config.ts` (Tailwind plugin)
 - `web/src/styles.css` (Tailwind import + `@theme`; trimmed to tokens) or replaced by `web/src/index.css`
 - `web/src/shell/AppShell.tsx` (Tailwind)
 - `web/src/board/Board.tsx`, `BoardContext.tsx`, `TaskCard.tsx`, `NewTaskModal.tsx`, actions/reducer (style-only)
@@ -104,7 +101,6 @@ Tracks the 5-pass implementation of [ADR-0001a](docs/adr/ADR-0001a-frontend-infr
 - `web/src/components/ConfirmDialog.tsx` (rewrite on top of `Dialog`)
 - `web/src/toast/ToastHost.tsx`
 - New: `web/src/components/ui/cn.ts`, `Sheet.tsx`, `Dialog.tsx`, `Button.tsx`, `Tooltip.tsx`, `Tabs.tsx`
-- Tests: `web/src/shell/AppShell.test.tsx`, `web/src/components/ui/Dialog.test.tsx`, `web/src/components/ui/Sheet.test.tsx`; vitest config tweak for the new environment.
 
 **Notes (this PR)**
 
@@ -120,7 +116,7 @@ Tracks the 5-pass implementation of [ADR-0001a](docs/adr/ADR-0001a-frontend-infr
 - The new `Dialog` is used by `NewTaskModal` and `ConfirmDialog`; Escape and focus trap work without us authoring them.
 - Lighthouse Performance ≥90 / Best Practices ≥95 in a local `pnpm run build:web && lhci` run; numbers recorded in the PR.
 - `pnpm run size` still green; bundle delta < 30 KB gzipped for Tailwind+Base UI typical usage.
-- All existing tests pass; new component tests pass.
+- All existing tests pass.
 
 **Dependencies:** Pass 2 done (size-limit so we catch a Tailwind regression immediately).
 
@@ -132,20 +128,19 @@ Tracks the 5-pass implementation of [ADR-0001a](docs/adr/ADR-0001a-frontend-infr
 
 **Steps**
 
-1. Add `web/` deps: `@uiw/react-codemirror`, `@codemirror/state`, `@codemirror/view`, `@codemirror/commands`, `@codemirror/language`, `@codemirror/lang-typescript`, `@codemirror/lang-markdown`, `@codemirror/lang-json`, `@codemirror/lang-css`, `@codemirror/lang-python`, `@codemirror/lang-sql`. Trim the language set if the chunk exceeds the 90 KB ceiling; drop SQL or Python first, then CSS — keep TS/MD/JSON.
+1. Add `web/` deps: `@uiw/react-codemirror`, `@codemirror/state`, `@codemirror/view`, `@codemirror/language`, `@codemirror/lang-javascript` (covers TS/JS/TSX/JSX), `@codemirror/lang-markdown`, `@codemirror/lang-json`, `@codemirror/lang-css`, `@codemirror/lang-python`, `@codemirror/legacy-modes` (covers `python` and `sql` stream modes, plus `diff` for the hunk body). Trim the language set if the chunk exceeds the 90 KB ceiling; drop SQL or Python first, then CSS — keep TS/MD/JSON.
 2. New file `web/src/codemirror/CodeBlock.tsx` — the public surface. `editable: boolean` prop. Internally lazy-imports `@uiw/react-codemirror` and the per-language extensions on first mount; resolves the same module on subsequent mounts in the session.
-3. New file `web/src/codemirror/languages.ts` — maps fence language strings (`ts`, `typescript`, `md`, `markdown`, `json`, `css`, `python`, `py`, `sql`) to the corresponding Lezer extension import. Falls back to plain text for unknown languages.
-4. New file `web/src/codemirror/MarkdownWithCode.tsx` — the integration glue. Calls `marked.parse()` for prose, then post-processes the HTML string to replace `<pre><code class="language-…">` with `<div data-cm data-lang="…" data-editable="false">…</div>` stubs. On mount, hydrates each stub with a `<CodeBlock>`. The hydration pass uses `useEffect` + a ref-collecting loop so it survives re-renders.
-5. Update `web/src/markdown.ts`: expose a `renderMarkdownToHtml(src)` (for legacy code paths — diffs, etc.) and a `renderProse(src)` that returns the marked-prose HTML **with stubs** for the new `MarkdownWithCode` component. Keep the existing `renderMarkdown` for callers that don't need hydration.
+3. New file `web/src/codemirror/languages.ts` — maps fence language strings (`ts`, `typescript`, `tsx`, `js`, `javascript`, `jsx`, `md`, `markdown`, `json`, `jsonc`, `css`, `py`, `python`, `sql`, `diff`, `patch`) to the corresponding extension import. Falls back to plain text for unknown languages.
+4. New file `web/src/codemirror/MarkdownWithCode.tsx` — the integration glue. Calls `marked.parse()` for prose, then post-processes the HTML string to replace `<pre><code class="language-…">` with `<div data-cm data-lang="…" data-idx="…">…</div>` stubs. On mount, hydrates each stub with a `<CodeBlock>`. The hydration pass uses `useEffect` + a ref-collecting loop so it survives re-renders.
+5. Update `web/src/markdown.ts`: add a `renderProse(src)` that returns the marked-prose HTML **with stubs** for the new `MarkdownWithCode` component. Keep the existing `renderMarkdown` for callers that don't need hydration.
 6. Wire `MarkdownWithCode` into:
    - `TaskDetail.tsx` — the spec (`<MarkdownWithCode src={detail.spec_markdown} editable={false} />`). Add an "Edit this block" affordance on hover that flips a specific block to `editable` (local UI state, sends no PATCH).
    - `SpecChatPanel.tsx` — each spec-chat message.
    - `DiffView.tsx` — replace the current plain `<pre>` per hunk with a `<CodeBlock editable={false} lang="diff" />` rendering the hunk body. Keeps the file-level view; adds token-level color via CodeMirror decorations.
-7. Theme: a single light theme matching the existing `--bg`/`--panel` palette, applied via the `theme` prop of `@uiw/react-codemirror`. No separate theme CSS file.
-8. Tests:
-   - `CodeBlock.test.tsx` — renders text; when `editable`, accepts input; stub→CodeBlock hydration swaps in the chunk.
-   - `MarkdownWithCode.test.tsx` — verifies a ` ```ts ` fence renders a stub with `data-lang="ts"` and a hydrated CodeBlock after mount; verifies unknown languages fall back to `lang="text"`.
-   - `languages.test.ts` — language string → extension map.
+7. Theme: a single light theme matching the existing `--bg`/`--panel` palette, applied as a `@codemirror/view` `EditorView.theme` extension. No separate theme CSS file.
+8. Remove the legacy `web/src/components/Markdown.tsx` (the old `renderMarkdown` consumer); its callers move to `MarkdownWithCode`.
+
+> Per AGENTS.md, no component-render tests for `CodeBlock` / `MarkdownWithCode`. The hydration/state machinery is exercised manually via the human-testing guide and the daemon end-to-end flow.
 
 **Files touched**
 
@@ -153,11 +148,11 @@ Tracks the 5-pass implementation of [ADR-0001a](docs/adr/ADR-0001a-frontend-infr
 - `web/src/codemirror/CodeBlock.tsx` (new)
 - `web/src/codemirror/languages.ts` (new)
 - `web/src/codemirror/MarkdownWithCode.tsx` (new)
-- `web/src/markdown.ts` (split into legacy + prose-with-stubs)
+- `web/src/markdown.ts` (add `renderProse`)
 - `web/src/detail/TaskDetail.tsx`
 - `web/src/specchat/SpecChatPanel.tsx`
 - `web/src/diff/DiffView.tsx`
-- Tests: `web/src/codemirror/{CodeBlock,MarkdownWithCode,languages}.test.tsx`
+- `web/src/components/Markdown.tsx` (deleted)
 - Update `web/.size-limit.json` with the CodeMirror chunk budget once we know its hashed name.
 
 **Acceptance**
@@ -166,9 +161,9 @@ Tracks the 5-pass implementation of [ADR-0001a](docs/adr/ADR-0001a-frontend-infr
 - The CodeMirror chunk ships in its own file (verify in `dist/assets/`).
 - Chunk size ≤ **90 KB gzipped** (`pnpm run size`); if over, trim the language set and re-measure.
 - "Edit" affordance on a chat block flips it to editable; change is local (no PATCH in Phase 1 — a future ADR can wire it to `POST .../spec`).
-- All existing tests pass; new CodeMirror tests pass.
+- All existing tests pass.
 
-**Dependencies:** Pass 3 done (Base UI gives us the affordance primitives; component tests use the same `happy-dom` setup).
+**Dependencies:** Pass 3 done.
 
 ---
 

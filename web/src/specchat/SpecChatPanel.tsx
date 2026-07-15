@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Send, Snowflake } from "lucide-react";
 import { fetchSpecMessages } from "../api/client";
 import { extractMarshalSpec, MARSHAL_SPEC_FENCE } from "./marshalSpec";
-import { Markdown } from "../components/Markdown";
+import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
 import { useBoardContext } from "../board/BoardContext";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -146,7 +146,7 @@ export function SpecChatPanel({ slug, detail, onSpecUpdated, onFrozen }: Props) 
               >
                 {m.role}
               </span>
-              <Markdown className="text-sm" src={m.content} />
+              <MarkdownWithCode className="text-sm" src={m.content} />
             </div>
           ))}
         </div>

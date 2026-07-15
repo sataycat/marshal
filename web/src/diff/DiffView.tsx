@@ -1,8 +1,19 @@
 import { type DiffFile } from "./parseDiff";
+import { CodeBlock } from "../codemirror/CodeBlock";
 import { cn } from "@/lib/utils";
 
 interface Props {
   files: DiffFile[];
+}
+
+function lineToText(line: { type: "add" | "del" | "context"; text: string }): string {
+  if (line.type === "add") return `+${line.text}`;
+  if (line.type === "del") return `-${line.text}`;
+  return ` ${line.text}`;
+}
+
+function hunkToText(hunk: DiffFile["hunks"][number]): string {
+  return hunk.lines.map(lineToText).join("\n");
 }
 
 export function DiffView({ files }: Props) {
@@ -19,7 +30,7 @@ export function DiffView({ files }: Props) {
           <header className="border-b border-border bg-muted px-2.5 py-1.5 font-mono text-xs">
             {file.newPath}
           </header>
-          <pre className="m-0 overflow-x-auto p-0 font-mono text-xs leading-relaxed">
+          <div className="font-mono text-xs leading-relaxed">
             {file.hunks.map((hunk, hi) => (
               <div
                 key={hi}
@@ -28,34 +39,20 @@ export function DiffView({ files }: Props) {
                 <div className="bg-secondary px-2.5 py-0.5 text-muted">
                   {`@@ -${hunk.oldStart},${hunk.oldLen} +${hunk.newStart},${hunk.newLen} @@`}
                 </div>
-                {hunk.lines.map((line, li) => (
-                  <div
-                    key={li}
-                    className={cn(
-                      "flex whitespace-pre",
-                      line.type === "add" &&
-                        "bg-[var(--color-diff-add-bg)] text-[var(--color-diff-add-fg)]",
-                      line.type === "del" &&
-                        "bg-[var(--color-diff-del-bg)] text-[var(--color-diff-del-fg)]",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "w-6 shrink-0 text-center text-muted select-none",
-                        line.type === "add" && "bg-[var(--color-diff-add-bg)]",
-                        line.type === "del" && "bg-[var(--color-diff-del-bg)]",
-                      )}
-                    >
-                      {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
-                    </span>
-                    <span className="flex-1 whitespace-pre-wrap pl-1">
-                      {line.text}
-                    </span>
-                  </div>
-                ))}
+                <CodeBlock
+                  value={hunkToText(hunk)}
+                  lang="diff"
+                  editable={false}
+                  minHeight="0"
+                  className={cn(
+                    "!rounded-none !border-0 !bg-muted",
+                    "[&_.cm-editor]:!bg-muted [&_.cm-editor]:!shadow-none",
+                    "[&_.cm-scroller]:!overflow-x-auto [&_.cm-content]:!py-1",
+                  )}
+                />
               </div>
             ))}
-          </pre>
+          </div>
         </section>
       ))}
     </div>
