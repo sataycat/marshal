@@ -1,6 +1,6 @@
 # ADR-0001a: Frontend Infrastructure — Routing, Layout, Performance, Accessibility, Code Editing & Syntax Highlighting
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-15
 **Parent:** ADR-0001 (Daemon Webapp)
 **Children:** —

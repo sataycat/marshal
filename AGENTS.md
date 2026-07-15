@@ -36,7 +36,7 @@ Run `pnpm install` (after pull) → `pnpm run check && pnpm run test` → any ex
 
 ## Bundle budgets
 
-`size-limit` enforces the per-chunk gzipped-JS budgets from ADR-0001a §3 (initial chunk ≤ 110 KB; route chunks have their own limits in `web/.size-limit.json`).
+`size-limit` enforces the per-chunk gzipped-JS budgets from ADR-0001a §3. Limits are intentionally generous (initial chunk ≤ 220 KB, CodeMirror chunk ≤ 180 KB, route chunks have their own limits in `web/.size-limit.json`); functionality trumps micro-optimizing under tighter ceilings, but lazy-loading heavy deps (`marked`, CodeMirror) is still required so the initial chunk stays small.
 
 - `pnpm run size` — runs `size-limit` against the built `web/dist`; runs in CI and is wired into `pnpm run build:web`, so a budget breach fails the build. Fix the import or update the budget in `web/.size-limit.json` with rationale.
 - `pnpm run analyze` — rebuilds with `ANALYZE=1` to emit `web/dist/stats.html` (a rollup-plugin-visualizer treemap) for manual triage when a chunk surprises. Not a production-graph dep.

@@ -182,8 +182,37 @@ If the daemon dies mid-build or mid-validate, the task is **not** auto-retried. 
 
 ## 10. Frontend
 
-Plain Vite + React SPA in `web/`, built to `web/dist/`, served by the daemon. The Vite dev server proxies `/api/*` and `/ws` to the daemon.
+React 18 SPA in `web/`, built by Vite to `web/dist/` and served by the daemon (the Vite dev server proxies `/api/*` and `/ws`). Stack: **React 18 + Vite + Tailwind v4 (`@tailwindcss/vite`) + shadcn/Base UI primitives + wouter + `@uiw/react-codemirror` + `marked`**, light-mode only.
+
+### Routing
+
+History-mode routing via **wouter** (`web/src/routes/routes.ts` centralizes paths, nav items, and `lazy()` chunk loaders). `App.tsx` wraps a `Router` + `Switch` over `lazy()` route components; `/` redirects to `/board`; `BoardProvider` sits at app level to share the WebSocket bus. The daemon's existing SPA fallback (`src/daemon/http.ts` `spaNotFound`) serves deep links, so refreshing `/chat/<threadId>` boots the bundle and resolves the route client-side. `PrefetchNavLink` triggers a route chunk on `mouseenter`/`focus`.
+
+### Layout
+
+`<AppShell>` owns the header + main slot (and a `@container` on the main slot so the chat pane knows its own width). At `md:` (768px) the board + detail sit side-by-side; below `md:` they stack and a mobile bottom-nav (`Tabs` at `md:hidden`) toggles Board / Chat / Detail. Tailwind v4 breakpoints are overridden in `@theme` (`sm = 480px`, `md = 768px`) so the named scale matches the design intent. `styles.css` is gone — `web/src/index.css` imports Tailwind + the `@theme` tokens only.
+
+### Board surface
 
 The board is a thin client: initializes from the `connected` WebSocket snapshot, applies event deltas, and reconciles on reconnect. No durable client-side state. The board renders six columns matching the state machine, with task cards showing title, slug, and time-in-state. Task detail includes spec, diff view, run log, and spec-authoring chat.
 
 Optimistic updates on mutations; rollback on server error. The server-side state machine is always authoritative — the UI hides invalid actions but does not enforce them.
+
+### Code rendering & editing
+
+One engine — `@uiw/react-codemirror` (CodeMirror 6) — serves both read-only highlighting and editable code. `web/src/codemirror/CodeBlock.tsx` is the public surface (`editable: boolean` prop); `languages.ts` maps fence strings (`ts`, `tsx`, `js`, `jsx`, `md`, `json`, `css`, `py`, `sql`, `diff`, …) to per-language extension imports, falling back to plain text. `MarkdownWithCode.tsx` integrates it with `marked`: prose is rendered with `marked`, then a hydration pass replaces `<pre><code class="language-…">` stubs with mounted `<CodeBlock>` instances. The first block of a session briefly renders as plain monospace, then hydrates; the CodeMirror module is cached for the session after. CodeMirror is wired into `TaskDetail` (spec), `SpecChatPanel` (chat messages), and `DiffView` (hunk bodies as `lang="diff"`). The spec-block "Edit this block" affordance flips a block to `editable` locally (no PATCH in Phase 1).
+
+### Performance
+
+Code-split aggressively: route-level `lazy()` chunks + point-of-use lazy loads for `marked` (`web/src/markdown.ts` `renderMarkdown`/`renderProse` dynamic-import on first call) and the CodeMirror engine (lazy on first `<CodeBlock>` mount, never in the initial chunk). **`size-limit`** is the per-PR gate: `pnpm run size` checks per-chunk gzipped budgets (`web/.size-limit.json`), wired into `pnpm run build:web` so a budget breach fails the build. **`rollup-plugin-visualizer`** behind `ANALYZE=1` (`pnpm run analyze`) emits `web/dist/stats.html` for manual triage; it is not a production-graph dep. Lighthouse (P≥90 / BP≥95) is a release-cadence gate, not per-PR. A11y is inherited from Base UI; not gated or tracked.
+
+### File map (frontend)
+
+- `web/src/App.tsx`, `web/src/shell/AppShell.tsx` — app shell + routing root.
+- `web/src/routes/routes.ts` — paths, nav, chunk loaders.
+- `web/src/board/*` — board surface (reducer, actions, `TaskCard`, `BoardContext` WebSocket bus).
+- `web/src/detail/TaskDetail.tsx`, `web/src/diff/DiffView.tsx`, `web/src/specchat/SpecChatPanel.tsx` — task surfaces (all consume `MarkdownWithCode`).
+- `web/src/codemirror/{CodeBlock,languages,MarkdownWithCode}.tsx` — CodeMirror integration.
+- `web/src/markdown.ts` — `renderMarkdown` / `renderProse` (lazy `marked`).
+- `web/src/components/ui/*` — shadcn/Base UI primitives (`Sheet`, `Dialog`, `Button`, `Tooltip`, `Tabs`, …) + the `cn()` helper.
+- `web/vite.config.ts`, `web/.size-limit.json`, `web/src/index.css` — build/theming config.
