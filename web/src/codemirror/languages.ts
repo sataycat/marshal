@@ -1,4 +1,3 @@
-import { StreamLanguage } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 
 /**
@@ -63,24 +62,28 @@ type Loader = () => Promise<Extension>;
 const LOADERS: Record<Exclude<LanguageId, "text">, Loader> = {
   ts: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true })),
   tsx: () =>
-    import("@codemirror/lang-javascript").then((m) => m.javascript({ jsx: true, typescript: true })),
+    import("@codemirror/lang-javascript").then((m) =>
+      m.javascript({ jsx: true, typescript: true }),
+    ),
   js: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
   jsx: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ jsx: true })),
   json: () => import("@codemirror/lang-json").then((m) => m.json()),
   md: () => import("@codemirror/lang-markdown").then((m) => m.markdown()),
   css: () => import("@codemirror/lang-css").then((m) => m.css()),
   py: () =>
-    import("@codemirror/legacy-modes/mode/python").then((m) =>
-      StreamLanguage.define(m.python),
-    ),
+    Promise.all([
+      import("@codemirror/language"),
+      import("@codemirror/legacy-modes/mode/python"),
+    ]).then(([{ StreamLanguage }, m]) => StreamLanguage.define(m.python)),
   sql: () =>
-    import("@codemirror/legacy-modes/mode/sql").then((m) =>
-      StreamLanguage.define(m.standardSQL),
+    Promise.all([import("@codemirror/language"), import("@codemirror/legacy-modes/mode/sql")]).then(
+      ([{ StreamLanguage }, m]) => StreamLanguage.define(m.standardSQL),
     ),
   diff: () =>
-    import("@codemirror/legacy-modes/mode/diff").then((m) =>
-      StreamLanguage.define(m.diff),
-    ),
+    Promise.all([
+      import("@codemirror/language"),
+      import("@codemirror/legacy-modes/mode/diff"),
+    ]).then(([{ StreamLanguage }, m]) => StreamLanguage.define(m.diff)),
 };
 
 const cache = new Map<LanguageId, Extension>();

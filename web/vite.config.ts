@@ -35,7 +35,21 @@ export default defineConfig({
       "/ws": { target: "ws://127.0.0.1:7433", ws: true },
     },
   },
-  build: { outDir: "dist", emptyOutDir: true },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        entryFileNames: "assets/app-[hash].js",
+        manualChunks(id) {
+          if (id.includes("/node_modules/@codemirror/view/")) {
+            return "codemirror";
+          }
+          return undefined;
+        },
+      },
+    },
+  },
   test: {
     include: ["src/**/*.test.ts"],
     environment: "node",

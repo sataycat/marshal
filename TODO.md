@@ -30,7 +30,7 @@ Tracks the 5-pass implementation of [ADR-0001a](docs/adr/ADR-0001a-frontend-infr
    - Keep `manualChunks` minimal — let Vite's natural lazy split do the work; we just observe it.
 4. Refactor `web/src/markdown.ts` to expose a `renderMarkdown(src)` that dynamic-imports `marked` on first call; cache the resolved module. The point is finer-grained than the route-level split: within a route, `marked` is its own sub-chunk that loads on first markdown render.
 5. Add `web/.size-limit.json` (or `size-limit` field in `web/package.json`) with budgets:
-   - `dist/assets/index-*.js` ≤ **110 KB gzipped** (initial chunk; React + ReactDOM + wouter + app shell + BoardContext).
+   - `dist/assets/app-*.js` ≤ **110 KB gzipped** (initial chunk; React + ReactDOM + wouter + app shell + BoardContext).
    - `dist/assets/BoardRoute-*.js` ≤ **25 KB gzipped** (current ~16 KB; leaves headroom for spec-chat additions in Phase 2).
    - `dist/assets/ChatRoute-*.js` and `dist/assets/ChatThreadRoute-*.js` ≤ **5 KB gzipped** (placeholders today; will grow with chat surface).
    - `dist/assets/NotFoundRoute-*.js` ≤ **2 KB gzipped**.
