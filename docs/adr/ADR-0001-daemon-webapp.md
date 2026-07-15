@@ -3,7 +3,7 @@
 **Status:** Proposed (sequencing revised — chat-first)  
 **Date:** 2024-07-14  
 **Parent:** —  
-**Children:** ADR-0001a (Frontend Infrastructure), ADR-0002 (Chat Session Management)
+**Children:** ADR-0001a (Frontend Infrastructure), ADR-0002 (Chat Interface)
 
 ---
 
@@ -43,7 +43,7 @@ Build out the daemon webapp into a **fully-featured, responsive, lightweight web
 
 ### The Two Surfaces
 
-**Delivery sequence: Chat first (Phase 1), Board second (Phase 2).** The chat UI is the immediate deliverable — it provides a usable ACP interface, enables dogfooding, and surfaces real workflow patterns that inform the kanban design. The board evolves from the existing minimal kanban once the chat-driven workflow is understood. See ADR-0002 for the chat session management model.
+**Delivery sequence: Chat first (Phase 1), Board second (Phase 2).** The chat UI is the immediate deliverable — it provides a usable ACP interface, enables dogfooding, and surfaces real workflow patterns that inform the kanban design. The board evolves from the existing minimal kanban once the chat-driven workflow is understood. See ADR-0002 for the chat interface design.
 
 #### Chat (Phase 1 — primary surface)
 
@@ -135,7 +135,7 @@ Mobile: single-panel with bottom nav
 | ADR-0001a | Frontend infrastructure (consolidated) | Proposed               | Routing, responsive layout, performance budget, accessibility,    |
 |           |                                        |                        | code editing/syntax highlighting — absorbs former ADR-0001c/d/e/f |
 |           |                                        |                        | and the routing slot                                              |
-| ADR-0002  | Chat session management                | Proposed               | Thread model, acpx integration, agent selector, lifecycle         |
+| ADR-0002  | Chat interface                          | Proposed               | 4-pane layout (sessions/files/editor+preview/chat), ACP event rendering, thinking + image upload, agent selector, thread model summary (session/permission/attachments deferred to child ADRs) |
 | ADR-0001b | ~~Chat architecture~~                  | Superseded by ADR-0002 | ~~Daemon API additions, WS event extensions, streaming protocol~~ |
 
 ---
