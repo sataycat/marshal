@@ -34,6 +34,15 @@ Vite+ is still used only for staged pre-commit formatting and linting:
 
 Run `pnpm install` (after pull) → `pnpm run check && pnpm run test` → any extra `pnpm run …` scripts before finishing.
 
+## Bundle budgets
+
+`size-limit` enforces the per-chunk gzipped-JS budgets from ADR-0001a §3 (initial chunk ≤ 110 KB; route chunks have their own limits in `web/.size-limit.json`).
+
+- `pnpm run size` — runs `size-limit` against the built `web/dist`; runs in CI and is wired into `pnpm run build:web`, so a budget breach fails the build. Fix the import or update the budget in `web/.size-limit.json` with rationale.
+- `pnpm run analyze` — rebuilds with `ANALYZE=1` to emit `web/dist/stats.html` (a rollup-plugin-visualizer treemap) for manual triage when a chunk surprises. Not a production-graph dep.
+
+Before adding a non-trivial new dependency to `web/`, check its bundle cost: run `pnpm run analyze` before and after, treat the CodeMirror chunk as its own lazy budget (never pull heavy libs into the initial chunk), and prefer dynamic `import()` at point of use. If the new dep would breach a budget in `web/.size-limit.json`, either lazy-split it, find a lighter alternative, or raise the budget with rationale in the PR.
+
 ## Testing
 
 Always write tests for new functionality and bug fixes wherever possible. Running `pnpm run test` should stay green.

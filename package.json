@@ -25,6 +25,8 @@
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
     "build:web": "pnpm --filter marshal-web run build",
     "build:all": "pnpm run build && pnpm run build:web",
+    "size": "pnpm --filter marshal-web run size",
+    "analyze": "pnpm --filter marshal-web run analyze",
     "test": "vitest run",
     "test:web": "pnpm --filter marshal-web run test",
     "test:all": "pnpm run test && pnpm run test:web",
@@ -47,6 +49,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.1.0",
     "@types/ws": "^8.18.1",
+    "shadcn": "^4.13.0",
     "typescript": "^6.0.3",
     "vitest": "^3.0.0"
   },

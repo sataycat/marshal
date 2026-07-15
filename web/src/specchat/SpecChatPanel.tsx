@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchSpecMessages } from "../api/client";
 import { extractMarshalSpec, MARSHAL_SPEC_FENCE } from "./marshalSpec";
-import { renderMarkdown } from "../markdown";
+import { Markdown } from "../components/Markdown";
 import { useBoardContext } from "../board/BoardContext";
 import type { SpecMessage, TaskDetail } from "../types";
 
@@ -131,10 +131,7 @@ export function SpecChatPanel({ slug, detail, onSpecUpdated, onFrozen }: Props) 
         {messages.map((m) => (
           <div key={m.id} className={`spec-chat-msg spec-chat-${m.role}`}>
             <span className="spec-chat-role">{m.role}</span>
-            <div
-              className="spec-chat-content"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }}
-            />
+            <Markdown className="spec-chat-content" src={m.content} />
           </div>
         ))}
       </div>

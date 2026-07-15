@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchTaskDetail, fetchTaskDiff, type DiffStats } from "../api/client";
-import { renderMarkdown } from "../markdown";
+import { Markdown } from "../components/Markdown";
 import { useBoardContext } from "../board/BoardContext";
 import { actionsForStatus, confirmMessage, type BoardAction } from "../board/actions";
 import type { TaskDetail } from "../types";
@@ -117,10 +117,7 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
             </details>
           )}
           <h3>Spec</h3>
-          <div
-            className="spec"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(detail.spec_markdown) }}
-          />
+          <Markdown className="spec" src={detail.spec_markdown} />
           {detail.status === "backlog" && (
             <SpecChatPanel
               slug={slug}

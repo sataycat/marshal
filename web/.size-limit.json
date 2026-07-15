@@ -1,0 +1,32 @@
+[
+  {
+    "path": "dist/assets/index-*.js",
+    "limit": "110 KB",
+    "gzip": true,
+    "name": "initial chunk (React+ReactDOM+wouter+AppShell+BoardContext)"
+  },
+  {
+    "path": "dist/assets/BoardRoute-*.js",
+    "limit": "25 KB",
+    "gzip": true,
+    "name": "BoardRoute chunk"
+  },
+  {
+    "path": "dist/assets/ChatRoute-*.js",
+    "limit": "5 KB",
+    "gzip": true,
+    "name": "ChatRoute chunk"
+  },
+  {
+    "path": "dist/assets/ChatThreadRoute-*.js",
+    "limit": "5 KB",
+    "gzip": true,
+    "name": "ChatThreadRoute chunk"
+  },
+  {
+    "path": "dist/assets/NotFoundRoute-*.js",
+    "limit": "2 KB",
+    "gzip": true,
+    "name": "NotFoundRoute chunk"
+  }
+]

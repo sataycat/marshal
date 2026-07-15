@@ -3,7 +3,7 @@
 **Status:** Proposed (sequencing revised — chat-first)  
 **Date:** 2024-07-14  
 **Parent:** —  
-**Children:** ADR-0002 (Chat Session Management)
+**Children:** ADR-0001a (Frontend Infrastructure), ADR-0002 (Chat Session Management)
 
 ---
 
@@ -37,7 +37,7 @@ Build out the daemon webapp into a **fully-featured, responsive, lightweight web
 
 2. **Responsive-first layout.** Desktop shows board + detail side-by-side (or board + chat). Tablet collapses to stacked. Mobile shows one surface at a time with navigation. Breakpoints: ~768px (tablet), ~480px (phone).
 
-3. **Performance budget.** Target Lighthouse scores: Performance ≥90, Accessibility ≥95, Best Practices ≥95. Bundle budget: <150KB gzipped JS (excluding source maps). No heavy UI framework. Vanilla CSS (custom properties, no Tailwind, no CSS-in-JS). React 18 stays — it's already there and adequate.
+3. **Performance budget.** Target Lighthouse scores: Performance ≥90, Best Practices ≥95. Accessibility is **not** gated or tracked — it is inherited from the Base UI primitive layer underneath shadcn (see ADR-0001a §4). Bundle budget: <150KB gzipped JS (excluding source maps). No heavy UI framework. Vanilla CSS (custom properties, no Tailwind, no CSS-in-JS). React 18 stays — it's already there and adequate.
 
 4. **No new runtime dependencies without justification.** `marked` stays for markdown. Anything else needs a child ADR. The bias is toward small, focused libraries or hand-rolled solutions.
 
@@ -103,9 +103,9 @@ Mobile: single-panel with bottom nav
 
 ### Styling and Component Approach
 
-- **shadcn/ui pattern (Radix primitives + Tailwind CSS).** Components are copied into the project — no opaque `node_modules` dependency. We own the code, customize freely, and delete what we don't need. Radix provides accessible, unstyled primitives (Dialog, Dropdown, Tabs, Tooltip, etc.); Tailwind provides the utility layer; shadcn/ui wires them together with sensible defaults.
+- **shadcn/ui pattern (Base UI primitives + Tailwind CSS).** Components are copied into the project — no opaque `node_modules` dependency. We own the code, customize freely, and delete what we don't need. Base UI provides accessible, unstyled primitives (Dialog, Dropdown, Tabs, Tooltip, etc.); Tailwind provides the utility layer; shadcn/ui wires them together with sensible defaults. Components are scaffolded via the shadcn MCP / CLI rather than hand-copied.
 - **Why shadcn specifically:** LLMs (Opus, Sonnet, GPT) are heavily trained on shadcn patterns and generate fluent, idiomatic code against them. This is a direct development-velocity multiplier when coding with agents. Fighting the grain of what models know best is wasted effort.
-- **Bundle discipline:** Radix primitives are tree-shakeable (~2-4KB each, ~15-25KB for typical usage). Tailwind's JIT compiler purges unused classes (~5-10KB gzipped output). Total UI layer overhead: ~20-35KB gzipped — well within the 150KB budget.
+- **Bundle discipline:** Base UI primitives are tree-shakeable (~2-4KB each, ~15-25KB for typical usage). Tailwind's JIT compiler purges unused classes (~5-10KB gzipped output). Total UI layer overhead: ~20-35KB gzipped — well within the 150KB budget.
 - **System font stack** (already in place).
 - **Light mode only to start.** Dark mode is straightforward with Tailwind's `dark:` variant + CSS custom properties, but deferred to avoid scope creep.
 - **Minimal motion.** Transitions for panel open/close, card state changes. No gratuitous animation.
@@ -113,32 +113,30 @@ Mobile: single-panel with bottom nav
 
 ### Technology Constraints
 
-| Dimension  | Decision                              | Rationale                                     |
-| ---------- | ------------------------------------- | --------------------------------------------- |
-| Framework  | React 18 (keep)                       | Already in use, adequate, no migration cost   |
-| Build      | Vite (keep)                           | Fast, already configured                      |
-| Styling    | Tailwind CSS (JIT) + CSS vars         | Purged output ~5-10KB; LLM-fluent utilities   |
-| Components | shadcn/ui (Radix primitives)          | Owned source, accessible, LLM-native patterns |
-| Routing    | Lightweight client-side router        | Child ADR to evaluate options                 |
-| State      | React context + useReducer (keep)     | Already works for board; extend for chat      |
-| Markdown   | `marked` (keep)                       | Already a dep; adequate                       |
-| Syntax HL  | Evaluate in child ADR                 | Needed for chat code blocks                   |
-| Icons      | Lucide (shadcn default) or inline SVG | Tree-shakeable; ~200B per icon                |
-| Testing    | Vitest (keep)                         | Already configured                            |
+| Dimension  | Decision                               | Rationale                                               |
+| ---------- | -------------------------------------- | ------------------------------------------------------- |
+| Framework  | React 18 (keep)                        | Already in use, adequate, no migration cost             |
+| Build      | Vite (keep)                            | Fast, already configured                                |
+| Styling    | Tailwind CSS (JIT) + CSS vars          | Purged output ~5-10KB; LLM-fluent utilities             |
+| Components | shadcn/ui (Base UI primitives)         | Owned source, accessible, LLM-native patterns           |
+| Routing    | wouter (history mode)                  | See ADR-0001a §1                                        |
+| State      | React context + useReducer (keep)      | Already works for board; extend for chat                |
+| Markdown   | `marked` (keep)                        | Already a dep; adequate                                 |
+| Code       | `@uiw/react-codemirror` (CodeMirror 6) | See ADR-0001a §5 (lazy-loaded; editable + highlighting) |
+| Icons      | Lucide (shadcn default) or inline SVG  | Tree-shakeable; ~200B per icon                          |
+| Testing    | Vitest (keep)                          | Already configured                                      |
 
 ---
 
 ## Child ADRs
 
-| ID        | Topic                                     | Status                 | Scope                                                             |
-| --------- | ----------------------------------------- | ---------------------- | ----------------------------------------------------------------- |
-| ADR-0002  | Chat session management                   | Proposed               | Thread model, acpx integration, agent selector, lifecycle         |
-| ADR-0001a | Client-side routing                       | Pending                | Router library choice, route structure, URL design                |
-| ADR-0001b | ~~Chat architecture~~                     | Superseded by ADR-0002 | ~~Daemon API additions, WS event extensions, streaming protocol~~ |
-| ADR-0001c | Responsive layout system                  | Pending                | Breakpoints, layout primitives, mobile navigation                 |
-| ADR-0001d | Performance budget and Lighthouse targets | Pending                | Bundle splitting, lazy loading, metrics tracking                  |
-| ADR-0001e | Accessibility                             | Pending                | ARIA roles, keyboard nav, screen reader support, focus mgmt       |
-| ADR-0001f | Syntax highlighting                       | Pending                | Library choice for code blocks in chat + spec + diff              |
+| ID        | Topic                                  | Status                 | Scope                                                             |
+| --------- | -------------------------------------- | ---------------------- | ----------------------------------------------------------------- |
+| ADR-0001a | Frontend infrastructure (consolidated) | Proposed               | Routing, responsive layout, performance budget, accessibility,    |
+|           |                                        |                        | code editing/syntax highlighting — absorbs former ADR-0001c/d/e/f |
+|           |                                        |                        | and the routing slot                                              |
+| ADR-0002  | Chat session management                | Proposed               | Thread model, acpx integration, agent selector, lifecycle         |
+| ADR-0001b | ~~Chat architecture~~                  | Superseded by ADR-0002 | ~~Daemon API additions, WS event extensions, streaming protocol~~ |
 
 ---
 
@@ -155,7 +153,7 @@ Mobile: single-panel with bottom nav
 
 - **Scope creep.** "Full-featured" is a moving target. The child ADR structure is the mitigation — each surface area is scoped and decided separately.
 - **Chat requires daemon API work.** The repo-level chat endpoint doesn't exist yet. This ADR intentionally does not define it — that's ADR-0001b's job — but it's a dependency.
-- **Performance budget is achievable but needs discipline.** React (~40KB) + Radix primitives (~20KB) + Tailwind (~8KB) + app code leaves ~80KB for markdown, syntax highlighting, and chat. Code splitting and lazy loading are the escape valves.
+- **Performance budget is achievable but needs discipline.** React (~40KB) + Base UI primitives (~20KB) + Tailwind (~8KB) + app code leaves ~80KB for markdown, the CodeMirror engine, and chat. Code splitting and lazy loading are the escape valves.
 - **No dark mode at launch.** Some users will want it immediately. Custom properties make it easy to add later, but it's explicitly deferred.
 
 ---
@@ -164,7 +162,7 @@ Mobile: single-panel with bottom nav
 
 1. **Keep the webapp minimal; invest in a TUI instead.** Rejected. The webapp is the interface most users will reach for. A TUI is complementary, not a replacement. PROJECT.md §2.7 says clients are thin — but "thin" means "no backend logic," not "no UX."
 
-2. **Hand-roll all components with vanilla CSS.** Rejected. The component count is already non-trivial (modals, dropdowns, tabs, tooltips, chat bubbles, code blocks, toasts) and will grow. Hand-rolling accessible primitives is expensive, error-prone, and fights the LLM grain — models generate shadcn/Radix patterns fluently but produce inconsistent bespoke components. The bundle overhead (~20-35KB gzipped) is acceptable.
+2. **Hand-roll all components with vanilla CSS.** Rejected. The component count is already non-trivial (modals, dropdowns, tabs, tooltips, chat bubbles, code blocks, toasts) and will grow. Hand-rolling accessible primitives is expensive, error-prone, and fights the LLM grain — models generate shadcn/Base UI patterns fluently but produce inconsistent bespoke components. The bundle overhead (~20-35KB gzipped) is acceptable.
 
 3. **Adopt a heavy component library (MUI, Ant Design, Chakra).** Rejected. These ship large runtime CSS-in-JS or full component bundles that blow the performance budget. shadcn/ui's copy-paste model avoids this — you only include what you use, and you own the source.
 
