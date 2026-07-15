@@ -1,4 +1,16 @@
 import { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
 import { useBoardContext } from "../board/BoardContext";
 
 interface Props {
@@ -26,51 +38,51 @@ export function NewTaskModal({ onClose }: Props) {
     if (task) onClose();
   };
 
-  const onKey = (e: React.KeyboardEvent): void => {
-    if (e.key === "Escape") onClose();
-  };
-
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" onKeyDown={onKey}>
-      <div className="modal new-task-modal">
-        <header className="modal-header">
-          <h2>New Task</h2>
-          <button type="button" className="close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </header>
-        <div className="modal-body">
-          <label className="field">
-            <span className="field-label">Title</span>
-            <input
-              className="text-input"
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>New Task</DialogTitle>
+          <DialogDescription>
+            Create a backlog task. You can refine the spec in chat before freezing.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-4">
+          <Field>
+            <FieldLabel htmlFor="new-task-title">Title</FieldLabel>
+            <Input
+              id="new-task-title"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               autoFocus
               placeholder="A short, descriptive task title"
             />
-          </label>
-          <label className="field">
-            <span className="field-label">Spec markdown (optional)</span>
-            <textarea
-              className="textarea"
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="new-task-spec">Spec markdown (optional)</FieldLabel>
+            <FieldDescription>
+              Initial spec. Editable in chat; frozen before build.
+            </FieldDescription>
+            <Textarea
+              id="new-task-spec"
               value={spec}
               onChange={(e) => setSpec(e.target.value)}
               rows={10}
-              placeholder="## Goal&#10;Describe what this task should accomplish."
+              placeholder={"## Goal\nDescribe what this task should accomplish."}
+              className="font-mono text-sm"
             />
-          </label>
+          </Field>
         </div>
-        <footer className="modal-actions">
-          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={submitting}>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
             Cancel
-          </button>
-          <button type="button" className="btn btn-primary" onClick={submit} disabled={submitting}>
+          </Button>
+          <Button onClick={submit} disabled={submitting}>
             {submitting ? "Creating…" : "Create Task"}
-          </button>
-        </footer>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

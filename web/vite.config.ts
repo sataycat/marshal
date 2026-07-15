@@ -1,13 +1,19 @@
 /// <reference types="vitest/config" />
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { visualizer } from "rollup-plugin-visualizer";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const analyze = process.env.ANALYZE === "1";
 
 export default defineConfig({
   plugins: [
     react(),
+    tailwindcss(),
     analyze &&
       visualizer({
         filename: "dist/stats.html",
@@ -17,6 +23,11 @@ export default defineConfig({
         open: false,
       }),
   ],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
   server: {
     port: 5173,
     proxy: {

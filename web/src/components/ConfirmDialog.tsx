@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 export interface ConfirmOptions {
   message: string;
+  title?: string;
   confirmLabel?: string;
   cancelLabel?: string;
 }
@@ -46,24 +56,27 @@ export function useConfirm(): ConfirmApi {
 
   const dialog =
     pending === null ? null : (
-      <div className="modal-backdrop" role="dialog" aria-modal="true">
-        <div className="modal confirm-dialog">
-          <p className="confirm-message">{pending.options.message}</p>
-          <div className="modal-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => finish(false)}>
+      <Dialog
+        open
+        onOpenChange={(open) => {
+          if (!open) finish(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{pending.options.title ?? "Confirm"}</DialogTitle>
+            <DialogDescription>{pending.options.message}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => finish(false)}>
               {pending.options.cancelLabel ?? "Cancel"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => finish(true)}
-              autoFocus
-            >
+            </Button>
+            <Button onClick={() => finish(true)} autoFocus>
               {pending.options.confirmLabel ?? "Confirm"}
-            </button>
-          </div>
-        </div>
-      </div>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     );
 
   return { confirm, dialog };

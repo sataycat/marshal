@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Send, Snowflake } from "lucide-react";
 import { fetchSpecMessages } from "../api/client";
 import { extractMarshalSpec, MARSHAL_SPEC_FENCE } from "./marshalSpec";
 import { Markdown } from "../components/Markdown";
 import { useBoardContext } from "../board/BoardContext";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import type { SpecMessage, TaskDetail } from "../types";
 
 interface Props {
@@ -25,9 +30,6 @@ export function SpecChatPanel({ slug, detail, onSpecUpdated, onFrozen }: Props) 
   const [freezing, setFreezing] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
-  // Seed from HTTP once when the slug changes so the panel works even before
-  // any WebSocket frame has arrived. Subsequent live updates come from the
-  // shared bus reducer via specMessagesFor.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -118,26 +120,39 @@ export function SpecChatPanel({ slug, detail, onSpecUpdated, onFrozen }: Props) 
   };
 
   return (
-    <div className="spec-chat">
-      <h3>Spec Authoring Chat</h3>
-      {loading && <p>Loading chat…</p>}
-      {error && <p className="error">{error}</p>}
-      <div className="spec-chat-messages" ref={listRef}>
-        {messages.length === 0 && !loading && (
-          <p className="hint">
-            Describe the task and let the agent ask clarifying questions.
-          </p>
-        )}
-        {messages.map((m) => (
-          <div key={m.id} className={`spec-chat-msg spec-chat-${m.role}`}>
-            <span className="spec-chat-role">{m.role}</span>
-            <Markdown className="spec-chat-content" src={m.content} />
-          </div>
-        ))}
-      </div>
-      <div className="spec-chat-composer">
-        <textarea
-          className="textarea"
+    <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
+      <h3 className="text-sm font-semibold">Spec Authoring Chat</h3>
+      {loading && <p className="text-sm text-muted">Loading chat…</p>}
+      {error && <p className="text-sm text-[var(--color-error)]">{error}</p>}
+      <ScrollArea className="h-72 rounded-md border border-border bg-bg/30 p-2">
+        <div ref={listRef}>
+          {messages.length === 0 && !loading && (
+            <p className="my-1 text-sm text-muted">
+              Describe the task and let the agent ask clarifying questions.
+            </p>
+          )}
+          {messages.map((m) => (
+            <div
+              key={m.id}
+              className="mb-2"
+              data-role={m.role}
+            >
+              <span
+                className={
+                  m.role === "assistant"
+                    ? "text-[0.7rem] font-bold tracking-wider text-[var(--color-success)] uppercase"
+                    : "text-[0.7rem] font-bold tracking-wider text-muted uppercase"
+                }
+              >
+                {m.role}
+              </span>
+              <Markdown className="text-sm" src={m.content} />
+            </div>
+          ))}
+        </div>
+      </ScrollArea>
+      <div className="flex items-end gap-2">
+        <Textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           rows={3}
@@ -150,45 +165,50 @@ export function SpecChatPanel({ slug, detail, onSpecUpdated, onFrozen }: Props) 
             }
           }}
         />
-        <button
+        <Button
           type="button"
-          className="btn btn-primary"
           onClick={() => void send()}
           disabled={sending || draft.trim().length === 0}
+          size="sm"
         >
+          <Send aria-hidden />
           {sending ? "Thinking…" : "Send"}
-        </button>
+        </Button>
       </div>
       {proposedSpec !== null && (
-        <div className="spec-chat-proposal">
-          <p className="spec-chat-proposal-label">
-            Latest proposed spec (from a <code>{MARSHAL_SPEC_FENCE}</code> block):
+        <div className="rounded-md border border-dashed border-border bg-yellow-50/40 p-2">
+          <p className="mb-1.5 text-xs text-muted">
+            Latest proposed spec (from a <code className="rounded bg-secondary px-1 py-0.5 font-mono text-[0.7rem]">{MARSHAL_SPEC_FENCE}</code> block):
           </p>
-          <pre className="spec-chat-proposal-text">{proposedSpec}</pre>
-          <div className="spec-chat-proposal-actions">
-            <button
+          <pre className="max-h-56 overflow-y-auto rounded-sm border border-border bg-panel p-1.5 font-mono text-xs whitespace-pre-wrap">
+            {proposedSpec}
+          </pre>
+          <div className="mt-2 flex gap-2">
+            <Button
               type="button"
-              className="btn btn-primary"
+              size="sm"
               onClick={() => void applySpec()}
               disabled={applying}
             >
               {applying ? "Updating…" : "Update Spec"}
-            </button>
-            <button type="button" className="btn btn-secondary" disabled={applying}>
+            </Button>
+            <Button type="button" size="sm" variant="outline" disabled={applying}>
               Dismiss
-            </button>
+            </Button>
           </div>
         </div>
       )}
-      <div className="spec-chat-freeze">
-        <button
+      <Separator />
+      <div>
+        <Button
           type="button"
-          className="btn btn-primary"
           onClick={() => void freeze()}
           disabled={freezing}
+          size="sm"
         >
+          <Snowflake aria-hidden />
           {freezing ? "Freezing…" : "Freeze to Ready"}
-        </button>
+        </Button>
       </div>
     </div>
   );

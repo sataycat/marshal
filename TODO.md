@@ -63,7 +63,7 @@ Tracks the 5-pass implementation of [ADR-0001a](docs/adr/ADR-0001a-frontend-infr
 
 ---
 
-## Pass 3 — Tailwind v4 + Base UI migration
+## Pass 3 — Tailwind v4 + Base UI migration ✅ done
 
 **Goal:** responsive layout system per ADR-0001a §2. Honest migration: plain CSS goes, Tailwind utilities take over, Base UI primitives replace hand-rolled modals.
 
@@ -105,6 +105,13 @@ Tracks the 5-pass implementation of [ADR-0001a](docs/adr/ADR-0001a-frontend-infr
 - `web/src/toast/ToastHost.tsx`
 - New: `web/src/components/ui/cn.ts`, `Sheet.tsx`, `Dialog.tsx`, `Button.tsx`, `Tooltip.tsx`, `Tabs.tsx`
 - Tests: `web/src/shell/AppShell.test.tsx`, `web/src/components/ui/Dialog.test.tsx`, `web/src/components/ui/Sheet.test.tsx`; vitest config tweak for the new environment.
+
+**Notes (this PR)**
+
+- Frontend component-appearance tests removed per AGENTS.md; pure-logic tests in `web/src/**/*.test.ts` retained.
+- shadcn/ui (Base UI) primitives used directly: `Button`, `Dialog`, `Sheet`, `Tabs`, `Tooltip`, `Input`, `Textarea`, `Field`, `Card`, `Separator`, `ScrollArea`.
+- `web/src/styles.css` replaced by `web/src/index.css` (Tailwind v4 + `@theme` tokens).
+- New mobile bottom-nav (`Tabs` at `md:hidden`).
 
 **Acceptance**
 

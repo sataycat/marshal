@@ -1,0 +1,111 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant md (@media (width >= 48rem));
+@custom-variant sm (@media (width >= 30rem));
+
+:root {
+  --background: #f6f7f9;
+  --foreground: #1b2330;
+
+  --card: #ffffff;
+  --card-foreground: #1b2330;
+
+  --popover: #ffffff;
+  --popover-foreground: #1b2330;
+
+  --primary: #2f6feb;
+  --primary-foreground: #ffffff;
+
+  --secondary: #eef1f5;
+  --secondary-foreground: #1b2330;
+
+  --muted: #eef1f5;
+  --muted-foreground: #6b7480;
+
+  --accent: #eef1f5;
+  --accent-foreground: #1b2330;
+
+  --destructive: #b91c1c;
+
+  --border: #d8dde3;
+  --input: #d8dde3;
+  --ring: #2f6feb;
+
+  --chart-1: #2f6feb;
+  --chart-2: #1a8a4f;
+  --chart-3: #b15a00;
+  --chart-4: #6b7480;
+  --chart-5: #b91c1c;
+
+  --radius: 0.5rem;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1b2330;
+  --sidebar-primary: #2f6feb;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef1f5;
+  --sidebar-accent-foreground: #1b2330;
+  --sidebar-border: #d8dde3;
+  --sidebar-ring: #2f6feb;
+}
+
+@theme inline {
+  --color-bg: var(--background);
+  --color-panel: var(--card);
+  --color-text: var(--foreground);
+  --color-muted: var(--muted-foreground);
+  --color-accent: var(--primary);
+  --color-accent-foreground: var(--primary-foreground);
+  --color-success: #1a8a4f;
+  --color-warn: #b15a00;
+  --color-error: #b91c1c;
+  --color-error-bg: #fff5f5;
+  --color-error-border: #f0c0c0;
+  --color-diff-add-bg: #e6f4ea;
+  --color-diff-add-fg: #1a7f37;
+  --color-diff-del-bg: #fbe9e9;
+  --color-diff-del-fg: #b91c1c;
+  --color-shimmer: #f2f4f7;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@theme {
+  --breakpoint-sm: 30rem;
+  --breakpoint-md: 48rem;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+    outline-color: color-mix(in oklch, var(--ring) 50%, transparent);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+}

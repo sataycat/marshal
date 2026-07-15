@@ -46,3 +46,5 @@ Before adding a non-trivial new dependency to `web/`, check its bundle cost: run
 ## Testing
 
 Always write tests for new functionality and bug fixes wherever possible. Running `pnpm run test` should stay green.
+
+**Do NOT test the frontend.** Visual / component-appearance / "did the right thing render" tests for React components under `web/` are a waste of time and tokens. The shadcn/Base UI primitives, the Tailwind utility classes, and the DOM environment are somebody else's problem; we own the wiring. Pure logic that lives in `web/src/**/*.ts` (reducers, parsers, helpers, route tables, markdown rendering, time formatting, etc.) is fair game — it's the same kind of testable unit code as the Node side and lives next to it in `.test.ts` files. Anything that needs a DOM (jsdom / happy-dom / @testing-library/react) is out: skip the test, ship the component, and let the human-testing guide and the daemon end-to-end flow catch visual regressions.

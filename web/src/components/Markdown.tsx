@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { renderMarkdown } from "../markdown";
+import { cn } from "@/lib/utils";
 
 interface Props {
   src: string;
@@ -27,7 +28,16 @@ export function Markdown({ src, className }: Props): JSX.Element {
   }, [src]);
 
   if (html === null) {
-    return <pre className={className}>{src}</pre>;
+    return (
+      <pre className={cn("font-mono text-xs whitespace-pre-wrap", className)}>
+        {src}
+      </pre>
+    );
   }
-  return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+  return (
+    <div
+      className={cn("markdown [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:overflow-x-auto", className)}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }
