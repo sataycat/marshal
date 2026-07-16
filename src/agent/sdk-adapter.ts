@@ -5,8 +5,10 @@ import type {
   Agent,
   AgentCommand,
   AgentEvent,
+  AgentPromptPart,
   AgentId,
   AgentSession,
+  AgentPermissionRequest,
   PromptOptions,
   SpawnOptions,
 } from "./types.js";
@@ -40,6 +42,9 @@ interface SessionState {
   sessionId: string;
   closeSupported: boolean;
   permissionMode: NonNullable<SpawnOptions["permissionMode"]>;
+  supportsImages: boolean;
+  onPermission?: SpawnOptions["onPermission"];
+  permissionSequence: number;
   queue: AsyncQueue | null;
   prompting: boolean;
   closed: boolean;
@@ -78,6 +83,7 @@ export class SdkAcpAgentAdapter implements Agent {
         cwd,
         name: opts.sessionName ?? `marshal-${agentId}`,
         recordId: state.sessionId,
+        supportsImages: state.supportsImages,
       };
       this.sessions.set(session, state);
       return session;
@@ -89,7 +95,7 @@ export class SdkAcpAgentAdapter implements Agent {
 
   async *prompt(
     session: AgentSession,
-    text: string,
+    prompt: string | AgentPromptPart[],
     opts: PromptOptions = {},
   ): AsyncIterable<AgentEvent> {
     const state = this.getState(session);
@@ -97,6 +103,7 @@ export class SdkAcpAgentAdapter implements Agent {
 
     state.prompting = true;
     state.permissionMode = opts.permissionMode ?? state.permissionMode;
+    state.onPermission = opts.onPermission ?? state.onPermission;
     const queue = new AsyncQueue();
     state.queue = queue;
     let timedOut = false;
@@ -114,7 +121,7 @@ export class SdkAcpAgentAdapter implements Agent {
     void state.context
       .request(
         acp.methods.agent.session.prompt,
-        { sessionId: state.sessionId, prompt: [{ type: "text", text }] },
+        { sessionId: state.sessionId, prompt: toAcpPrompt(prompt) },
         { cancellationSignal: controller.signal },
       )
       .then((response) => {
@@ -175,6 +182,22 @@ export class SdkAcpAgentAdapter implements Agent {
       .client({ name: "marshal" })
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) => {
         if (!state) return { outcome: { outcome: "cancelled" } };
+        if (state.permissionMode === "interactive") {
+          const request: AgentPermissionRequest = {
+            requestId: `${state.sessionId}:${++state.permissionSequence}`,
+            sessionId: state.sessionId,
+            tool: params.toolCall.title ?? "tool",
+            kind: params.toolCall.kind,
+            rawInput: params.toolCall.rawInput,
+            options: params.options.map((option) => ({ optionId: option.optionId, name: option.name, kind: option.kind })),
+          };
+          state.queue?.push({ event: { type: "permission", tool: request.tool, granted: false, requestId: request.requestId } });
+          return (async () => {
+            const optionId = await state?.onPermission?.(request);
+            const option = params.options.find((candidate) => candidate.optionId === optionId);
+            return option ? { outcome: { outcome: "selected", optionId: option.optionId } } : { outcome: { outcome: "cancelled" } };
+          })();
+        }
         const option = selectPermissionOption(
           params.options,
           state.permissionMode,
@@ -223,6 +246,9 @@ export class SdkAcpAgentAdapter implements Agent {
       sessionId: created.sessionId,
       closeSupported: initialized.agentCapabilities?.sessionCapabilities?.close != null,
       permissionMode: opts.permissionMode ?? "approve-all",
+      supportsImages: initialized.agentCapabilities?.promptCapabilities?.image === true,
+      onPermission: opts.onPermission,
+      permissionSequence: 0,
       queue: null,
       prompting: false,
       closed: false,
@@ -252,6 +278,13 @@ export class SdkAcpAgentAdapter implements Agent {
     if (!state || state.closed) throw new Error(`Unknown or closed ACP session "${session.name}"`);
     return state;
   }
+}
+
+function toAcpPrompt(prompt: string | AgentPromptPart[]): acp.ContentBlock[] {
+  if (typeof prompt === "string") return [{ type: "text", text: prompt }];
+  return prompt.map((part) => part.type === "text"
+    ? { type: "text", text: part.text }
+    : { type: "image", data: part.data, mimeType: part.mimeType });
 }
 
 function waitForSpawn(child: ChildProcessWithoutNullStreams, command: string): Promise<void> {

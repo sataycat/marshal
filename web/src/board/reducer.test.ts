@@ -134,6 +134,7 @@ function thread(overrides: Partial<ChatThread> = {}): ChatThread {
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     last_message_at: null,
+    scratch_markdown: "",
     ...overrides,
   };
 }
@@ -145,6 +146,7 @@ function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
     role: "assistant",
     content: "hello",
     created_at: "2026-01-01T00:00:00.000Z",
+    attachment_ids: [],
     ...overrides,
   };
 }

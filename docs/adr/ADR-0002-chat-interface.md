@@ -1,9 +1,9 @@
 # ADR-0002: Chat Interface — Lightweight Web Client over ACP
 
-**Status:** Proposed
+**Status:** Accepted for Slice 5 implementation
 **Date:** 2026-07-15
 **Parent:** ADR-0001 (Daemon Webapp)
-**Children:** (to be filed — session model, permission mode)
+**Children:** ADR-0002a (session model, permission mode), ADR-0002b (attachments)
 
 ---
 
@@ -220,10 +220,20 @@ To stay light and ship:
 
 ---
 
+## Slice 5 Persistence Decision
+
+Scratch drafts are persisted as `chat_threads.scratch_markdown`, scoped to the
+repo-owned thread. The existing `PATCH /api/threads/:id` endpoint accepts
+`scratch_markdown`; the web client debounces updates while editing and restores
+the value from `GET /api/threads/:id` after reload or thread switching. This is
+the smallest implementation consistent with the session model: scratch is
+thread state, not a chat message and not an ACP session artifact. Existing
+databases receive the column through the schema bootstrap compatibility check.
+
 ## Open Questions
 
 1. **Pane widths + collapse threshold.** At what viewport width does the Files sidebar auto-collapse? At what width does Sessions collapse into the header? Pin numbers after dogfooding; default to ≥1280px shows all four, 1024–1280 collapses Files, <1024 collapses Sessions, <768 mobile single-pane + bottom nav.
 2. **Editor scratch persistence shape.** Is scratch state per-thread, per-repo, or pane-global? Per-thread matches "what was I about to send"; pane-global matches "my notes." Lean per-thread with a "scratch bake into notes" affordance later.
 3. **Thinking rendering fidelity.** Some agents stream thinking as plain text, others as structured labeled blocks (model name, duration). Phase 1 treats it as opaque muted markdown; richer structure can be a Phase 2 enrichment without breaking the collapsed affordance.
 4. **File-mention expansion target.** When `@path/to/file.ts` is sent, is the expansion inserted into the saved message (visible in history) or kept as a server-side reference post-send (history shows the mention, daemon expanded it for the agent)? Lean: insert into saved message so history is self-explanatory, even at the cost of larger messages.
-5. **Multi-image batches and paste-from-clipboard.** Drag-and-drop multiple files and screenshot paste (`Cmd+V`) into the input both need to work; details land in the Chat Attachments child ADR.
+5. **Multi-image batches and paste-from-clipboard.** Drag-and-drop and multi-file selection ship in Phase 1; clipboard paste and richer attachment management remain follow-up polish.

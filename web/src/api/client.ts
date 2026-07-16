@@ -1,11 +1,15 @@
 import type {
   BusEvent,
   ChatMessage,
+  ChatFileContent,
+  ChatFileEntry,
   ChatThread,
+  ChatAttachment,
   SpecMessage,
   TaskCard,
   TaskDetail,
   TaskStatus,
+  PendingPermission,
 } from "../types";
 
 export interface DiffStats {
@@ -172,7 +176,7 @@ export async function createChatThread(input: { agent_id: string }): Promise<Cha
   return body.thread;
 }
 
-export async function updateChatThread(id: string, input: { title?: string; status?: ChatThread["status"]; archived?: boolean; pinned?: boolean }): Promise<ChatThread> {
+export async function updateChatThread(id: string, input: { title?: string; status?: ChatThread["status"]; archived?: boolean; pinned?: boolean; scratch_markdown?: string }): Promise<ChatThread> {
   const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
   return (await jsonOrThrow<{ thread: ChatThread }>(res)).thread;
 }
@@ -187,11 +191,22 @@ export async function fetchChatThread(id: string): Promise<{ thread: ChatThread;
   return jsonOrThrow<{ thread: ChatThread; messages: ChatMessage[] }>(res);
 }
 
-export async function sendChatMessage(id: string, content: string): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage }> {
+export async function uploadChatAttachment(id: string, file: File): Promise<ChatAttachment> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/attachments`, { method: "POST", body: form });
+  return (await jsonOrThrow<{ attachment: ChatAttachment }>(res)).attachment;
+}
+
+export function chatAttachmentUrl(threadId: string, attachmentId: string): string {
+  return `/api/threads/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(attachmentId)}`;
+}
+
+export async function sendChatMessage(id: string, content: string, attachmentIds: string[] = []): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage }> {
   const res = await fetch(`/api/threads/${encodeURIComponent(id)}/send`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, attachment_ids: attachmentIds }),
   });
   return jsonOrThrow<{ userMessage: ChatMessage; assistantMessage: ChatMessage }>(res);
 }
@@ -199,6 +214,30 @@ export async function sendChatMessage(id: string, content: string): Promise<{ us
 export async function cancelChatTurn(id: string): Promise<void> {
   const res = await fetch(`/api/threads/${encodeURIComponent(id)}/cancel`, { method: "POST" });
   await jsonOrThrow<{ cancelled: boolean }>(res);
+}
+
+export async function fetchChatPermissions(id: string): Promise<PendingPermission[]> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/permissions`);
+  return (await jsonOrThrow<{ permissions: PendingPermission[] }>(res)).permissions;
+}
+
+export async function decideChatPermission(id: string, requestId: string, action: "approve" | "deny"): Promise<void> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/permissions/${encodeURIComponent(requestId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+  await jsonOrThrow<{ requestId: string; action: string }>(res);
+}
+
+export async function fetchChatFiles(id: string): Promise<ChatFileEntry[]> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/files`);
+  return (await jsonOrThrow<{ files: ChatFileEntry[] }>(res)).files;
+}
+
+export async function fetchChatFile(id: string, path: string): Promise<ChatFileContent> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/files/content?path=${encodeURIComponent(path)}`);
+  return (await jsonOrThrow<{ file: ChatFileContent }>(res)).file;
 }
 
 function wsUrl(): string {
@@ -222,6 +261,7 @@ export function connectBus(
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   const open = (): void => {
+    options.onStatus?.("connecting");
     ws = new WebSocket(wsUrl());
     ws.onopen = () => options.onStatus?.("open");
     ws.onmessage = (ev) => {

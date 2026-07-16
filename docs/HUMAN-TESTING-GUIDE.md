@@ -20,6 +20,7 @@ It is written for local-first testing on one machine.
 - spec authoring chat (`/spec-messages`, `/spec`)
 - diff review and local merge (`/diff`, `/merge`)
 - SPA static serving and WebSocket live updates
+- Chat-first Phase 1 workbench: threads, drafts, files, permissions, images, reconnects, and mobile navigation
 
 ### Out of scope (not current product behavior)
 
@@ -345,6 +346,23 @@ Terminate a WS client abruptly.
 Expected:
 
 - daemon remains healthy (`/api/health` still 200)
+
+### 7.4 Chat-first dogfooding flow
+
+1. Open `/chat` and create a new thread with a configured ACP agent.
+2. Send a short text prompt and confirm the streamed assistant response remains after reload.
+3. Open a repository file from the Files pane, add a file mention to the draft, and send it.
+4. Trigger an ACP permission request and approve once; repeat with deny and confirm the turn fails closed.
+5. Attach a PNG or JPEG from the paperclip, drag an image onto the chat input, and send an image-only message.
+6. Confirm the image appears in the transcript after reload. With an image-incapable agent, confirm sending reports an explicit unsupported-image error and does not silently drop the image.
+7. Disconnect the browser or stop/restart the daemon. Confirm the header reports reconnecting, then the thread list and transcript recover from the daemon snapshot.
+8. At a narrow mobile viewport, switch Files / Draft / Chat with the local pane selector, use the back button to return to threads, and confirm desktop still shows the panes side by side.
+
+Expected:
+
+- Invalid MIME, spoofed signatures, oversized files, and exhausted quotas show actionable upload errors.
+- Failed sends preserve the uploaded image for retry; successful sends clear the attachment tray.
+- Permission decisions never default on disconnect.
 
 ## 8. Static serving and routing tests
 

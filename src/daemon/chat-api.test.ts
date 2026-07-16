@@ -33,6 +33,9 @@ describe("chat thread API", () => {
     const id = created.body.thread.id;
     expect(created.body.thread).toMatchObject({ agent_id: "agent-a", title: "Debug login", status: "draft" });
 
+    const scratch = await req(app, "PATCH", `/api/threads/${id}`, { scratch_markdown: "## Working draft" });
+    expect(scratch.body.thread.scratch_markdown).toBe("## Working draft");
+
     const message = await req(app, "POST", `/api/threads/${id}/messages`, { role: "user", content: "Please inspect this." });
     expect(message.status).toBe(201);
     expect(message.body.message).toMatchObject({ thread_id: id, role: "user", content: "Please inspect this." });

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
-import { boardReducer, boardToList, chatMessagesFor, chatMessagesReducer, chatThreadsReducer, chatThreadsToList, type BoardState, type ChatMessagesState, type ChatThreadsState } from "../board/reducer";
+import { boardReducer, boardToList, chatMessagesFor, chatMessagesReducer, chatPermissionsFor, chatPermissionsReducer, chatThreadsReducer, chatThreadsToList, type BoardState, type ChatMessagesState, type ChatPermissionsState, type ChatThreadsState } from "../board/reducer";
 import {
   specMessagesReducer,
   messagesForSlug,
   type SpecMessagesState,
 } from "../specchat/specMessagesReducer";
 import { connectBus, fetchChatThreads, fetchTasks, type SocketStatus, type WebSocketHandle } from "../api/client";
-import type { BusEvent, ChatMessage, ChatThread, SpecMessage } from "../types";
+import type { BusEvent, ChatMessage, ChatThread, PendingPermission, SpecMessage } from "../types";
 
 export interface BoardView {
   tasks: ReturnType<typeof boardToList>;
@@ -15,6 +15,7 @@ export interface BoardView {
   dispatch: (event: BusEvent) => void;
   threads: ChatThread[];
   messagesForThread: (id: string) => ChatMessage[];
+  permissionsForThread: (id: string) => PendingPermission[];
 }
 
 export function useBoard(): BoardView {
@@ -23,12 +24,14 @@ export function useBoard(): BoardView {
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [threadState, dispatchThreads] = useReducer(chatThreadsReducer, {} as ChatThreadsState);
   const [messageState, dispatchMessages] = useReducer(chatMessagesReducer, {} as ChatMessagesState);
+  const [permissionState, dispatchPermissions] = useReducer(chatPermissionsReducer, {} as ChatPermissionsState);
 
   const dispatch = useCallback((event: BusEvent): void => {
     dispatchTasks(event);
     dispatchSpec(event);
     dispatchThreads(event);
     dispatchMessages(event);
+    dispatchPermissions(event);
   }, []);
 
   const specMessagesFor = useCallback(
@@ -74,5 +77,6 @@ export function useBoard(): BoardView {
     dispatch,
     threads: chatThreadsToList(threadState),
     messagesForThread: (id: string) => chatMessagesFor(messageState, id),
+    permissionsForThread: (id: string) => chatPermissionsFor(permissionState, id),
   };
 }

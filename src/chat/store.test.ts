@@ -26,6 +26,13 @@ describe("chat thread store", () => {
     expect(listChatThreads(root, true)[0]).toMatchObject({ id: thread.id, status: "closed", archived: true, pinned: true });
   });
 
+  it("persists a per-thread scratch markdown buffer", () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-chat-store-"));
+    const thread = createChatThread({ agentId: "agent-a" }, root);
+    updateChatThread(thread.id, { scratchMarkdown: "# Draft\n\nKeep this." }, root);
+    expect(getChatThread(thread.id, root).scratch_markdown).toBe("# Draft\n\nKeep this.");
+  });
+
   it("does not open a thread from another repository", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-chat-store-"));
     const otherRoot = mkdtempSync(join(tmpdir(), "marshal-chat-store-"));

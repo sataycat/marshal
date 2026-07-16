@@ -79,7 +79,7 @@ Slice 1 ──> Slice 2 ──> Slice 3 ──> Slice 4 ──> Slice 5
 
 **Outcome:** A user can keep and switch between several conversations without losing context.
 
-### Slice 5 — Editor And Markdown Drafting
+### Slice 5 — Editor And Markdown Drafting [done]
 
 **Goal:** Add the drafting workflow that differentiates Marshal from a generic chat box.
 
@@ -93,7 +93,7 @@ Slice 1 ──> Slice 2 ──> Slice 3 ──> Slice 4 ──> Slice 5
 
 **Outcome:** A user can compose a longer markdown prompt, preview it, send it, and continue from the same workspace.
 
-### Slice 6 — Files Sidebar And Context
+### Slice 6 — Files Sidebar And Context [done]
 
 **Goal:** Give the user lightweight awareness of the repository the agent is using.
 
@@ -106,7 +106,7 @@ Slice 1 ──> Slice 2 ──> Slice 3 ──> Slice 4 ──> Slice 5
 
 **Outcome:** A user can find the relevant file, inspect it, and include focused repository context in a message.
 
-### Slice 7 — Interactive Permissions
+### Slice 7 — Interactive Permissions [done]
 
 **Goal:** Let browser-driven threads handle ACP permission requests safely.
 
@@ -120,7 +120,7 @@ Slice 1 ──> Slice 2 ──> Slice 3 ──> Slice 4 ──> Slice 5
 
 **Outcome:** An interactive thread can pause for a permission decision and continue without relying on headless approve-all behavior.
 
-### Slice 8 — Attachments And Final Phase 1 Polish
+### Slice 8 — Attachments And Final Phase 1 Polish [done]
 
 **Goal:** Complete the core chat-first workflow and make it ready for dogfooding.
 

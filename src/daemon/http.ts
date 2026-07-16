@@ -62,6 +62,8 @@ import {
 } from "../chat/store.js";
 import { publishThreadCreated, publishThreadDeleted, publishThreadMessage, publishThreadUpdated } from "./bus.js";
 import { ChatTurnBusyError, ChatTurnRunner } from "./chat-turn.js";
+import { ChatFileTooLargeError, InvalidChatPathError, listChatFiles, readChatFile } from "../chat/files.js";
+import { ChatAttachmentError, createChatAttachment, listChatAttachments, MAX_ATTACHMENT_BYTES, readChatAttachment } from "../chat/attachments.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -339,6 +341,9 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof ChatTurnBusyError) {
     return new ApiError(409, err.message, "thread_busy");
   }
+  if (err instanceof InvalidChatPathError) return new ApiError(422, err.message, "invalid_path");
+  if (err instanceof ChatFileTooLargeError) return new ApiError(422, err.message, "file_too_large");
+  if (err instanceof ChatAttachmentError) return new ApiError(422, err.message, err.code);
   logger.error({ err }, "Unexpected error in task HTTP handler");
   return new ApiError(500, "Internal server error", "internal_error");
 }
@@ -370,24 +375,27 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
   app.get("/api/threads/:id", (c) => {
     try {
       const thread = getChatThread(c.req.param("id"), root);
-      return c.json({ thread, messages: listChatMessages(thread.id, root) });
+      return c.json({ thread, messages: listChatMessages(thread.id, root), attachments: listChatAttachments(thread.id, root) });
     } catch (err) {
       throw mapDomainError(err);
     }
   });
   app.patch("/api/threads/:id", async (c) => {
-    const body = await readJsonObject(c, new Set(["title", "status", "archived", "pinned"]));
+    const body = await readJsonObject(c, new Set(["title", "status", "archived", "pinned", "scratch_markdown"]));
     if (body.title !== undefined && typeof body.title !== "string") throw new ApiError(422, "title must be a string", "invalid_field");
     if (body.status !== undefined && (typeof body.status !== "string" || !isChatThreadStatus(body.status))) throw new ApiError(422, "status is invalid", "invalid_field");
     for (const field of ["archived", "pinned"] as const) {
       if (body[field] !== undefined && typeof body[field] !== "boolean") throw new ApiError(422, `${field} must be a boolean`, "invalid_field");
     }
+    if (body.scratch_markdown !== undefined && typeof body.scratch_markdown !== "string") throw new ApiError(422, "scratch_markdown must be a string", "invalid_field");
     try {
+      if (body.status === "closed") await turns.closeThread(c.req.param("id"));
       const thread = updateChatThread(c.req.param("id"), {
         title: body.title as string | undefined,
         status: body.status as "draft" | "active" | "closed" | "error" | undefined,
         archived: body.archived as boolean | undefined,
         pinned: body.pinned as boolean | undefined,
+        scratchMarkdown: body.scratch_markdown as string | undefined,
       }, root);
       if (bus) publishThreadUpdated(bus, thread);
       return c.json({ thread });
@@ -395,8 +403,9 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
       throw mapDomainError(err);
     }
   });
-  app.delete("/api/threads/:id", (c) => {
+  app.delete("/api/threads/:id", async (c) => {
     try {
+      await turns.closeThread(c.req.param("id"));
       deleteChatThread(c.req.param("id"), root);
       if (bus) publishThreadDeleted(bus, c.req.param("id"));
       return c.json({ deleted: true });
@@ -410,6 +419,66 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
     } catch (err) {
       throw mapDomainError(err);
     }
+  });
+  app.get("/api/threads/:id/files", (c) => {
+    try {
+      const thread = getChatThread(c.req.param("id"), root);
+      return c.json({ files: listChatFiles(thread.repo_root, thread.cwd, turns.touchedFiles(thread.id)) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.get("/api/threads/:id/permissions", (c) => {
+    try {
+      getChatThread(c.req.param("id"), root);
+      return c.json({ permissions: turns.pendingPermissions(c.req.param("id")) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.post("/api/threads/:id/permissions/:requestId", async (c) => {
+    const body = await readJsonObject(c, new Set(["action"]));
+    if (body.action !== "approve" && body.action !== "deny") throw new ApiError(422, "action must be approve or deny", "invalid_field");
+    try {
+      const request = turns.decidePermission(c.req.param("id"), c.req.param("requestId"), body.action);
+      return c.json({ requestId: request.requestId, action: body.action });
+    } catch (err) {
+      if (err instanceof Error && err.name === "PermissionDecisionError") throw new ApiError(409, err.message, "permission_stale");
+      throw mapDomainError(err);
+    }
+  });
+  app.get("/api/threads/:id/files/content", (c) => {
+    try {
+      const thread = getChatThread(c.req.param("id"), root);
+      const path = c.req.query("path");
+      if (!path) throw new ApiError(422, "path is required", "missing_query");
+      return c.json({ file: readChatFile(thread.cwd, path) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.get("/api/threads/:id/attachments", (c) => {
+    try { return c.json({ attachments: listChatAttachments(c.req.param("id"), root) }); }
+    catch (err) { throw mapDomainError(err); }
+  });
+  app.get("/api/threads/:id/attachments/:attachmentId", (c) => {
+    try {
+      const { attachment, bytes } = readChatAttachment(c.req.param("id"), c.req.param("attachmentId"), root);
+      return new Response(bytes, { headers: { "Content-Type": attachment.mime_type, "Content-Length": String(bytes.byteLength), "Cache-Control": "private, max-age=31536000, immutable" } });
+    } catch (err) { throw mapDomainError(err); }
+  });
+  app.post("/api/threads/:id/attachments", async (c) => {
+    const contentLength = Number(c.req.header("content-length") ?? "0");
+    if (contentLength > MAX_ATTACHMENT_BYTES + 256 * 1024) throw new ApiError(422, "Upload exceeds the 10 MiB image limit", "attachment_too_large");
+    try {
+      const body = await c.req.parseBody({ all: false });
+      const file = body.file;
+      if (!(file instanceof File)) throw new ApiError(422, "A multipart image field named file is required", "missing_file");
+      if (file.size > MAX_ATTACHMENT_BYTES) throw new ChatAttachmentError("Image must be between 1 byte and 10 MiB.", "attachment_too_large");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const attachment = createChatAttachment(c.req.param("id"), { type: file.type, name: file.name, size: file.size, bytes }, root);
+      return c.json({ attachment }, 201);
+    } catch (err) { throw mapDomainError(err); }
   });
   app.post("/api/threads/:id/messages", async (c) => {
     const body = await readJsonObject(c, new Set(["role", "content"]));
@@ -430,12 +499,13 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
     }
   });
   app.post("/api/threads/:id/send", async (c) => {
-    const body = await readJsonObject(c, new Set(["content"]));
+    const body = await readJsonObject(c, new Set(["content", "attachment_ids"]));
     if (body.content === undefined) throw new ApiError(422, "content is required", "missing_field");
     const content = assertString(body.content, "content");
     if (!content.trim()) throw new ApiError(422, "content must not be empty", "invalid_field");
+    if (body.attachment_ids !== undefined && (!Array.isArray(body.attachment_ids) || body.attachment_ids.some((id) => typeof id !== "string"))) throw new ApiError(422, "attachment_ids must be an array of strings", "invalid_field");
     try {
-      const result = await turns.send(c.req.param("id"), content);
+      const result = await turns.send(c.req.param("id"), content, body.attachment_ids as string[] | undefined);
       return c.json(result, 201);
     } catch (err) {
       throw mapDomainError(err);

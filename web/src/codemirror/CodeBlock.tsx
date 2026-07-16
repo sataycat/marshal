@@ -69,6 +69,8 @@ export interface CodeBlockProps {
   minHeight?: string;
   /** Fires when the user edits the buffer. */
   onChange?: (next: string) => void;
+  /** Fires for keyboard shortcuts while the editor is focused. */
+  onKeyDown?: (event: React.KeyboardEvent) => void;
 }
 
 /**
@@ -89,6 +91,7 @@ export function CodeBlock({
   className,
   minHeight,
   onChange,
+  onKeyDown,
 }: CodeBlockProps): JSX.Element {
   const [Component, setComponent] = useState<CodeMirrorComponent | null>(codeMirrorCached);
   const [extension, setExtension] = useState<Extension | null>(null);
@@ -146,6 +149,7 @@ export function CodeBlock({
         extensions={extensions}
         minHeight={minHeight}
         onChange={onChange}
+        onKeyDown={onKeyDown}
       />
     </div>
   );

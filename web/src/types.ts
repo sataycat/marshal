@@ -56,6 +56,7 @@ export interface ChatThread {
   created_at: string;
   updated_at: string;
   last_message_at: string | null;
+  scratch_markdown: string;
 }
 
 export interface ChatMessage {
@@ -64,6 +65,30 @@ export interface ChatMessage {
   role: ChatMessageRole;
   content: string;
   created_at: string;
+  attachment_ids: string[];
+}
+
+export interface ChatAttachment {
+  id: string;
+  thread_id: string;
+  filename: string;
+  mime_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  byte_size: number;
+  created_at: string;
+}
+
+export interface ChatFileEntry {
+  path: string;
+  type: "file" | "directory";
+  changed: boolean;
+  touched: boolean;
+}
+
+export interface ChatFileContent {
+  path: string;
+  content: string;
+  truncated: boolean;
+  bytes: number;
 }
 
 export interface ThreadPayload {
@@ -77,4 +102,20 @@ export interface ThreadMessagePayload {
 
 export interface ThreadDeletedPayload {
   id: string;
+}
+
+export type PermissionOptionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
+export interface PermissionOption {
+  optionId: string;
+  name: string;
+  kind: PermissionOptionKind;
+}
+export interface PendingPermission {
+  requestId: string;
+  sessionId: string;
+  threadId: string;
+  tool: string;
+  kind?: string | null;
+  rawInput?: unknown;
+  options: PermissionOption[];
 }

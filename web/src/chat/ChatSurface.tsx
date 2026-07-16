@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Archive, AlertCircle, ArrowLeft, Bot, Check, LoaderCircle, MessageSquare, Pin, Plus, RefreshCw, Search, Send, Square, X } from "lucide-react";
-import { cancelChatTurn, createChatThread, deleteChatThread, fetchChatAgents, fetchChatThread, sendChatMessage, updateChatThread } from "../api/client";
+import { Archive, AlertCircle, ArrowLeft, Bot, Check, ImagePlus, LoaderCircle, MessageSquare, Pencil, Pin, Plus, RefreshCw, Search, Send, Square, X } from "lucide-react";
+import { cancelChatTurn, chatAttachmentUrl, createChatThread, deleteChatThread, decideChatPermission, fetchChatAgents, fetchChatFiles, fetchChatFile, fetchChatPermissions, fetchChatThread, sendChatMessage, updateChatThread, uploadChatAttachment } from "../api/client";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
+import { EditorPane } from "./EditorPane";
 import { useBoardContext } from "../board/BoardContext";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,7 +11,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import type { ChatMessage, ChatThread } from "../types";
+import type { ChatAttachment, ChatMessage, ChatThread, PendingPermission } from "../types";
+import type { ChatFileEntry } from "../types";
+import { FilesSidebar } from "./FilesSidebar";
 import { timeInState } from "../time";
 
 export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Element {
@@ -128,7 +131,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
           <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold">Threads</p>
-            <p className="text-xs text-muted">{status === "open" ? "Connected" : "Reconnecting"}</p>
+             <p className="text-xs text-muted">{status === "open" ? "Connected" : status === "connecting" ? "Connecting..." : "Reconnecting..."}</p>
           </div>
           <Button type="button" size="sm" onClick={() => void openNewThread()} disabled={creating}>
             <Plus aria-hidden />
@@ -146,7 +149,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
         </div>
         <ScrollArea className="max-h-[calc(100svh-11rem)] md:h-[calc(100svh-7rem)] md:max-h-none">
           <div className="p-2">
-            {visibleThreads.length === 0 && <p className="px-3 py-8 text-center text-sm text-muted">{showArchived ? "No matching conversations." : "No conversations yet."}</p>}
+             {visibleThreads.length === 0 && <div className="px-3 py-8 text-center text-sm text-muted"><p>{showArchived ? "No matching conversations." : "No conversations yet."}</p>{!showArchived && <p className="mt-1 text-xs">Create a thread to start working with an agent.</p>}</div>}
             {visibleThreads.map((thread) => (
               <div key={thread.id} className={cn("group mb-1 rounded-md transition-colors hover:bg-secondary", thread.id === selectedId && "bg-secondary")}>
                 <Link href={`/chat/${thread.id}`} className="flex items-start gap-3 px-3 py-2.5">
@@ -169,7 +172,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
         </ScrollArea>
       </aside>
       <section className={cn("min-h-0 flex-1", !selectedId && "hidden md:flex")}>
-         {selectedId ? <ChatPane thread={selected} seeded={seeded} live={messagesForThread(selectedId)} loading={loading} loadError={loadError} onRetryLoad={() => setLoadAttempt((attempt) => attempt + 1)} onBack={() => void navigate("/chat")} /> : <EmptyChat onNew={() => void openNewThread()} />}
+         {selectedId ? <ThreadWorkspace thread={selected} seeded={seeded} live={messagesForThread(selectedId)} loading={loading} loadError={loadError} onRetryLoad={() => setLoadAttempt((attempt) => attempt + 1)} onBack={() => void navigate("/chat")} /> : <EmptyChat onNew={() => void openNewThread()} />}
       </section>
       <Dialog open={switcherOpen} onOpenChange={setSwitcherOpen}>
         <DialogContent className="max-w-lg">
@@ -184,6 +187,97 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
   );
 }
 
+function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad, onBack }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void }): JSX.Element {
+  const { pushError, status, permissionsForThread } = useBoardContext();
+  const [scratch, setScratch] = useState(thread?.scratch_markdown ?? "");
+  const [sending, setSending] = useState(false);
+  const [files, setFiles] = useState<ChatFileEntry[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<{ path: string; content: string } | null>(null);
+  const [permissions, setPermissions] = useState<PendingPermission[]>([]);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [mobilePane, setMobilePane] = useState<"files" | "editor" | "chat">("chat");
+
+  useEffect(() => {
+    setScratch(thread?.scratch_markdown ?? "");
+  }, [thread?.id, thread?.scratch_markdown]);
+
+  useEffect(() => {
+    if (!thread || scratch === thread.scratch_markdown) return;
+    const timer = window.setTimeout(() => {
+      updateChatThread(thread.id, { scratch_markdown: scratch }).catch((error: unknown) => pushError(error instanceof Error ? error.message : "Unable to save the draft."));
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [pushError, scratch, thread]);
+
+  useEffect(() => {
+    if (!thread) return;
+    setFilesLoading(true);
+    fetchChatFiles(thread.id).then(setFiles).catch((error: unknown) => pushError(error instanceof Error ? error.message : "Unable to load files.")).finally(() => setFilesLoading(false));
+  }, [pushError, thread?.id]);
+
+  useEffect(() => {
+    if (!thread) { setPermissions([]); return; }
+    let cancelled = false;
+    const load = (): void => {
+    fetchChatPermissions(thread.id).then((items) => { if (!cancelled) setPermissions(items); }).catch(() => undefined);
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [status, thread?.id]);
+
+  useEffect(() => {
+    if (!thread) return;
+    fetch(`/api/threads/${encodeURIComponent(thread.id)}/attachments`).then((response) => response.json() as Promise<{ attachments: ChatAttachment[] }>).then((body) => setAttachments(body.attachments)).catch(() => undefined);
+  }, [thread?.id]);
+
+  const busPermissions = thread ? permissionsForThread(thread.id) : [];
+  const visiblePermissions = busPermissions.length > 0 ? busPermissions : permissions;
+
+  const decide = async (requestId: string, action: "approve" | "deny"): Promise<void> => {
+    if (!thread) return;
+    try {
+      await decideChatPermission(thread.id, requestId, action);
+      setPermissions((current) => current.filter((request) => request.requestId !== requestId));
+    } catch (error) {
+      setPermissions((current) => current.filter((request) => request.requestId !== requestId));
+      pushError(error instanceof Error ? error.message : "Permission request is no longer active.");
+    }
+  };
+
+  const openFile = async (path: string): Promise<void> => {
+    if (!thread) return;
+    try {
+      const file = await fetchChatFile(thread.id, path);
+      setSelectedFile({ path: file.path, content: file.content });
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : "Unable to open file.");
+    }
+  };
+
+  const mentionFile = (path: string): void => {
+    setScratch((current) => `${current}${current.length > 0 && !current.endsWith(" ") ? " " : ""}@${path} `);
+  };
+
+  const send = async (attachmentIds: string[] = attachments.map((attachment) => attachment.id)): Promise<void> => {
+    const content = scratch.trim();
+    if (!thread || (!content && attachments.length === 0) || sending) return;
+    setSending(true);
+    try {
+      await sendChatMessage(thread.id, content, attachmentIds);
+      setAttachments((current) => current.filter((attachment) => !attachmentIds.includes(attachment.id)));
+      setScratch("");
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : "The agent could not complete the turn.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (loading || loadError || !thread) return <ChatPane thread={thread} seeded={seeded} live={live} permissions={visiblePermissions} attachments={attachments} onAttachments={setAttachments} onPermission={decide} loading={loading} loadError={loadError} onRetryLoad={onRetryLoad} onBack={onBack} draft={scratch} onDraftChange={setScratch} onSendDraft={send} sending={sending} />;
+  return <div className="flex min-h-0 flex-1 flex-col"><div className="flex border-b border-border bg-panel p-1 md:hidden"><Button type="button" size="xs" variant={mobilePane === "files" ? "default" : "ghost"} className="flex-1" onClick={() => setMobilePane("files")}>Files</Button><Button type="button" size="xs" variant={mobilePane === "editor" ? "default" : "ghost"} className="flex-1" onClick={() => setMobilePane("editor")}>Draft</Button><Button type="button" size="xs" variant={mobilePane === "chat" ? "default" : "ghost"} className="flex-1" onClick={() => setMobilePane("chat")}>Chat</Button></div><div className="flex min-h-0 flex-1 flex-col md:flex-row"><div className={cn("min-h-0 flex-1", mobilePane !== "files" && "hidden md:flex")}><FilesSidebar files={files} loading={filesLoading} selectedPath={selectedFile?.path ?? null} onOpen={(path) => void openFile(path)} onMention={mentionFile} /></div><div className={cn("min-h-0 flex-1", mobilePane !== "editor" && "hidden md:flex")}><EditorPane value={scratch} onChange={setScratch} onSend={() => void send()} sending={sending} filePath={selectedFile?.path} fileContent={selectedFile?.content} onCloseFile={() => setSelectedFile(null)} /></div><div className={cn("min-h-0 flex-1", mobilePane !== "chat" && "hidden md:flex")}><ChatPane thread={thread} seeded={seeded} live={live} permissions={visiblePermissions} attachments={attachments} onAttachments={setAttachments} onPermission={decide} loading={loading} loadError={loadError} onRetryLoad={onRetryLoad} onBack={onBack} draft={scratch} onDraftChange={setScratch} onSendDraft={send} sending={sending} /></div></div></div>;
+}
+
 function StatusDot({ status }: { status: ChatThread["status"] }): JSX.Element {
   return <span className={cn("inline-block size-1.5 rounded-full", status === "error" ? "bg-error" : status === "active" ? "bg-success" : "bg-muted")} aria-hidden />;
 }
@@ -192,11 +286,12 @@ function EmptyChat({ onNew }: { onNew: () => void }): JSX.Element {
   return <div className="flex min-h-96 flex-1 items-center justify-center p-6"><div className="max-w-sm text-center"><Bot className="mx-auto mb-4 size-8 text-primary" aria-hidden /><h1 className="text-xl font-semibold">Start a conversation</h1><p className="mt-2 text-sm text-muted">Create a thread to talk with the configured coding agent.</p><Button className="mt-5" type="button" onClick={onNew}><Plus aria-hidden />New thread</Button></div></div>;
 }
 
-function ChatPane({ thread, seeded, live, loading, loadError, onRetryLoad, onBack }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void }): JSX.Element {
+function ChatPane({ thread, seeded, live, permissions, attachments, onAttachments, onPermission, loading, loadError, onRetryLoad, onBack, draft, onDraftChange, onSendDraft, sending: externalSending }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; permissions: PendingPermission[]; attachments: ChatAttachment[]; onAttachments: (items: ChatAttachment[]) => void; onPermission: (requestId: string, action: "approve" | "deny") => Promise<void>; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void; draft: string; onDraftChange: (value: string) => void; onSendDraft: (attachmentIds?: string[]) => Promise<void>; sending: boolean }): JSX.Element {
   const { pushError, dispatch } = useBoardContext();
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
+  const [draftSending, setDraftSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const messages = useMemo(() => {
     const byId = new Map<number, ChatMessage>();
@@ -210,25 +305,37 @@ function ChatPane({ thread, seeded, live, loading, loadError, onRetryLoad, onBac
     const content = listRef.current;
     const viewport = content?.parentElement;
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
-  }, [messages, sending]);
+  }, [messages, draftSending, externalSending]);
 
   const send = async (text = draft): Promise<void> => {
     const content = text.trim();
-    if (!thread || !content || sending) return;
-    setSending(true);
+    if (!thread || !content || draftSending || externalSending) return;
+    setDraftSending(true);
     setSendError(null);
-    setDraft("");
+    onDraftChange("");
     try {
-      const result = await sendChatMessage(thread.id, content);
+      const result = await sendChatMessage(thread.id, content, attachments.map((attachment) => attachment.id));
       dispatch({ type: "thread.message", payload: { threadId: thread.id, message: result.userMessage }, timestamp: new Date().toISOString() });
       dispatch({ type: "thread.message", payload: { threadId: thread.id, message: result.assistantMessage }, timestamp: new Date().toISOString() });
     } catch (error) {
       const message = error instanceof Error ? error.message : "The agent could not complete the turn.";
       setSendError(message);
-      setDraft(content);
+      onDraftChange(content);
     } finally {
-      setSending(false);
+      setDraftSending(false);
     }
+  };
+
+  const upload = async (files: FileList | File[]): Promise<void> => {
+    if (!thread || uploading) return;
+    setUploading(true);
+    try {
+      const uploaded = [...attachments];
+      for (const file of [...files]) uploaded.push(await uploadChatAttachment(thread.id, file));
+      onAttachments(uploaded);
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Image upload failed. Check the type and 10 MiB limit.");
+    } finally { setUploading(false); }
   };
 
   const cancel = async (): Promise<void> => {
@@ -249,13 +356,22 @@ function ChatPane({ thread, seeded, live, loading, loadError, onRetryLoad, onBac
      <header className="flex items-center gap-2 border-b border-border bg-panel px-3 py-3 md:px-6"><Button type="button" size="icon" variant="ghost" className="md:hidden" onClick={onBack} aria-label="Back to threads" title="Back to threads"><ArrowLeft aria-hidden /></Button><div className="min-w-0"><h1 className="truncate text-sm font-semibold">{thread.title}</h1><p className="truncate text-xs text-muted">{thread.cwd}</p></div><span className="ml-auto flex items-center gap-1.5 text-xs text-muted"><StatusDot status={thread.status} />{thread.status}</span></header>
     <ScrollArea className="min-h-0 flex-1"><div ref={listRef} className="mx-auto max-w-3xl space-y-5 p-4 md:p-8">
       {messages.length === 0 && <p className="py-12 text-center text-sm text-muted">Send a message to begin.</p>}
-      {messages.map((message) => <article key={message.id} className={cn("max-w-[92%]", message.role === "user" ? "ml-auto" : "mr-auto")}><p className="mb-1 text-[0.68rem] font-bold tracking-wider text-muted uppercase">{message.role}</p><div className={cn("rounded-lg border px-4 py-3", message.role === "user" ? "border-primary/20 bg-primary/5" : "border-border bg-panel")}><MarkdownWithCode className="text-sm leading-6" src={message.content} /></div></article>)}
-      {sending && <p className="flex items-center gap-2 text-xs text-muted"><LoaderCircle className="size-3.5 animate-spin" aria-hidden />Streaming response...</p>}
+       {messages.map((message) => <article key={message.id} className={cn("max-w-[92%]", message.role === "user" ? "ml-auto" : "mr-auto")}><div className="mb-1 flex items-center gap-2"><p className="text-[0.68rem] font-bold tracking-wider text-muted uppercase">{message.role}</p>{message.role === "user" && <button type="button" className="text-[0.68rem] text-muted hover:text-text" onClick={() => onDraftChange(message.content)}><Pencil aria-hidden className="mr-1 inline size-3" />Edit</button>}</div><div className={cn("rounded-lg border px-4 py-3", message.role === "user" ? "border-primary/20 bg-primary/5" : "border-border bg-panel")}>
+         {message.attachment_ids.map((id) => <img key={id} src={chatAttachmentUrl(message.thread_id, id)} alt="Attached image" className="mb-2 max-h-64 rounded border object-contain" />)}<MarkdownWithCode className="text-sm leading-6" src={message.content} /></div></article>)}
+       {permissions.map((request) => <PermissionCard key={request.requestId} request={request} onDecision={onPermission} />)}
+       {(draftSending || externalSending) && <p className="flex items-center gap-2 text-xs text-muted"><LoaderCircle className="size-3.5 animate-spin" aria-hidden />Streaming response...</p>}
     </div></ScrollArea>
     <div className="border-t border-border bg-panel p-3 md:p-4"><div className="mx-auto max-w-3xl">
-      {(sendError || thread.status === "error") && <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-error-border bg-error-bg px-3 py-2 text-xs text-error"><span>{sendError ?? "The last turn failed."}</span><Button type="button" size="xs" variant="outline" onClick={() => void send(lastPrompt)} disabled={sending || !lastPrompt}><RefreshCw aria-hidden />Retry</Button></div>}
-      <div className="flex items-end gap-2"><Textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder="Message the coding agent..." disabled={sending} rows={3} /><Button type="button" onClick={() => void (sending ? cancel() : send())} disabled={!sending && draft.trim().length === 0} variant={sending ? "destructive" : "default"}>{sending ? <><Square aria-hidden />Stop</> : <><Send aria-hidden />Send</>}</Button></div>
+       {(sendError || thread.status === "error") && <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-error-border bg-error-bg px-3 py-2 text-xs text-error"><span>{sendError ?? "The last turn failed."}</span><Button type="button" size="xs" variant="outline" onClick={() => void send(lastPrompt)} disabled={draftSending || externalSending || !lastPrompt}><RefreshCw aria-hidden />Retry</Button></div>}
+        {attachments.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{attachments.map((attachment) => <div key={attachment.id} className="relative"><img src={chatAttachmentUrl(attachment.thread_id, attachment.id)} alt={attachment.filename} className="size-14 rounded border object-cover" /><button type="button" className="absolute -right-1 -top-1 rounded-full bg-panel text-error" onClick={() => onAttachments(attachments.filter((item) => item.id !== attachment.id))} aria-label={`Remove ${attachment.filename}`}><X className="size-3" /></button></div>)}</div>}
+        <div className="flex items-end gap-2"><input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple className="hidden" onChange={(event) => { if (event.target.files) void upload(event.target.files); event.target.value = ""; }} /><Button type="button" size="icon" variant="outline" onClick={() => inputRef.current?.click()} disabled={uploading || draftSending || externalSending} aria-label="Attach image" title="Attach image"><ImagePlus aria-hidden /></Button><Textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void upload(event.dataTransfer.files); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void onSendDraft(); } }} placeholder={uploading ? "Uploading image..." : "Message the coding agent..."} disabled={draftSending || externalSending} rows={3} /><Button type="button" onClick={() => void ((draftSending || externalSending) ? cancel() : send())} disabled={!(draftSending || externalSending) && draft.trim().length === 0 && attachments.length === 0} variant={(draftSending || externalSending) ? "destructive" : "default"}>{(draftSending || externalSending) ? <><Square aria-hidden />Stop</> : <><Send aria-hidden />Send</>}</Button></div>
       <p className="mt-1 text-right text-[0.68rem] text-muted">Enter to send, Shift+Enter for a new line</p>
     </div></div>
   </div>;
+}
+
+function PermissionCard({ request, onDecision }: { request: PendingPermission; onDecision: (requestId: string, action: "approve" | "deny") => Promise<void> }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const decide = async (action: "approve" | "deny"): Promise<void> => { setBusy(true); await onDecision(request.requestId, action); };
+  return <article className="mr-auto max-w-[92%] rounded-lg border border-warn/40 bg-warn/5 px-4 py-3"><p className="text-xs font-semibold text-warn">Permission needed</p><p className="mt-1 text-sm">Agent wants to <strong>{request.tool}</strong>{request.kind ? ` (${request.kind})` : ""}.</p>{request.options.length > 0 && <p className="mt-1 text-xs text-muted">The agent supplied {request.options.map((option) => option.name).join(" / ")}.</p>}<div className="mt-3 flex gap-2"><Button type="button" size="xs" onClick={() => void decide("approve")} disabled={busy}>Approve once</Button><Button type="button" size="xs" variant="outline" onClick={() => void decide("deny")} disabled={busy}>Deny</Button></div></article>;
 }

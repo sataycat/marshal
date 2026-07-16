@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { openDb } from "../db/index.js";
 
 export type ChatThreadStatus = "draft" | "active" | "closed" | "error";
@@ -18,6 +18,7 @@ export interface ChatThread {
   created_at: string;
   updated_at: string;
   last_message_at: string | null;
+  scratch_markdown: string;
 }
 
 export interface ChatMessage {
@@ -26,6 +27,7 @@ export interface ChatMessage {
   role: ChatMessageRole;
   content: string;
   created_at: string;
+  attachment_ids: string[];
 }
 
 export interface CreateChatThreadInput {
@@ -40,6 +42,7 @@ export interface UpdateChatThreadInput {
   status?: ChatThreadStatus;
   archived?: boolean;
   pinned?: boolean;
+  scratchMarkdown?: string;
 }
 
 export class ChatThreadNotFoundError extends Error {
@@ -69,7 +72,9 @@ function rowToThread(row: Record<string, unknown>): ChatThread {
 }
 
 function rowToMessage(row: Record<string, unknown>): ChatMessage {
-  return { ...(row as unknown as ChatMessage), role: row.role as ChatMessageRole };
+  let attachmentIds: string[] = [];
+  try { attachmentIds = JSON.parse(String(row.attachment_ids ?? "[]")) as string[]; } catch { attachmentIds = []; }
+  return { ...(row as unknown as ChatMessage), role: row.role as ChatMessageRole, attachment_ids: attachmentIds };
 }
 
 export function listChatThreads(root?: string, includeArchived = false): ChatThread[] {
@@ -94,6 +99,10 @@ export function createChatThread(input: CreateChatThreadInput, root?: string): C
   const id = randomUUID();
   const repository = repoRoot(root);
   const cwd = resolve(input.cwd ?? repository);
+  const cwdRelative = relative(repository, cwd).replaceAll("\\", "/");
+  if (cwdRelative === ".." || cwdRelative.startsWith("../") || cwdRelative.startsWith("/")) {
+    throw new Error("Thread cwd must be inside the repository root");
+  }
   db.prepare(
     "INSERT INTO chat_threads (id, repo_root, cwd, agent_id, title, task_slug) VALUES (?, ?, ?, ?, ?, ?)",
   ).run(id, repository, cwd, input.agentId, input.title?.trim() || "New thread", input.taskSlug ?? null);
@@ -105,9 +114,9 @@ export function updateChatThread(id: string, input: UpdateChatThreadInput, root?
   const current = getChatThread(id, root);
   const updated = db
     .prepare(
-      "UPDATE chat_threads SET title = ?, status = ?, archived = ?, pinned = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND repo_root = ?",
+      "UPDATE chat_threads SET title = ?, status = ?, archived = ?, pinned = ?, scratch_markdown = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND repo_root = ?",
     )
-    .run(input.title?.trim() || current.title, input.status ?? current.status, input.archived === undefined ? Number(current.archived) : Number(input.archived), input.pinned === undefined ? Number(current.pinned) : Number(input.pinned), id, repoRoot(root));
+    .run(input.title?.trim() || current.title, input.status ?? current.status, input.archived === undefined ? Number(current.archived) : Number(input.archived), input.pinned === undefined ? Number(current.pinned) : Number(input.pinned), input.scratchMarkdown ?? current.scratch_markdown, id, repoRoot(root));
   if (updated.changes === 0) throw new ChatThreadNotFoundError(id);
   return getChatThread(id, root);
 }
@@ -125,11 +134,11 @@ export function listChatMessages(id: string, root?: string): ChatMessage[] {
   return (db.prepare("SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY id ASC").all(id) as Record<string, unknown>[]).map(rowToMessage);
 }
 
-export function appendChatMessage(id: string, role: ChatMessageRole, content: string, root?: string): ChatMessage {
+export function appendChatMessage(id: string, role: ChatMessageRole, content: string, root?: string, attachmentIds: string[] = []): ChatMessage {
   getChatThread(id, root);
   const db = openDb(root);
   const tx = db.transaction(() => {
-    const info = db.prepare("INSERT INTO chat_messages (thread_id, role, content) VALUES (?, ?, ?)").run(id, role, content);
+    const info = db.prepare("INSERT INTO chat_messages (thread_id, role, content, attachment_ids) VALUES (?, ?, ?, ?)").run(id, role, content, JSON.stringify(attachmentIds));
     db.prepare("UPDATE chat_threads SET status = 'active', last_message_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
     return db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(Number(info.lastInsertRowid)) as Record<string, unknown>;
   });

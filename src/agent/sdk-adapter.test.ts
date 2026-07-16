@@ -147,6 +147,23 @@ describe("SdkAcpAgentAdapter", () => {
     await denyAdapter.close(denySession);
   });
 
+  it("waits for an interactive decision and forwards the chosen ACP option ID", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "marshal-sdk-cwd-"));
+    const adapter = makeAdapter();
+    const session = await adapter.spawn(cwd, "fake", {
+      permissionMode: "interactive",
+      onPermission: async (request) => {
+        expect(request.options.map((option) => option.kind)).toEqual(["allow_once", "reject_once"]);
+        expect(request.options[0].optionId).toBe("allow");
+        return "allow";
+      },
+    });
+    const events = await collect(adapter.prompt(session, "hello", { permissionMode: "interactive" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "permission", granted: false, requestId: "sdk-session-1:1" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool", status: "completed", output: "allow" }));
+    await adapter.close(session);
+  });
+
   it("cancels an active prompt", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "marshal-sdk-cwd-"));
     const adapter = makeAdapter({ FAKE_ACP_HANG: "1" });

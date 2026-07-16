@@ -54,6 +54,9 @@ All under `127.0.0.1:<port>` (default `7433`). Hono for routing; `ws` library fo
 | POST   | `/api/tasks/:slug/ready`               | Freeze spec and move to ready (distinct from transition). |
 | GET    | `/api/tasks/:slug/diff`                | Unified diff of task branch vs trunk.                     |
 | POST   | `/api/tasks/:slug/merge`               | Local `git merge --no-ff` into trunk.                     |
+| GET    | `/api/threads/:id/attachments`         | List validated thread-scoped image metadata.             |
+| POST   | `/api/threads/:id/attachments`         | Validate and persist one bounded image upload.           |
+| GET    | `/api/threads/:id/attachments/:id`     | Read one thread-scoped persisted image.                  |
 | GET    | `/api/tasks/:slug/runs`                | All runs for a task.                                      |
 | GET    | `/api/runs/:id`                        | One run (includes prompt).                                |
 | GET    | `/api/runs/:id/events?after_seq&limit` | Paginated run events.                                     |
@@ -83,6 +86,7 @@ SQLite, WAL mode. Four tables:
 - **`runs`** — one row per build or validate attempt. Links to `task_id`, tracks `role` (builder/validator), `agent_id`, `status`, `prompt`, `commit_sha`, timestamps, `error`.
 - **`run_events`** — one row per agent event within a run, with monotonic `seq` for ordering and JSON `payload`. Inserted as events stream in (not buffered).
 - **`spec_messages`** — chat history for the spec-authoring phase. `role` is `user` or `assistant`.
+- **`chat_attachments`** — bounded thread-scoped image metadata; bytes live below `.marshal/attachments/<thread-id>/` and are never general static assets. Chat messages carry a JSON list of attachment UUIDs.
 
 ---
 
@@ -206,6 +210,8 @@ One engine — `@uiw/react-codemirror` (CodeMirror 6) — serves both read-only 
 ### Performance
 
 Code-split aggressively: route-level `lazy()` chunks + point-of-use lazy loads for `marked` (`web/src/markdown.ts` `renderMarkdown`/`renderProse` dynamic-import on first call) and the CodeMirror engine (lazy on first `<CodeBlock>` mount, never in the initial chunk). **`rollup-plugin-visualizer`** behind `ANALYZE=1` (`pnpm run analyze`) emits `web/dist/stats.html` for manual triage; it is not a production-graph dep. Lighthouse (P≥90 / BP≥95) is a release-cadence gate, not per-PR. A11y is inherited from Base UI; not gated or tracked.
+
+Chat reconnects report `connecting`/`open`/`closed`, reconnect automatically, and rehydrate durable thread/message state through the WebSocket snapshot plus thread detail fetch. Empty thread lists, empty transcripts, failed loads, and failed turns have actionable copy and retry paths. Phase 1 chat supports PNG, JPEG, WebP, and GIF uploads up to 10 MiB each, with an 8-image send limit and 40 MiB per-thread quota. MIME, filename extension, and file signatures are checked by the daemon. ACP image content blocks are sent only when the negotiated `promptCapabilities.image` is true; otherwise the turn fails explicitly.
 
 ### File map (frontend)
 

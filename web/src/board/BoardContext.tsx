@@ -47,6 +47,7 @@ export interface BoardContextValue {
   updateTaskSpec: (slug: string, specMarkdown: string) => Promise<TaskDetail | null>;
   threads: import("../types").ChatThread[];
   messagesForThread: (id: string) => import("../types").ChatMessage[];
+  permissionsForThread: (id: string) => import("../types").PendingPermission[];
   dispatch: (event: BusEvent) => void;
 }
 
@@ -64,7 +65,7 @@ function nowIso(): string {
 }
 
 export function BoardProvider({ children }: { children: ReactNode }) {
-  const { tasks, specMessagesFor, status, dispatch, threads, messagesForThread } = useBoard();
+  const { tasks, specMessagesFor, status, dispatch, threads, messagesForThread, permissionsForThread } = useBoard();
   const [toasts, dispatchToast] = useReducer(toastReducer, []);
   const { confirm, dialog } = useConfirm();
 
@@ -209,6 +210,7 @@ export function BoardProvider({ children }: { children: ReactNode }) {
       updateTaskSpec,
       threads,
       messagesForThread,
+      permissionsForThread,
       dispatch,
     }),
     [
@@ -228,6 +230,7 @@ export function BoardProvider({ children }: { children: ReactNode }) {
       updateTaskSpec,
       threads,
       messagesForThread,
+      permissionsForThread,
       dispatch,
     ],
   );

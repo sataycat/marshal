@@ -1,6 +1,6 @@
 export type BoardState = Record<number, TaskCard>;
 
-import type { BusEvent, ChatMessage, ChatThread, TaskCard, ThreadMessagePayload, ThreadPayload } from "../types";
+import type { BusEvent, ChatMessage, ChatThread, PendingPermission, TaskCard, ThreadMessagePayload, ThreadPayload } from "../types";
 
 export function boardReducer(state: BoardState, event: BusEvent): BoardState {
   switch (event.type) {
@@ -26,6 +26,26 @@ export function boardReducer(state: BoardState, event: BusEvent): BoardState {
 
 export type ChatThreadsState = Record<string, ChatThread>;
 export type ChatMessagesState = Record<string, Record<number, ChatMessage>>;
+export type ChatPermissionsState = Record<string, Record<string, PendingPermission>>;
+
+export function chatPermissionsReducer(state: ChatPermissionsState, event: BusEvent): ChatPermissionsState {
+  if (event.type !== "thread.event") return state;
+  const payload = event.payload as { threadId?: string; event?: { type?: string; request?: PendingPermission; requestId?: string } };
+  if (!payload.threadId || !payload.event) return state;
+  if (payload.event.type === "permission-request" && payload.event.request) {
+    return { ...state, [payload.threadId]: { ...state[payload.threadId], [payload.event.request.requestId]: payload.event.request } };
+  }
+  if (payload.event.type === "permission-resolved" && payload.event.requestId) {
+    const next = { ...state[payload.threadId] };
+    delete next[payload.event.requestId];
+    return { ...state, [payload.threadId]: next };
+  }
+  return state;
+}
+
+export function chatPermissionsFor(state: ChatPermissionsState, id: string): PendingPermission[] {
+  return Object.values(state[id] ?? {});
+}
 
 export function chatThreadsReducer(state: ChatThreadsState, event: BusEvent): ChatThreadsState {
   if (event.type === "connected") {

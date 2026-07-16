@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS chat_threads (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_message_at DATETIME,
+  scratch_markdown TEXT NOT NULL DEFAULT '',
   FOREIGN KEY (task_slug) REFERENCES tasks(slug)
 );
 
@@ -77,9 +78,24 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   thread_id TEXT NOT NULL,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
+  attachment_ids TEXT NOT NULL DEFAULT '[]',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id
   ON chat_messages(thread_id, id);
+
+CREATE TABLE IF NOT EXISTS chat_attachments (
+  id TEXT PRIMARY KEY,
+  thread_id TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  byte_size INTEGER NOT NULL,
+  storage_name TEXT NOT NULL UNIQUE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_attachments_thread_id
+  ON chat_attachments(thread_id, created_at, id);
