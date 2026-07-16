@@ -10,6 +10,7 @@ import {
   type EventBus,
   type TaskPayload,
 } from "./bus.js";
+import type { ChatThread } from "../chat/store.js";
 
 export interface WebSocketBridgeOptions {
   path: string;
@@ -33,7 +34,7 @@ interface ClientState {
 export function attachWebSocket(
   server: Server,
   bus: EventBus,
-  snapshot: () => TaskPayload[],
+  snapshot: () => TaskPayload[] | { tasks: TaskPayload[]; threads: ChatThread[] },
   options: WebSocketBridgeOptions,
 ): WebSocketBridgeHandle {
   const path = options.path;
@@ -76,7 +77,10 @@ export function attachWebSocket(
       removeClient(ws);
     });
 
-    const connectedPayload: ConnectedPayload = { tasks: snapshot() };
+    const currentSnapshot = snapshot();
+    const connectedPayload: ConnectedPayload = Array.isArray(currentSnapshot)
+      ? { tasks: currentSnapshot, threads: [] }
+      : currentSnapshot;
     const connectedEvent: BusEvent = {
       type: ConnectedType,
       payload: connectedPayload,

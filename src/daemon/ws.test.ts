@@ -92,7 +92,7 @@ describe("WebSocket event bus", () => {
     try {
       const connected = await collector.next(2000);
       expect(connected.type).toBe("connected");
-      expect(connected.payload).toEqual({ tasks: [] });
+      expect(connected.payload).toEqual({ tasks: [], threads: [] });
       expect(connected.timestamp).toMatch(
         /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/,
       );
@@ -113,6 +113,33 @@ describe("WebSocket event bus", () => {
         title: "Slice Three Acceptance",
         status: "backlog",
       });
+    } finally {
+      collector.close();
+      ws.close();
+      await handle.close();
+    }
+  });
+
+  it("sends repository threads in the connected snapshot and broadcasts thread mutations", async () => {
+    const handle = await startHttpServer({ root: repoRoot, host: "127.0.0.1", port: 0, version: "0.0.1" });
+    const { ws, collector } = await openSocket(`ws://127.0.0.1:${handle.port}/ws`);
+    try {
+      const connected = await collector.next();
+      expect(connected.payload).toMatchObject({ tasks: [], threads: [] });
+      const created = await fetch(`http://127.0.0.1:${handle.port}/api/threads`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "agent-a" }),
+      });
+      const thread = (await created.json() as { thread: { id: string } }).thread;
+      expect((await collector.next()).type).toBe("thread.created");
+      await fetch(`http://127.0.0.1:${handle.port}/api/threads/${thread.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "user", content: "hello" }),
+      });
+      expect((await collector.next()).type).toBe("thread.message");
+      expect((await collector.next()).type).toBe("thread.updated");
     } finally {
       collector.close();
       ws.close();

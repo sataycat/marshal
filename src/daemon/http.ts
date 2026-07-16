@@ -49,6 +49,17 @@ import { listSpecMessages, type SpecMessage } from "../tasks/spec-store.js";
 import { publishSpecMessage } from "./bus.js";
 import type { Agent } from "../agent/types.js";
 import { resolveAgentId, MissingAgentIdError } from "../worktree/config.js";
+import {
+  appendChatMessage,
+  ChatThreadNotFoundError,
+  createChatThread,
+  getChatThread,
+  isChatThreadStatus,
+  listChatMessages,
+  listChatThreads,
+  updateChatThread,
+} from "../chat/store.js";
+import { publishThreadCreated, publishThreadMessage, publishThreadUpdated } from "./bus.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -104,6 +115,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
   registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent);
+  registerChatRoutes(app, root, bus);
   registerStaticRoutes(app, webDir);
   app.notFound((c) => spaNotFound(c, webDir));
   app.onError((err, c) => {
@@ -318,8 +330,82 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof MissingAgentIdError) {
     return new ApiError(400, err.message, "agent_not_configured");
   }
+  if (err instanceof ChatThreadNotFoundError) {
+    return new ApiError(404, err.message, "thread_not_found");
+  }
   logger.error({ err }, "Unexpected error in task HTTP handler");
   return new ApiError(500, "Internal server error", "internal_error");
+}
+
+function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus | undefined): void {
+  app.get("/api/threads", (c) => c.json({ threads: listChatThreads(root, c.req.query("archived") === "true") }));
+  app.post("/api/threads", async (c) => {
+    const body = await readJsonObject(c, new Set(["agent_id", "cwd", "title", "task_slug"]));
+    if (body.agent_id === undefined) throw new ApiError(422, "agent_id is required", "missing_field");
+    const agentId = assertString(body.agent_id, "agent_id");
+    if (!agentId.trim()) throw new ApiError(422, "agent_id must not be empty", "invalid_field");
+    const thread = createChatThread({
+      agentId,
+      cwd: body.cwd === undefined ? undefined : assertString(body.cwd, "cwd"),
+      title: body.title === undefined ? undefined : assertString(body.title, "title"),
+      taskSlug: body.task_slug === undefined ? undefined : assertString(body.task_slug, "task_slug"),
+    }, root);
+    if (bus) publishThreadCreated(bus, thread);
+    return c.json({ thread }, 201);
+  });
+  app.get("/api/threads/:id", (c) => {
+    try {
+      const thread = getChatThread(c.req.param("id"), root);
+      return c.json({ thread, messages: listChatMessages(thread.id, root) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.patch("/api/threads/:id", async (c) => {
+    const body = await readJsonObject(c, new Set(["title", "status", "archived", "pinned"]));
+    if (body.title !== undefined && typeof body.title !== "string") throw new ApiError(422, "title must be a string", "invalid_field");
+    if (body.status !== undefined && (typeof body.status !== "string" || !isChatThreadStatus(body.status))) throw new ApiError(422, "status is invalid", "invalid_field");
+    for (const field of ["archived", "pinned"] as const) {
+      if (body[field] !== undefined && typeof body[field] !== "boolean") throw new ApiError(422, `${field} must be a boolean`, "invalid_field");
+    }
+    try {
+      const thread = updateChatThread(c.req.param("id"), {
+        title: body.title as string | undefined,
+        status: body.status as "draft" | "active" | "closed" | "error" | undefined,
+        archived: body.archived as boolean | undefined,
+        pinned: body.pinned as boolean | undefined,
+      }, root);
+      if (bus) publishThreadUpdated(bus, thread);
+      return c.json({ thread });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.get("/api/threads/:id/messages", (c) => {
+    try {
+      return c.json({ messages: listChatMessages(c.req.param("id"), root) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.post("/api/threads/:id/messages", async (c) => {
+    const body = await readJsonObject(c, new Set(["role", "content"]));
+    if (body.role !== "user" && body.role !== "assistant") throw new ApiError(422, "role must be user or assistant", "invalid_field");
+    if (body.content === undefined) throw new ApiError(422, "content is required", "missing_field");
+    const content = assertString(body.content, "content");
+    if (!content.trim()) throw new ApiError(422, "content must not be empty", "invalid_field");
+    try {
+      const threadId = c.req.param("id");
+      const message = appendChatMessage(threadId, body.role, content, root);
+      if (bus) {
+        publishThreadMessage(bus, threadId, message);
+        publishThreadUpdated(bus, getChatThread(threadId, root));
+      }
+      return c.json({ message }, 201);
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
 }
 
 function registerTaskRoutes(
@@ -718,7 +804,10 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
 
   let wsHandle: WebSocketBridgeHandle | undefined;
   if (attachWs) {
-    wsHandle = attachWebSocket(server as HttpServer, bus, () => listTasks(root).map(taskCard), {
+    wsHandle = attachWebSocket(server as HttpServer, bus, () => ({
+      tasks: listTasks(root).map(taskCard),
+      threads: listChatThreads(root),
+    }), {
       path: "/ws",
     });
   }

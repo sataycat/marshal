@@ -1,5 +1,6 @@
 import { logger } from "../logger.js";
 import type { SpecMessage } from "../tasks/spec-store.js";
+import type { ChatMessage, ChatThread } from "../chat/store.js";
 
 export interface BusEvent<P = unknown> {
   type: string;
@@ -41,6 +42,9 @@ export const DaemonIdleType = "daemon.idle";
 export const DaemonCycleCompleteType = "daemon.cycle_complete";
 export const ConnectedType = "connected";
 export const SpecMessageType = "spec.message";
+export const ThreadCreatedType = "thread.created";
+export const ThreadUpdatedType = "thread.updated";
+export const ThreadMessageType = "thread.message";
 
 export interface SpecMessagePayload {
   taskSlug: string;
@@ -82,6 +86,16 @@ export interface RunEventPayload {
 
 export interface ConnectedPayload {
   tasks: TaskPayload[];
+  threads: ChatThread[];
+}
+
+export interface ThreadPayload {
+  thread: ChatThread;
+}
+
+export interface ThreadMessagePayload {
+  threadId: string;
+  message: ChatMessage;
 }
 
 export function publishTaskCreated(bus: EventBus, task: TaskPayload): void {
@@ -124,4 +138,16 @@ export function publishDaemonCycleComplete(bus: EventBus): void {
 export function publishSpecMessage(bus: EventBus, taskSlug: string, message: SpecMessage): void {
   const payload: SpecMessagePayload = { taskSlug, message };
   bus.publish(SpecMessageType, payload);
+}
+
+export function publishThreadCreated(bus: EventBus, thread: ChatThread): void {
+  bus.publish(ThreadCreatedType, { thread });
+}
+
+export function publishThreadUpdated(bus: EventBus, thread: ChatThread): void {
+  bus.publish(ThreadUpdatedType, { thread });
+}
+
+export function publishThreadMessage(bus: EventBus, threadId: string, message: ChatMessage): void {
+  bus.publish(ThreadMessageType, { threadId, message });
 }
