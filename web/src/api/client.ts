@@ -1,4 +1,12 @@
-import type { BusEvent, SpecMessage, TaskCard, TaskDetail, TaskStatus } from "../types";
+import type {
+  BusEvent,
+  ChatMessage,
+  ChatThread,
+  SpecMessage,
+  TaskCard,
+  TaskDetail,
+  TaskStatus,
+} from "../types";
 
 export interface DiffStats {
   files: number;
@@ -140,6 +148,41 @@ export async function updateTaskSpec(slug: string, specMarkdown: string): Promis
   });
   const body = await jsonOrThrow<{ task: TaskDetail }>(res);
   return body.task;
+}
+
+export async function fetchChatThreads(): Promise<ChatThread[]> {
+  const res = await fetch("/api/threads");
+  const body = await jsonOrThrow<{ threads: ChatThread[] }>(res);
+  return body.threads;
+}
+
+export async function createChatThread(input: { agent_id: string }): Promise<ChatThread> {
+  const res = await fetch("/api/threads", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await jsonOrThrow<{ thread: ChatThread }>(res);
+  return body.thread;
+}
+
+export async function fetchChatThread(id: string): Promise<{ thread: ChatThread; messages: ChatMessage[] }> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}`);
+  return jsonOrThrow<{ thread: ChatThread; messages: ChatMessage[] }>(res);
+}
+
+export async function sendChatMessage(id: string, content: string): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage }> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  return jsonOrThrow<{ userMessage: ChatMessage; assistantMessage: ChatMessage }>(res);
+}
+
+export async function cancelChatTurn(id: string): Promise<void> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+  await jsonOrThrow<{ cancelled: boolean }>(res);
 }
 
 function wsUrl(): string {

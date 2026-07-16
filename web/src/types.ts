@@ -39,3 +39,38 @@ export interface SpecMessagePayload {
   taskSlug: string;
   message: SpecMessage;
 }
+
+export type ChatThreadStatus = "draft" | "active" | "closed" | "error";
+export type ChatMessageRole = "user" | "assistant";
+
+export interface ChatThread {
+  id: string;
+  repo_root: string;
+  cwd: string;
+  agent_id: string;
+  title: string;
+  status: ChatThreadStatus;
+  archived: boolean;
+  pinned: boolean;
+  task_slug: string | null;
+  created_at: string;
+  updated_at: string;
+  last_message_at: string | null;
+}
+
+export interface ChatMessage {
+  id: number;
+  thread_id: string;
+  role: ChatMessageRole;
+  content: string;
+  created_at: string;
+}
+
+export interface ThreadPayload {
+  thread: ChatThread;
+}
+
+export interface ThreadMessagePayload {
+  threadId: string;
+  message: ChatMessage;
+}

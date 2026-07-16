@@ -1,6 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { boardReducer, boardToList, type BoardState } from "./reducer";
-import type { BusEvent, TaskCard } from "../types";
+import {
+  boardReducer,
+  boardToList,
+  chatMessagesFor,
+  chatMessagesReducer,
+  chatThreadsReducer,
+  chatThreadsToList,
+  type BoardState,
+  type ChatMessagesState,
+  type ChatThreadsState,
+} from "./reducer";
+import type { BusEvent, ChatMessage, ChatThread, TaskCard } from "../types";
 
 function card(over: Partial<TaskCard> = {}): TaskCard {
   return {
@@ -107,5 +117,57 @@ describe("boardToList", () => {
 
   it("returns an empty array for empty state", () => {
     expect(boardToList({})).toEqual([]);
+  });
+});
+
+function thread(overrides: Partial<ChatThread> = {}): ChatThread {
+  return {
+    id: "thread-1",
+    repo_root: "/repo",
+    cwd: "/repo",
+    agent_id: "builder",
+    title: "Thread",
+    status: "draft",
+    archived: false,
+    pinned: false,
+    task_slug: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    last_message_at: null,
+    ...overrides,
+  };
+}
+
+function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    id: 1,
+    thread_id: "thread-1",
+    role: "assistant",
+    content: "hello",
+    created_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("chat state reducers", () => {
+  it("replaces thread state from a connected snapshot", () => {
+    const state: ChatThreadsState = { old: thread({ id: "old" }) };
+    const next = chatThreadsReducer(state, ev("connected", { threads: [thread()] }));
+    expect(Object.keys(next)).toEqual(["thread-1"]);
+  });
+
+  it("upserts live thread updates and sorts pinned threads before recent threads", () => {
+    let state: ChatThreadsState = {};
+    state = chatThreadsReducer(state, ev("thread.created", { thread: thread({ id: "old", updated_at: "2026-01-03T00:00:00.000Z" }) }));
+    state = chatThreadsReducer(state, ev("thread.updated", { thread: thread({ id: "pinned", pinned: true }) }));
+    expect(chatThreadsToList(state).map((item) => item.id)).toEqual(["pinned", "old"]);
+  });
+
+  it("deduplicates streamed messages by id and returns them in order", () => {
+    const state: ChatMessagesState = {};
+    const withFirst = chatMessagesReducer(state, ev("thread.message", { threadId: "thread-1", message: message({ id: 2, content: "partial" }) }));
+    const withUpdate = chatMessagesReducer(withFirst, ev("thread.message", { threadId: "thread-1", message: message({ id: 2, content: "complete" }) }));
+    const withSecond = chatMessagesReducer(withUpdate, ev("thread.message", { threadId: "thread-1", message: message({ id: 3, content: "next" }) }));
+    expect(chatMessagesFor(withSecond, "thread-1").map((item) => item.content)).toEqual(["complete", "next"]);
   });
 });

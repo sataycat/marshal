@@ -205,7 +205,7 @@ One engine — `@uiw/react-codemirror` (CodeMirror 6) — serves both read-only 
 
 ### Performance
 
-Code-split aggressively: route-level `lazy()` chunks + point-of-use lazy loads for `marked` (`web/src/markdown.ts` `renderMarkdown`/`renderProse` dynamic-import on first call) and the CodeMirror engine (lazy on first `<CodeBlock>` mount, never in the initial chunk). **`size-limit`** is the per-PR gate: `pnpm run size` checks per-chunk gzipped budgets (`web/.size-limit.json`), wired into `pnpm run build:web` so a budget breach fails the build. **`rollup-plugin-visualizer`** behind `ANALYZE=1` (`pnpm run analyze`) emits `web/dist/stats.html` for manual triage; it is not a production-graph dep. Lighthouse (P≥90 / BP≥95) is a release-cadence gate, not per-PR. A11y is inherited from Base UI; not gated or tracked.
+Code-split aggressively: route-level `lazy()` chunks + point-of-use lazy loads for `marked` (`web/src/markdown.ts` `renderMarkdown`/`renderProse` dynamic-import on first call) and the CodeMirror engine (lazy on first `<CodeBlock>` mount, never in the initial chunk). **`rollup-plugin-visualizer`** behind `ANALYZE=1` (`pnpm run analyze`) emits `web/dist/stats.html` for manual triage; it is not a production-graph dep. Lighthouse (P≥90 / BP≥95) is a release-cadence gate, not per-PR. A11y is inherited from Base UI; not gated or tracked.
 
 ### File map (frontend)
 
@@ -216,4 +216,4 @@ Code-split aggressively: route-level `lazy()` chunks + point-of-use lazy loads f
 - `web/src/codemirror/{CodeBlock,languages,MarkdownWithCode}.tsx` — CodeMirror integration.
 - `web/src/markdown.ts` — `renderMarkdown` / `renderProse` (lazy `marked`).
 - `web/src/components/ui/*` — shadcn/Base UI primitives (`Sheet`, `Dialog`, `Button`, `Tooltip`, `Tabs`, …) + the `cn()` helper.
-- `web/vite.config.ts`, `web/.size-limit.json`, `web/src/index.css` — build/theming config.
+- `web/vite.config.ts`, `web/src/index.css` — build/theming config.

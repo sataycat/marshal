@@ -38,6 +38,8 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    // Compressed-size reporting is diagnostic work and should not slow normal builds.
+    reportCompressedSize: false,
     rollupOptions: {
       output: {
         entryFileNames: "assets/app-[hash].js",

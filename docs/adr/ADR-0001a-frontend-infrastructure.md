@@ -87,27 +87,24 @@ ADR-0001 fixed breakpoints (~768px tablet, ~480px phone) and a target IA: on des
 
 ### Context
 
-ADR-0001 set the targets (Lighthouse P≥90 / BP≥95; <150KB gzipped JS; accessibility is no longer gated — see §4) but not how to enforce or track them. Without enforcement the budget erodes silently — the classic SPA failure mode.
+ADR-0001 set the targets (Lighthouse P≥90 / BP≥95; <150KB gzipped JS; accessibility is no longer gated — see §4) but not how to track them.
 
 ### Decision
 
-**Code-split aggressively; enforce bundle size in CI; audit Lighthouse on a release cadence, not per-PR.**
+**Code-split aggressively; inspect bundle composition on demand; audit Lighthouse on a release cadence, not per-PR.**
 
 - **Route-level splitting.** Each route is a lazy component (`lazy(() => import('./chat/ChatRoute'))`) loaded via wouter's `Route`. The board route (Phase 2) never loads in Phase 1 sessions.
 - **Point-of-use lazy loading for the two heaviest non-core deps:**
   - `marked` — imported only by the chat and diff routes; the board route doesn't need markdown. Wrapped in a `lazyMarkdown` helper that dynamic-imports `marked` on first render of a message/diff.
   - CodeMirror code engine (see §5) — `@uiw/react-codemirror` plus its Lezer grammar packages are the single heaviest lazy dep (~60–80KB gzipped for core + a working language set, estimated). Loaded on first code-block mount, never in the initial chunk; cached for the session after.
-- **`size-limit` with budget assertions** wired into `pnpm run build` (or a dedicated `pnpm run size`). Fails the build if any named asset exceeds its limit. Initial-chunk limit set to leave the planned headroom; per-route chunks get their own limits. Run in CI on every PR — fast, deterministic, no browser.
-  - Initial chunk budget (gzip): React+ReactDOM+Base UI+Tailwind+wouter+app shell ≤ 110KB, leaving ≥40KB headroom before the 150KB ceiling for the chat / `marked` / CodeMirror chunks.
-  - Dedicated CodeMirror chunk budget (gzip): ~90KB ceiling — core + language packages live in their own lazy chunk, so they never bill against the initial budget. Exact figure confirmed with `rollup-plugin-visualizer` post-build; raise or trim the registered language set to fit.
 - **`rollup-plugin-visualizer`** as a `--analyze` build flag (not a dep in the production graph) for manual triage when a chunk surprises us.
-- **Lighthouse via ` @lhci/cli`** (or `unlighthouse`) run on a **release-tag / nightly** cadence against the built bundle served by the daemon. Targets are a release gate, not a per-PR block — Lighthouse is too slow and variance-prone to gate every PR. Bundle-size (`size-limit`) **is** a per-PR gate; Lighthouse is a release gate. This split keeps the loop fast and avoids flaky-red main.
+- **Lighthouse via ` @lhci/cli`** (or `unlighthouse`) run on a **release-tag / nightly** cadence against the built bundle served by the daemon. Targets are a release gate, not a per-PR block — Lighthouse is too slow and variance-prone to gate every PR.
 - **No images.** System font stack already in place. Icons are inline SVG / Lucide tree-shaken to the icons used (≈200B each), imported per-icon, not via a barrel.
 - **No SSR, no prerender.** ADR-0001 §5 already settled this; reaffirmed here because it bounds the perf surface to client-only.
 
 ### Alternatives Considered
 
-1. **`bundlesize` / custom `gzip-size` script.** `size-limit` does the same with named budgets and gzip out of the box; not worth writing bespoke checks.
+1. **Automated bundle-size gates.** Removed because the extra compression pass pushed the web build past short execution timeouts. Use the visualizer when bundle composition needs investigation.
 
 2. **Lighthouse on every PR.** Rejected — multi-minute runtime, variance on a local daemon, and it gates on metrics (TTI, CLS) that bundle-size doesn't fully control. Release cadence with manual review is the right granularity.
 
@@ -176,7 +173,7 @@ Code blocks appear in three surfaces: chat messages (mostly read-only), spec aut
 ### Positive
 
 - **One ADR, one review.** Five cross-cutting-but-related decisions land together, consistent with each other and with the budget.
-- **Budget is defended, not aspirational.** Route splitting + point-of-use lazy loading + `size-limit` in CI means the 150KB ceiling is enforced on every PR rather than discovered at release time.
+- **Heavy dependencies remain isolated.** Route splitting and point-of-use lazy loading keep `marked` and CodeMirror out of the initial chunk.
 - **Routing deep-links for free.** wouter + the existing daemon SPA fallback give shareable `/chat/:threadId` links with no server changes — which ADR-0002's thread model benefits from directly.
 - **A11y cost is near zero.** Inherited from Base UI; no bespoke hooks or axe gate to maintain. Acceptable for a single-user local tool and one less thing to break in CI.
 - **Code editing is a first-class affordance, not an afterthought.** CodeMirror as the single engine means the author can drop into editing markdown/code directly wherever it appears; highlighting and editing share one path and one lazy chunk.
@@ -184,7 +181,7 @@ Code blocks appear in three surfaces: chat messages (mostly read-only), spec aut
 ### Negative / Risks
 
 - **wouter is less known to some LLMs than React Router.** Mitigation: its API is a React-Router subset, so models map naturally; a tiny `routes.ts` establishes the route shape as a reference. If wouter friction shows up in practice, React Router is the documented escalation (§1 alt 1) at a known ~20KB cost.
-- **Two-track gating (size per-PR, Lighthouse per-release).** Means a perf regression in TTI/CLS could land in `main` and only surface at release. Mitigation: Lighthouse runs nightly against `main` as well as on release tags, so regressions are caught in ≤1 day, not at release.
+- **Bundle size is not automatically gated.** A dependency regression can land unnoticed until manual analysis or Lighthouse catches it. Mitigation: run the visualizer when adding a non-trivial frontend dependency.
 - **CodeMirror is heavier than the old `highlight.js` curated set.** The dedicated chunk is ~3–4× the size of the previous ~20–25KB highlighter set. Acceptable because it is lazy and isolated in its own chunk with its own budget (§3); but a chat-heavy session with many read-only blocks pays the full chunk on the first block. Mitigation: chunk is cached for the session; no per-block re-cost.
 - **A11y is deprioritized.** Dropping the gate and the bespoke app-layer work means a real regression in keyboard/focus behavior could land unnoticed. Accepted: the user base is a single local author; Base UI's defaults cover the common cases; revisit if accessibility becomes a real requirement.
 - **First-paint hydration flash** on the first code block of a session (plain monospace → full CodeMirror). Acceptable and brief; cached for the session after.

@@ -1,28 +1,34 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
-import { boardReducer, boardToList, type BoardState } from "../board/reducer";
+import { boardReducer, boardToList, chatMessagesFor, chatMessagesReducer, chatThreadsReducer, chatThreadsToList, type BoardState, type ChatMessagesState, type ChatThreadsState } from "../board/reducer";
 import {
   specMessagesReducer,
   messagesForSlug,
   type SpecMessagesState,
 } from "../specchat/specMessagesReducer";
-import { connectBus, fetchTasks, type SocketStatus, type WebSocketHandle } from "../api/client";
-import type { BusEvent, SpecMessage } from "../types";
+import { connectBus, fetchChatThreads, fetchTasks, type SocketStatus, type WebSocketHandle } from "../api/client";
+import type { BusEvent, ChatMessage, ChatThread, SpecMessage } from "../types";
 
 export interface BoardView {
   tasks: ReturnType<typeof boardToList>;
   specMessagesFor: (slug: string) => SpecMessage[];
   status: SocketStatus;
   dispatch: (event: BusEvent) => void;
+  threads: ChatThread[];
+  messagesForThread: (id: string) => ChatMessage[];
 }
 
 export function useBoard(): BoardView {
   const [state, dispatchTasks] = useReducer(boardReducer, {} as BoardState);
   const [specState, dispatchSpec] = useReducer(specMessagesReducer, {} as SpecMessagesState);
   const [status, setStatus] = useState<SocketStatus>("connecting");
+  const [threadState, dispatchThreads] = useReducer(chatThreadsReducer, {} as ChatThreadsState);
+  const [messageState, dispatchMessages] = useReducer(chatMessagesReducer, {} as ChatMessagesState);
 
   const dispatch = useCallback((event: BusEvent): void => {
     dispatchTasks(event);
     dispatchSpec(event);
+    dispatchThreads(event);
+    dispatchMessages(event);
   }, []);
 
   const specMessagesFor = useCallback(
@@ -50,6 +56,11 @@ export function useBoard(): BoardView {
 
     handle = connectBus(dispatch, { onStatus: (s) => setStatus(s) });
 
+    fetchChatThreads().then((threads) => {
+      if (cancelled) return;
+      dispatchThreads({ type: "connected", payload: { threads }, timestamp: new Date().toISOString() });
+    }).catch(() => undefined);
+
     return () => {
       cancelled = true;
       handle?.close();
@@ -61,5 +72,7 @@ export function useBoard(): BoardView {
     specMessagesFor,
     status,
     dispatch,
+    threads: chatThreadsToList(threadState),
+    messagesForThread: (id: string) => chatMessagesFor(messageState, id),
   };
 }

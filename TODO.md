@@ -51,7 +51,7 @@ Slice 1 ──> Slice 2 ──> Slice 3 ──> Slice 4 ──> Slice 5
 
 **Outcome:** A client can create a thread, send a message, receive a streamed response, reload it, and see the conversation history.
 
-### Slice 3 — Minimal Chat Route
+### Slice 3 — Minimal Chat Route [done]
 
 **Goal:** Expose the first usable browser chat surface.
 

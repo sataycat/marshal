@@ -45,6 +45,9 @@ export interface BoardContextValue {
     content: string,
   ) => Promise<{ userMessage: SpecMessage; assistantMessage: SpecMessage } | null>;
   updateTaskSpec: (slug: string, specMarkdown: string) => Promise<TaskDetail | null>;
+  threads: import("../types").ChatThread[];
+  messagesForThread: (id: string) => import("../types").ChatMessage[];
+  dispatch: (event: BusEvent) => void;
 }
 
 const BoardContext = createContext<BoardContextValue | null>(null);
@@ -61,7 +64,7 @@ function nowIso(): string {
 }
 
 export function BoardProvider({ children }: { children: ReactNode }) {
-  const { tasks, specMessagesFor, status, dispatch } = useBoard();
+  const { tasks, specMessagesFor, status, dispatch, threads, messagesForThread } = useBoard();
   const [toasts, dispatchToast] = useReducer(toastReducer, []);
   const { confirm, dialog } = useConfirm();
 
@@ -204,6 +207,9 @@ export function BoardProvider({ children }: { children: ReactNode }) {
       mergeTask,
       sendSpecMessage,
       updateTaskSpec,
+      threads,
+      messagesForThread,
+      dispatch,
     }),
     [
       tasks,
@@ -220,6 +226,9 @@ export function BoardProvider({ children }: { children: ReactNode }) {
       mergeTask,
       sendSpecMessage,
       updateTaskSpec,
+      threads,
+      messagesForThread,
+      dispatch,
     ],
   );
 
