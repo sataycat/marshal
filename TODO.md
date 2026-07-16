@@ -65,7 +65,7 @@ Slice 1 ──> Slice 2 ──> Slice 3 ──> Slice 4 ──> Slice 5
 
 **Outcome:** A human can use Marshal in the browser for a complete basic chat loop.
 
-### Slice 4 — Thread Management UX
+### Slice 4 — Thread Management UX [done]
 
 **Goal:** Make multiple conversations practical to use.
 

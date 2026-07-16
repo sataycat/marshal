@@ -37,6 +37,12 @@ export function chatThreadsReducer(state: ChatThreadsState, event: BusEvent): Ch
     const thread = (event.payload as ThreadPayload).thread;
     return { ...state, [thread.id]: thread };
   }
+  if (event.type === "thread.deleted") {
+    const id = (event.payload as { id: string }).id;
+    const next = { ...state };
+    delete next[id];
+    return next;
+  }
   return state;
 }
 

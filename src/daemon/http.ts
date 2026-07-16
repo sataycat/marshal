@@ -48,18 +48,19 @@ import { runSpecAuthorTurn, SpecChatClosedError } from "./spec-chat.js";
 import { listSpecMessages, type SpecMessage } from "../tasks/spec-store.js";
 import { publishSpecMessage } from "./bus.js";
 import type { Agent } from "../agent/types.js";
-import { resolveAgentId, MissingAgentIdError } from "../worktree/config.js";
+import { loadGlobalConfig, resolveAgentId, MissingAgentIdError, isAgentCommand } from "../worktree/config.js";
 import {
   appendChatMessage,
   ChatThreadNotFoundError,
   createChatThread,
+  deleteChatThread,
   getChatThread,
   isChatThreadStatus,
   listChatMessages,
   listChatThreads,
   updateChatThread,
 } from "../chat/store.js";
-import { publishThreadCreated, publishThreadMessage, publishThreadUpdated } from "./bus.js";
+import { publishThreadCreated, publishThreadDeleted, publishThreadMessage, publishThreadUpdated } from "./bus.js";
 import { ChatTurnBusyError, ChatTurnRunner } from "./chat-turn.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
@@ -344,6 +345,13 @@ function mapDomainError(err: unknown): ApiError {
 
 function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus | undefined, chatAgent?: Agent): void {
   const turns = new ChatTurnRunner({ root, bus, agent: chatAgent });
+  app.get("/api/chat-agents", (c) => {
+    const config = loadGlobalConfig();
+    const configured = [config.agents?.builder, config.agents?.validator, config.agents?.specAuthor]
+      .filter(isAgentCommand)
+      .map((agent) => agent.id);
+    return c.json({ agents: [...new Set(configured)] });
+  });
   app.get("/api/threads", (c) => c.json({ threads: listChatThreads(root, c.req.query("archived") === "true") }));
   app.post("/api/threads", async (c) => {
     const body = await readJsonObject(c, new Set(["agent_id", "cwd", "title", "task_slug"]));
@@ -383,6 +391,15 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
       }, root);
       if (bus) publishThreadUpdated(bus, thread);
       return c.json({ thread });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.delete("/api/threads/:id", (c) => {
+    try {
+      deleteChatThread(c.req.param("id"), root);
+      if (bus) publishThreadDeleted(bus, c.req.param("id"));
+      return c.json({ deleted: true });
     } catch (err) {
       throw mapDomainError(err);
     }

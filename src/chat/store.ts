@@ -112,6 +112,13 @@ export function updateChatThread(id: string, input: UpdateChatThreadInput, root?
   return getChatThread(id, root);
 }
 
+export function deleteChatThread(id: string, root?: string): void {
+  const db = openDb(root);
+  getChatThread(id, root);
+  const result = db.prepare("DELETE FROM chat_threads WHERE id = ? AND repo_root = ?").run(id, repoRoot(root));
+  if (result.changes === 0) throw new ChatThreadNotFoundError(id);
+}
+
 export function listChatMessages(id: string, root?: string): ChatMessage[] {
   getChatThread(id, root);
   const db = openDb(root);

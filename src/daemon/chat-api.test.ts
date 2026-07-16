@@ -52,4 +52,17 @@ describe("chat thread API", () => {
     expect((await req(app, "POST", "/api/threads", { title: "No agent" })).status).toBe(422);
     expect((await req(app, "POST", "/api/threads", { agent_id: "a", nope: true })).status).toBe(400);
   });
+
+  it("supports lifecycle actions and deletion", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-chat-api-"));
+    initGitRepo(root);
+    const app = buildApp("0.0.1", { root });
+    const created = await req(app, "POST", "/api/threads", { agent_id: "agent-a" });
+    const id = created.body.thread.id;
+    expect((await req(app, "PATCH", `/api/threads/${id}`, { archived: true, pinned: true, status: "closed" })).body.thread).toMatchObject({ archived: true, pinned: true, status: "closed" });
+    expect((await req(app, "GET", "/api/threads")).body.threads).toHaveLength(0);
+    expect((await req(app, "GET", "/api/threads?archived=true")).body.threads[0]).toMatchObject({ id, archived: true });
+    expect((await req(app, "DELETE", `/api/threads/${id}`)).body).toEqual({ deleted: true });
+    expect((await req(app, "GET", `/api/threads/${id}`)).status).toBe(404);
+  });
 });

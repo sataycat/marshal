@@ -74,3 +74,7 @@ export interface ThreadMessagePayload {
   threadId: string;
   message: ChatMessage;
 }
+
+export interface ThreadDeletedPayload {
+  id: string;
+}

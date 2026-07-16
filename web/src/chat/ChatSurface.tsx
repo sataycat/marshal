@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { AlertCircle, ArrowLeft, Bot, LoaderCircle, MessageSquare, Plus, RefreshCw, Send, Square } from "lucide-react";
-import { cancelChatTurn, createChatThread, fetchChatThread, sendChatMessage } from "../api/client";
+import { Archive, AlertCircle, ArrowLeft, Bot, Check, LoaderCircle, MessageSquare, Pin, Plus, RefreshCw, Search, Send, Square, X } from "lucide-react";
+import { cancelChatTurn, createChatThread, deleteChatThread, fetchChatAgents, fetchChatThread, sendChatMessage, updateChatThread } from "../api/client";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
 import { useBoardContext } from "../board/BoardContext";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ChatThread } from "../types";
+import { timeInState } from "../time";
 
 export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Element {
   const { threads, messagesForThread, status, dispatch, pushError } = useBoardContext();
@@ -19,6 +22,12 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
   const [loading, setLoading] = useState(Boolean(selectedId));
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedThreads, setArchivedThreads] = useState<ChatThread[]>([]);
+  const [agentFilter, setAgentFilter] = useState("all");
+  const [agents, setAgents] = useState<string[]>([]);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [switcherQuery, setSwitcherQuery] = useState("");
 
   useEffect(() => {
     if (!selectedId) {
@@ -54,11 +63,34 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
     }
   }, [selectedId, threads]);
 
+  useEffect(() => {
+    fetchChatAgents().then(setAgents).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!showArchived) return;
+    fetch("/api/threads?archived=true")
+      .then((response) => response.json() as Promise<{ threads: ChatThread[] }>)
+      .then((result) => setArchivedThreads(result.threads))
+      .catch(() => undefined);
+  }, [showArchived]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSwitcherOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const openNewThread = async (): Promise<void> => {
     if (creating) return;
     setCreating(true);
     try {
-      const thread = await createChatThread({ agent_id: "builder" });
+      const thread = await createChatThread({ agent_id: agents[0] ?? "builder" });
       dispatch({ type: "thread.created", payload: { thread }, timestamp: new Date().toISOString() });
       void navigate(`/chat/${thread.id}`);
     } catch (error) {
@@ -68,10 +100,32 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
     }
   };
 
+  const allThreads = showArchived ? [...threads, ...archivedThreads.filter((archived) => !threads.some((thread) => thread.id === archived.id))] : threads;
+  const visibleThreads = allThreads.filter((thread) => (agentFilter === "all" || thread.agent_id === agentFilter) && (showArchived || !thread.archived));
+  const mutateThread = async (thread: ChatThread, input: Parameters<typeof updateChatThread>[1]): Promise<void> => {
+    try {
+      const updated = await updateChatThread(thread.id, input);
+      dispatch({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : "Unable to update the thread.");
+    }
+  };
+  const discardThread = async (thread: ChatThread): Promise<void> => {
+    if (!window.confirm(`Discard ${thread.title}? This cannot be undone.`)) return;
+    try {
+      await deleteChatThread(thread.id);
+      dispatch({ type: "thread.deleted", payload: { id: thread.id }, timestamp: new Date().toISOString() });
+      if (selectedId === thread.id) void navigate("/chat");
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : "Unable to discard the thread.");
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <aside className={cn("w-full shrink-0 border-b border-border bg-panel md:w-72 md:border-r md:border-b-0", selectedId && "hidden md:block")}>
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="border-b border-border px-4 py-3">
+          <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold">Threads</p>
             <p className="text-xs text-muted">{status === "open" ? "Connected" : "Reconnecting"}</p>
@@ -80,25 +134,52 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
             <Plus aria-hidden />
             New
           </Button>
+          </div>
+          <div className="mt-3 flex gap-2">
+            <label className="sr-only" htmlFor="agent-filter">Filter agents</label>
+            <select id="agent-filter" value={agentFilter} onChange={(event) => setAgentFilter(event.target.value)} className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2 text-xs">
+              <option value="all">All agents</option>
+              {agents.map((agent) => <option key={agent} value={agent}>{agent}</option>)}
+            </select>
+            <Button type="button" size="icon-sm" variant="outline" onClick={() => setSwitcherOpen(true)} aria-label="Switch thread" title="Switch thread (Cmd/Ctrl+K)"><Search aria-hidden /></Button>
+          </div>
         </div>
         <ScrollArea className="max-h-[calc(100svh-11rem)] md:h-[calc(100svh-7rem)] md:max-h-none">
           <div className="p-2">
-            {threads.length === 0 && <p className="px-3 py-8 text-center text-sm text-muted">No conversations yet.</p>}
-            {threads.map((thread) => (
-              <Link key={thread.id} href={`/chat/${thread.id}`} className={cn("mb-1 flex items-start gap-3 rounded-md px-3 py-3 transition-colors hover:bg-secondary", thread.id === selectedId && "bg-secondary")}>
+            {visibleThreads.length === 0 && <p className="px-3 py-8 text-center text-sm text-muted">{showArchived ? "No matching conversations." : "No conversations yet."}</p>}
+            {visibleThreads.map((thread) => (
+              <div key={thread.id} className={cn("group mb-1 rounded-md transition-colors hover:bg-secondary", thread.id === selectedId && "bg-secondary")}>
+                <Link href={`/chat/${thread.id}`} className="flex items-start gap-3 px-3 py-2.5">
                 <MessageSquare aria-hidden className="mt-0.5 size-4 shrink-0 text-muted" />
                 <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">{thread.title}</span>
-                  <span className="mt-1 flex items-center gap-1.5 text-xs text-muted"><StatusDot status={thread.status} />{thread.agent_id}</span>
+                  <span className="flex items-center gap-1 truncate text-sm font-medium">{thread.pinned && <Pin aria-hidden className="size-3 text-primary" />}{thread.title}</span>
+                  <span className="mt-1 flex items-center gap-1.5 text-xs text-muted"><StatusDot status={thread.status} />{thread.agent_id} · {timeInState(thread.last_message_at ?? thread.updated_at)}</span>
                 </span>
-              </Link>
+                </Link>
+                <div className="hidden items-center justify-end gap-0.5 px-2 pb-1 group-hover:flex">
+                  <Button type="button" size="icon-xs" variant="ghost" onClick={() => void mutateThread(thread, { pinned: !thread.pinned })} aria-label={thread.pinned ? "Unpin thread" : "Pin thread"}><Pin aria-hidden /></Button>
+                  <Button type="button" size="icon-xs" variant="ghost" onClick={() => void mutateThread(thread, { archived: !thread.archived })} aria-label={thread.archived ? "Unarchive thread" : "Archive thread"}><Archive aria-hidden /></Button>
+                  {thread.status !== "closed" && <Button type="button" size="icon-xs" variant="ghost" onClick={() => void mutateThread(thread, { status: "closed" })} aria-label="Close thread"><Check aria-hidden /></Button>}
+                  {thread.status === "draft" && <Button type="button" size="icon-xs" variant="ghost" onClick={() => void discardThread(thread)} aria-label="Discard thread"><X aria-hidden /></Button>}
+                </div>
+              </div>
             ))}
+            <button type="button" className="mt-2 w-full px-3 text-left text-xs text-muted hover:text-text" onClick={() => setShowArchived((value) => !value)}>{showArchived ? "Hide archived" : "Show archived"}</button>
           </div>
         </ScrollArea>
       </aside>
       <section className={cn("min-h-0 flex-1", !selectedId && "hidden md:flex")}>
          {selectedId ? <ChatPane thread={selected} seeded={seeded} live={messagesForThread(selectedId)} loading={loading} loadError={loadError} onRetryLoad={() => setLoadAttempt((attempt) => attempt + 1)} onBack={() => void navigate("/chat")} /> : <EmptyChat onNew={() => void openNewThread()} />}
       </section>
+      <Dialog open={switcherOpen} onOpenChange={setSwitcherOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Switch thread</DialogTitle><DialogDescription>Search titles, agents, and recent activity.</DialogDescription></DialogHeader>
+          <Input autoFocus value={switcherQuery} onChange={(event) => setSwitcherQuery(event.target.value)} placeholder="Search threads..." />
+          <div className="max-h-72 space-y-1 overflow-y-auto">
+            {threads.filter((thread) => !thread.archived && `${thread.title} ${thread.agent_id}`.toLowerCase().includes(switcherQuery.toLowerCase())).map((thread) => <button key={thread.id} type="button" className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-secondary" onClick={() => { setSwitcherOpen(false); setSwitcherQuery(""); void navigate(`/chat/${thread.id}`); }}><StatusDot status={thread.status} /><span className="min-w-0 flex-1 truncate text-sm">{thread.title}</span><span className="text-xs text-muted">{thread.agent_id}</span></button>)}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

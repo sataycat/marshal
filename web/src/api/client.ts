@@ -150,10 +150,16 @@ export async function updateTaskSpec(slug: string, specMarkdown: string): Promis
   return body.task;
 }
 
-export async function fetchChatThreads(): Promise<ChatThread[]> {
-  const res = await fetch("/api/threads");
+export async function fetchChatThreads(includeArchived = false): Promise<ChatThread[]> {
+  const res = await fetch(`/api/threads${includeArchived ? "?archived=true" : ""}`);
   const body = await jsonOrThrow<{ threads: ChatThread[] }>(res);
   return body.threads;
+}
+
+export async function fetchChatAgents(): Promise<string[]> {
+  const res = await fetch("/api/chat-agents");
+  const body = await jsonOrThrow<{ agents: string[] }>(res);
+  return body.agents;
 }
 
 export async function createChatThread(input: { agent_id: string }): Promise<ChatThread> {
@@ -164,6 +170,16 @@ export async function createChatThread(input: { agent_id: string }): Promise<Cha
   });
   const body = await jsonOrThrow<{ thread: ChatThread }>(res);
   return body.thread;
+}
+
+export async function updateChatThread(id: string, input: { title?: string; status?: ChatThread["status"]; archived?: boolean; pinned?: boolean }): Promise<ChatThread> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+  return (await jsonOrThrow<{ thread: ChatThread }>(res)).thread;
+}
+
+export async function deleteChatThread(id: string): Promise<void> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await jsonOrThrow<{ deleted: boolean }>(res);
 }
 
 export async function fetchChatThread(id: string): Promise<{ thread: ChatThread; messages: ChatMessage[] }> {

@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { appendChatMessage, createChatThread, getChatThread, listChatMessages, listChatThreads, updateChatThread } from "./store.js";
+import { appendChatMessage, createChatThread, deleteChatThread, getChatThread, listChatMessages, listChatThreads, updateChatThread } from "./store.js";
 
 describe("chat thread store", () => {
   it("creates a draft, persists messages, and activates on the first message", () => {
@@ -31,5 +31,14 @@ describe("chat thread store", () => {
     const otherRoot = mkdtempSync(join(tmpdir(), "marshal-chat-store-"));
     const thread = createChatThread({ agentId: "agent-a" }, root);
     expect(() => getChatThread(thread.id, otherRoot)).toThrow("Chat thread not found");
+  });
+
+  it("deletes a thread and its messages", () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-chat-store-"));
+    const thread = createChatThread({ agentId: "agent-a" }, root);
+    appendChatMessage(thread.id, "user", "discard me", root);
+    deleteChatThread(thread.id, root);
+    expect(listChatThreads(root, true)).toEqual([]);
+    expect(() => getChatThread(thread.id, root)).toThrow("Chat thread not found");
   });
 });

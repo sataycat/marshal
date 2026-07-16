@@ -45,6 +45,7 @@ export const SpecMessageType = "spec.message";
 export const ThreadCreatedType = "thread.created";
 export const ThreadUpdatedType = "thread.updated";
 export const ThreadMessageType = "thread.message";
+export const ThreadDeletedType = "thread.deleted";
 export const ThreadEventType = "thread.event";
 
 export interface SpecMessagePayload {
@@ -151,4 +152,8 @@ export function publishThreadUpdated(bus: EventBus, thread: ChatThread): void {
 
 export function publishThreadMessage(bus: EventBus, threadId: string, message: ChatMessage): void {
   bus.publish(ThreadMessageType, { threadId, message });
+}
+
+export function publishThreadDeleted(bus: EventBus, id: string): void {
+  bus.publish(ThreadDeletedType, { id });
 }
