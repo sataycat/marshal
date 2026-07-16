@@ -60,6 +60,7 @@ import {
   updateChatThread,
 } from "../chat/store.js";
 import { publishThreadCreated, publishThreadMessage, publishThreadUpdated } from "./bus.js";
+import { ChatTurnBusyError, ChatTurnRunner } from "./chat-turn.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -99,6 +100,7 @@ export interface BuildAppOptions {
   bus?: EventBus;
   webDir?: string;
   specAgent?: Agent;
+  chatAgent?: Agent;
 }
 
 export function defaultWebDistDir(): string {
@@ -115,7 +117,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
   registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent);
-  registerChatRoutes(app, root, bus);
+  registerChatRoutes(app, root, bus, options.chatAgent);
   registerStaticRoutes(app, webDir);
   app.notFound((c) => spaNotFound(c, webDir));
   app.onError((err, c) => {
@@ -333,11 +335,15 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof ChatThreadNotFoundError) {
     return new ApiError(404, err.message, "thread_not_found");
   }
+  if (err instanceof ChatTurnBusyError) {
+    return new ApiError(409, err.message, "thread_busy");
+  }
   logger.error({ err }, "Unexpected error in task HTTP handler");
   return new ApiError(500, "Internal server error", "internal_error");
 }
 
-function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus | undefined): void {
+function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus | undefined, chatAgent?: Agent): void {
+  const turns = new ChatTurnRunner({ root, bus, agent: chatAgent });
   app.get("/api/threads", (c) => c.json({ threads: listChatThreads(root, c.req.query("archived") === "true") }));
   app.post("/api/threads", async (c) => {
     const body = await readJsonObject(c, new Set(["agent_id", "cwd", "title", "task_slug"]));
@@ -402,6 +408,26 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
         publishThreadUpdated(bus, getChatThread(threadId, root));
       }
       return c.json({ message }, 201);
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.post("/api/threads/:id/send", async (c) => {
+    const body = await readJsonObject(c, new Set(["content"]));
+    if (body.content === undefined) throw new ApiError(422, "content is required", "missing_field");
+    const content = assertString(body.content, "content");
+    if (!content.trim()) throw new ApiError(422, "content must not be empty", "invalid_field");
+    try {
+      const result = await turns.send(c.req.param("id"), content);
+      return c.json(result, 201);
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.post("/api/threads/:id/cancel", async (c) => {
+    try {
+      await turns.cancel(c.req.param("id"));
+      return c.json({ cancelled: true });
     } catch (err) {
       throw mapDomainError(err);
     }

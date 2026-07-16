@@ -128,3 +128,11 @@ export function appendChatMessage(id: string, role: ChatMessageRole, content: st
   });
   return rowToMessage(tx());
 }
+
+export function updateChatMessage(id: number, content: string, root?: string): ChatMessage {
+  const db = openDb(root);
+  db.prepare("UPDATE chat_messages SET content = ? WHERE id = ?").run(content, id);
+  const row = db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  if (!row) throw new Error(`Chat message not found: ${id}`);
+  return rowToMessage(row);
+}

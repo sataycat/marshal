@@ -45,6 +45,7 @@ export const SpecMessageType = "spec.message";
 export const ThreadCreatedType = "thread.created";
 export const ThreadUpdatedType = "thread.updated";
 export const ThreadMessageType = "thread.message";
+export const ThreadEventType = "thread.event";
 
 export interface SpecMessagePayload {
   taskSlug: string;

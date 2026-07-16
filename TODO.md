@@ -37,7 +37,7 @@ Slice 1 ──> Slice 2 ──> Slice 3 ──> Slice 4 ──> Slice 5
 
 **Outcome:** The daemon can create, list, open, and update a thread without starting an agent process.
 
-### Slice 2 — First Chat Turn
+### Slice 2 — First Chat Turn [done]
 
 **Goal:** Send one message to a configured ACP agent through a thread.
 
