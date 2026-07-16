@@ -90,8 +90,10 @@ describe("M0 loop integration (CLI + orchestrator)", () => {
     writeFileSync(
       globalConfigPath,
       JSON.stringify({
-        acpx: { bin: "acpx", version: ">=0.12.0 <0.13.0" },
-        agents: { builder: "opencode", validator: "pi" },
+        agents: {
+          builder: { id: "opencode", command: "opencode", args: ["acp"] },
+          validator: { id: "pi", command: "pi-acp", args: [] },
+        },
         worktree: { root: worktreeRoot },
       }),
     );

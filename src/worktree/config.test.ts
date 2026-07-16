@@ -5,6 +5,7 @@ import {
   DEFAULT_MAX_RETRIES,
   MissingAgentIdError,
   resolveAgentId,
+  resolveAgentCommand,
   resolveDaemonBind,
   resolveMaxRetries,
   type GlobalConfig,
@@ -31,39 +32,67 @@ describe("resolveAgentId (ADR-023: no per-role defaults)", () => {
       }
     })();
     expect(err?.message).toContain("agents.builder");
-    expect(err?.message).toContain("acpx.sh/agents.html");
+    expect(err?.message).toContain("direct ACP command");
   });
 
   it("throws MissingAgentIdError for validator when only builder is set", () => {
-    expect(() => resolveAgentId("validator", { agents: { builder: "codex" } })).toThrow(
-      MissingAgentIdError,
-    );
+    expect(() =>
+      resolveAgentId("validator", {
+        agents: { builder: { id: "codex", command: "codex-acp", args: [] } },
+      }),
+    ).toThrow(MissingAgentIdError);
   });
 
   it("throws MissingAgentIdError for specAuthor without falling back to builder", () => {
     expect(() =>
-      resolveAgentId("specAuthor", { agents: { builder: "codex", validator: "claude" } }),
+      resolveAgentId("specAuthor", {
+        agents: {
+          builder: { id: "codex", command: "codex-acp", args: [] },
+          validator: { id: "claude", command: "claude-acp", args: [] },
+        },
+      }),
     ).toThrow(MissingAgentIdError);
   });
 
   it("returns the configured builder id", () => {
-    const config: GlobalConfig = { agents: { builder: "codex" } };
+    const config: GlobalConfig = {
+      agents: { builder: { id: "codex", command: "codex-acp", args: [] } },
+    };
     expect(resolveAgentId("builder", config)).toBe("codex");
   });
 
   it("returns the configured validator id", () => {
-    const config: GlobalConfig = { agents: { validator: "claude" } };
+    const config: GlobalConfig = {
+      agents: { validator: { id: "claude", command: "claude-acp", args: [] } },
+    };
     expect(resolveAgentId("validator", config)).toBe("claude");
   });
 
   it("returns the configured specAuthor id", () => {
-    const config: GlobalConfig = { agents: { specAuthor: "opencode" } };
+    const config: GlobalConfig = {
+      agents: { specAuthor: { id: "opencode", command: "opencode", args: ["acp"] } },
+    };
     expect(resolveAgentId("specAuthor", config)).toBe("opencode");
   });
 
   it("passes through a custom agent id end-to-end (ADR-019)", () => {
-    const config: GlobalConfig = { agents: { builder: "claude-code" } };
+    const config: GlobalConfig = {
+      agents: { builder: { id: "claude-code", command: "claude-agent-acp", args: [] } },
+    };
     expect(resolveAgentId("builder", config)).toBe("claude-code");
+  });
+
+  it("resolves the id and command from a direct ACP configuration", () => {
+    const command = { id: "opencode", command: "npx", args: ["-y", "opencode-ai", "acp"] };
+    const config: GlobalConfig = { agents: { builder: command } };
+    expect(resolveAgentId("builder", config)).toBe("opencode");
+    expect(resolveAgentCommand("builder", config)).toEqual(command);
+  });
+
+  it("rejects a retired string configuration", () => {
+    expect(() =>
+      resolveAgentCommand("builder", { agents: { builder: "codex" } } as unknown as GlobalConfig),
+    ).toThrow(/String agent IDs are no longer supported/);
   });
 
   it("exposes the role on the error", () => {

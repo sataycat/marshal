@@ -28,7 +28,7 @@ Deployment target is a single box or a VPS. Models are accessed via API; "local"
 
 A daemon owns the orchestrator, the worktree manager, the agent layer, the validation gate, the state, and the HTTP + WebSocket API. State is per-repo and discovered via the cwd-walked repo root. Clients (the web board, the CLI, future TUI) are thin adapters over the same API.
 
-The agent layer targets the [Agent Client Protocol](https://agentclientprotocol.com) and shells out to [acpx](https://github.com/openclaw/acpx) for session persistence, prompt queueing, cancel, cwd sandboxing, permission modes, and structured typed output. The acpx surface is pinned by semver; the adapter around it is the only place that knows about acpx's CLI grammar. This isolates Marshal from a single fast-moving tool — the safety story is the protocol, not any vendor.
+The agent layer targets the [Agent Client Protocol](https://agentclientprotocol.com) directly through the official TypeScript SDK. Marshal owns process lifecycle, permission policy, timeout, cancellation, and event mapping behind its stable `Agent` interface. Structured executable commands are required for every role. The safety and portability contract is ACP.
 
 A task's lifecycle is `backlog → ready → building → validating → review → done`, with human-driven escape hatches out of `building`, `validating`, and `review` back to earlier states. The spec is mutable in SQLite while the task is in `backlog`; the freeze at the Ready transition commits it to the task branch as the immutable build contract.
 
@@ -59,11 +59,11 @@ A per-task spend ceiling is a non-functional requirement alongside the step budg
 
 The daemon's HTTP + WebSocket API can spawn processes with file/exec permissions on request. It is therefore an RCE-as-a-service surface when reachable beyond localhost. The daemon binds to `127.0.0.1` only by default. Any exposure beyond localhost requires an authenticated tunnel or token-based auth. An unauthenticated listener reachable beyond localhost is never acceptable.
 
-ACP and acpx do **not** sandbox the agent. The agent runs on the host with its own CLI file/exec permissions, and headless runs need a permissive profile because there is no TTY to approve prompts. Isolation — running the builder inside a container or throwaway VM scoped to the task worktree — is therefore the operator's responsibility. Running approve-all agents bare on the host is unsafe in any scenario where the agent can reach paths beyond the task worktree.
+ACP does **not** sandbox the agent. The agent runs on the host with its own CLI file/exec permissions, and headless runs need a permissive profile because there is no TTY to approve prompts. Isolation — running the builder inside a container or throwaway VM scoped to the task worktree — is therefore the operator's responsibility. Running approve-all agents bare on the host is unsafe in any scenario where the agent can reach paths beyond the task worktree.
 
 ## 8. Build sequencing
 
-- **M0** — vertical slice / go-no-go. Daemon spawns the configured builder via acpx on a Ready task, runs headless in a worktree to completion, hands the diff to the configured validator, and routes pass/fail through the state machine. No UI. Proves or kills the whole design.
+- **M0** — vertical slice / go-no-go. Daemon spawns the configured builder through the `Agent` interface on a Ready task, runs headless in a worktree to completion, hands the diff to the configured validator, and routes pass/fail through the state machine. No UI. Proves or kills the whole design.
 - **M1** — control plane. HTTP + WebSocket API, Kanban board, task lifecycle visible and driveable from the browser, local merge flow.
 - **M2** — the gate, first-class. Two-level verification, decorrelated validator with the discipline of §4, retry/escalation routing made load-bearing. The differentiator; invest here.
 - **M3** — more agents. Mostly config, not code.
@@ -79,6 +79,5 @@ ACP and acpx do **not** sandbox the agent. The agent runs on the host with its o
 
 - **vibe kanban** (BloopAI) — the board/worktree/PR model; community-maintained after Bloop's shutdown. The shape Marshal's M1 inherits.
 - **no-mistakes** (kunchenguid) — local git proxy that runs an AI validation pipeline in a disposable worktree and forwards a clean PR only after checks pass. The gate model to steal.
-- **ACPX / OpenClaw** (openclaw org) — headless ACP client and agent gateway.
 - **ACP** (Zed) — the agent-editor protocol standard; the durable substrate.
-- **opencode**, **pi** — early executors used to prove the loop; any acpx-supported agent is now a config choice.
+- **opencode**, **pi** — early executors used to prove the loop; any ACP-compatible executable is now a config choice.

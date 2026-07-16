@@ -34,7 +34,13 @@ function initAgentConfig(root: string): void {
   const cfgPath = join(root, ".marshal", "config.json");
   writeFileSync(
     cfgPath,
-    JSON.stringify({ agents: { builder: "codex", validator: "claude", specAuthor: "opencode" } }),
+    JSON.stringify({
+      agents: {
+        builder: { id: "codex", command: "codex-acp", args: [] },
+        validator: { id: "claude", command: "claude-agent-acp", args: [] },
+        specAuthor: { id: "opencode", command: "opencode", args: ["acp"] },
+      },
+    }),
   );
   process.env.MARSHAL_GLOBAL_CONFIG = cfgPath;
 }

@@ -2,13 +2,14 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
+import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
+import type { AgentCommand } from "../agent/types.js";
 import {
-  ACPX_INSTALL_PIN,
-  DEFAULT_VERSION_RANGE,
-  satisfiesVersionRange,
-} from "../agent/acpx-adapter.js";
-import { DEFAULT_MAX_RETRIES, type AgentRole, type GlobalConfig } from "../worktree/config.js";
-import { ACPX_AUTH_DOCS, AGENT_INSTALL_HINTS } from "./hints.js";
+  DEFAULT_MAX_RETRIES,
+  isAgentCommand,
+  type AgentRole,
+  type GlobalConfig,
+} from "../worktree/config.js";
 
 export type CheckStatus = "ok" | "missing" | "warning" | "fail";
 
@@ -54,13 +55,6 @@ export const defaultRunCommand: CommandRunner = (bin, args) =>
   });
 
 export const REQUIRED_NODE_MAJOR = 18;
-
-// `ACPX_ACCEPT_RANGE` is what an already-installed acpx must satisfy; it is
-// passed to `checkAcpx` and written into `config.acpx.version`. `ACPX_INSTALL_PIN`
-// is the exact version string used in `npm i -g acpx@...` install hints. See
-// ADR-023 Decision 6 and the doc comment in `acpx-adapter.ts`.
-export const ACPX_ACCEPT_RANGE = DEFAULT_VERSION_RANGE;
-export { ACPX_INSTALL_PIN };
 
 function ok(label: string, detail?: string): CheckResult {
   return { label, status: "ok", detail };
@@ -115,68 +109,6 @@ async function checkPnpm(runCmd: CommandRunner): Promise<CheckResult> {
 }
 
 // -----------------------------------------------------------------------------
-// Phase 2: ACPX
-// -----------------------------------------------------------------------------
-
-export interface AcpxCheckOptions {
-  binPath: string;
-  versionRange: string;
-}
-
-export async function checkAcpx(
-  runCmd: CommandRunner,
-  opts: AcpxCheckOptions,
-): Promise<CheckResult[]> {
-  return [await checkAcpxPath(runCmd, opts.binPath), await checkAcpxVersion(runCmd, opts)];
-}
-
-async function checkAcpxPath(runCmd: CommandRunner, binPath: string): Promise<CheckResult> {
-  if (binPath !== "acpx") {
-    if (!existsSync(binPath)) {
-      return fail(
-        "acpx",
-        `not found at ${binPath}`,
-        "install acpx",
-        "https://github.com/openclaw/acpx",
-      );
-    }
-    return ok("acpx", binPath);
-  }
-  const r = await runCmd("which", ["acpx"]);
-  if (r.notFound || r.code !== 0 || !r.stdout.trim()) {
-    return fail(
-      "acpx",
-      "not on PATH",
-      `npm i -g acpx@${ACPX_INSTALL_PIN}`,
-      "https://github.com/openclaw/acpx",
-    );
-  }
-  return ok("acpx", r.stdout.trim());
-}
-
-async function checkAcpxVersion(
-  runCmd: CommandRunner,
-  opts: AcpxCheckOptions,
-): Promise<CheckResult> {
-  const r = await runCmd(opts.binPath, ["--version"]);
-  if (r.notFound) {
-    return fail("acpx version", "acpx not installed", `npm i -g acpx@${ACPX_INSTALL_PIN}`);
-  }
-  if (r.code !== 0) {
-    return fail("acpx version", `acpx --version failed: ${(r.stderr || r.stdout).trim()}`);
-  }
-  const version = r.stdout.trim();
-  if (!satisfiesVersionRange(version, opts.versionRange)) {
-    return warn(
-      "acpx version",
-      `found ${version}, expected ${opts.versionRange}`,
-      `npm i -g acpx@${ACPX_INSTALL_PIN}`,
-    );
-  }
-  return ok("acpx version", version);
-}
-
-// -----------------------------------------------------------------------------
 // Phase 3: agent discovery
 // -----------------------------------------------------------------------------
 
@@ -186,128 +118,36 @@ export interface AgentCheckResult {
   handshake: CheckResult;
 }
 
-export async function checkAgent(
-  runCmd: CommandRunner,
-  agentId: string,
-  acpxBin: string,
+export async function checkDirectAgent(
+  command: AgentCommand,
   role: AgentRole,
   tmpDir: string,
 ): Promise<AgentCheckResult> {
-  return {
-    role,
-    agentId,
-    handshake: await checkAgentHandshake(runCmd, agentId, acpxBin, tmpDir),
-  };
-}
-
-// ADR-024 Decision 2: the "is this agent linked and usable" check is a
-// zero-cost acpx session probe — `acpx <agent> sessions new` (ACP initialize +
-// session/new, no LLM prompt, zero tokens) followed by `sessions close` for
-// cleanup. This replaces the old `exec 'hello'` handshake (which consumed
-// tokens) and the `--help` pre-check (which used an undocumented probe
-// surface). If `sessions new` fails, `sessions close` is skipped.
-async function checkAgentHandshake(
-  runCmd: CommandRunner,
-  agentId: string,
-  acpxBin: string,
-  tmpDir: string,
-): Promise<CheckResult> {
-  const r = await runCmd(acpxBin, [
-    "--cwd",
-    tmpDir,
-    "--timeout",
-    "10",
-    "--format",
-    "json",
-    agentId,
-    "sessions",
-    "new",
-  ]);
-  if (r.notFound) {
-    return warn(`${agentId} handshake`, "acpx not installed");
-  }
-  if (r.code !== 0) {
-    // ADR-022 Decision 2: this is the authoritative "can this agent run" probe.
-    // Surface the agent's own stderr/stdout verbatim and point at the agent's
-    // docs (curated hint) or the ACPX docs as a fallback. Marshal never names a
-    // provider env var — auth diagnosis lives with the agent and ACPX, where it
-    // belongs.
-    const hint = AGENT_INSTALL_HINTS[agentId];
-    const docs = hint?.docs ?? ACPX_AUTH_DOCS;
-    const fix = hint
-      ? `ensure \`${hint.acpxCommand}\` runs (acpx adapter command)`
-      : `install the '${agentId}' agent per its docs`;
-    const detail = `agent not available via acpx: ${
-      (r.stderr || r.stdout).trim() || `exit ${r.code}`
-    }`;
-    return warn(`${agentId} handshake`, detail, fix, docs);
-  }
-
-  // Clean up the probe session. If parsing fails or close fails, it is
-  // harmless — the session is ephemeral and pruned by acpx on next use.
-  const sessionName = parseProbeSessionId(r.stdout);
-  if (sessionName) {
-    await runCmd(acpxBin, [
-      "--cwd",
-      tmpDir,
-      agentId,
-      "sessions",
-      "close",
-      sessionName,
-    ]);
-  }
-
-  return ok(`${agentId} handshake`, "session created");
-}
-
-function parseProbeSessionId(stdout: string): string | null {
-  const line = stdout.split("\n").find((l) => l.trim().length > 0);
-  if (!line) return null;
+  const adapter = new SdkAcpAgentAdapter({ commands: [command] });
   try {
-    const record = JSON.parse(line) as Record<string, unknown>;
-    const name = record.name as string | undefined;
-    if (name) return name;
-    const recordId = record.recordId as string | undefined;
-    if (recordId) return recordId;
-    const id = record.id as string | undefined;
-    if (id) return id;
-  } catch {
-    // Non-JSON output; skip close.
+    const session = await adapter.spawn(tmpDir, command.id, {
+      sessionName: `marshal-doctor-${role}`,
+      permissionMode: "deny-all",
+      timeoutSeconds: 10,
+    });
+    await adapter.close(session);
+    return {
+      role,
+      agentId: command.id,
+      handshake: ok(`${command.id} handshake`, "ACP session created"),
+    };
+  } catch (err) {
+    return {
+      role,
+      agentId: command.id,
+      handshake: warn(
+        `${command.id} handshake`,
+        `direct ACP agent unavailable: ${err instanceof Error ? err.message : String(err)}`,
+        `verify agents.${role}.command and agents.${role}.args in ~/.marshal/config.json`,
+        "https://agentclientprotocol.com",
+      ),
+    };
   }
-  return null;
-}
-
-// -----------------------------------------------------------------------------
-// Phase 3 chooser: probe the ACPX built-in registry (ADR-023 Decision 4)
-// -----------------------------------------------------------------------------
-
-export interface AgentProbe {
-  agentId: string;
-  handshake: CheckResult;
-}
-
-export async function probeAgentCandidates(
-  runCmd: CommandRunner,
-  acpxBin: string,
-  tmpDir: string,
-): Promise<AgentProbe[]> {
-  const ids = Object.keys(AGENT_INSTALL_HINTS);
-  const probes: AgentProbe[] = [];
-  for (const agentId of ids) {
-    const handshake = await checkAgentHandshake(runCmd, agentId, acpxBin, tmpDir);
-    probes.push({ agentId, handshake });
-  }
-  return probes;
-}
-
-export function renderProbeLine(probe: AgentProbe, index: number): string {
-  const status = probe.handshake.status;
-  const icon = status === "ok" ? "✓" : status === "warning" ? "⚠" : "✗";
-  return `  [${index}] ${probe.agentId.padEnd(12)} ${icon} handshake ${status}`;
-}
-
-export function isProbeUsable(probe: AgentProbe): boolean {
-  return probe.handshake.status === "ok" || probe.handshake.status === "warning";
 }
 
 // -----------------------------------------------------------------------------
@@ -318,10 +158,6 @@ export function getGlobalConfigPath(): string {
   return process.env.MARSHAL_GLOBAL_CONFIG ?? resolve(homedir(), ".marshal", "config.json");
 }
 
-// "Machine already configured" = a prior onboarding wrote a complete-enough
-// config. A partial / hand-authored config that's missing acpx or the agent
-// roles does NOT count — `init` then runs the preflight and Phase 5 merges to
-// fill the gaps (ADR-020 Decision 1 + Phase 5).
 export function machineAlreadyConfigured(configPath: string = getGlobalConfigPath()): boolean {
   if (!existsSync(configPath)) return false;
   let parsed: unknown;
@@ -332,18 +168,17 @@ export function machineAlreadyConfigured(configPath: string = getGlobalConfigPat
   }
   if (typeof parsed !== "object" || parsed === null) return false;
   const cfg = parsed as GlobalConfig;
-  return Boolean(cfg.acpx && cfg.agents?.builder && cfg.agents?.validator);
+  const builder = cfg.agents?.builder;
+  const validator = cfg.agents?.validator;
+  return isAgentCommand(builder) && isAgentCommand(validator);
 }
 
 export function generateConfig(detected: {
-  acpxBin: string;
-  versionRange: string;
-  builder: string;
-  validator: string;
-  specAuthor?: string;
+  builder: AgentCommand;
+  validator: AgentCommand;
+  specAuthor?: AgentCommand;
 }): GlobalConfig {
   return {
-    acpx: { bin: detected.acpxBin || "acpx", version: detected.versionRange },
     agents: {
       builder: detected.builder,
       validator: detected.validator,
@@ -354,14 +189,15 @@ export function generateConfig(detected: {
 }
 
 export function mergeConfig(existing: GlobalConfig, patch: GlobalConfig): GlobalConfig {
-  const merged: GlobalConfig = { ...existing };
-  merged.acpx = {
-    ...patch.acpx,
-    ...existing.acpx,
-  };
+  const { acpx: _retiredAcpx, ...retained } = existing as GlobalConfig & { acpx?: unknown };
+  const merged: GlobalConfig = { ...retained };
   merged.agents = {
     ...patch.agents,
-    ...existing.agents,
+    ...(isAgentCommand(existing.agents?.builder) ? { builder: existing.agents.builder } : {}),
+    ...(isAgentCommand(existing.agents?.validator) ? { validator: existing.agents.validator } : {}),
+    ...(isAgentCommand(existing.agents?.specAuthor)
+      ? { specAuthor: existing.agents.specAuthor }
+      : {}),
   };
   merged.policy = {
     ...patch.policy,

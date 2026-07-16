@@ -9,8 +9,8 @@ See [`docs/PROJECT.md`](docs/PROJECT.md) for the design tenets and vision, and [
 - **Node.js ≥ 18** (ES2022).
 - **git**.
 - **A C++ toolchain** (`python3`, `make`, `g++` or `clang`) for `better-sqlite3`'s native build. Prebuilt binaries cover common platforms; the long tail needs the toolchain.
-- **[acpx](https://github.com/openclaw/acpx) on PATH** — the ACP client Marshal shells out to. Pin: `>=0.12.0 <0.13.0`.
-- **A builder agent and a validator agent reachable through ACPX.** Defaults: `opencode` (builder) and `pi` (validator). Any ACP-compatible agent works — see the [acpx agent registry](https://acpx.sh/agents.html).
+- **ACP agent commands.** Marshal connects directly through the official ACP SDK.
+- **A builder agent and a validator agent reachable through their configured commands.** Generated defaults use `npx -y opencode-ai acp` (builder/spec author) and `npx -y pi-acp` (validator).
 
 ## Install
 
@@ -25,7 +25,7 @@ cd your-repo
 marshal init
 ```
 
-`marshal init` is non-interactive. It checks system prereqs and acpx, writes `~/.marshal/config.json` (with the default `opencode` / `pi` / `opencode` role assignments), and creates `.marshal/` for per-repo state. If acpx is missing it prints the install command and halts — it does not run installs itself.
+`marshal init` is non-interactive. It checks system prerequisites, writes `~/.marshal/config.json` with structured direct ACP commands, and creates `.marshal/` for per-repo state. A legacy config containing string role IDs is migrated to the generated direct defaults; customize those commands afterward if needed.
 
 To verify a setup without mutating anything:
 
@@ -95,18 +95,48 @@ marshal daemon start [--interval <ms>] [--port <port>] [--host <addr>]
 
 ```jsonc
 {
-  "acpx": { "bin": "acpx", "version": ">=0.12.0 <0.13.0" },
   "agents": {
-    "builder": "opencode", // any ACPX agent id
-    "validator": "pi", // any ACPX agent id
-    "specAuthor": "opencode",
+    "builder": {
+      "id": "opencode",
+      "command": "npx",
+      "args": ["-y", "opencode-ai", "acp"],
+    },
+    "validator": {
+      "id": "pi",
+      "command": "npx",
+      "args": ["-y", "pi-acp"],
+    },
+    "specAuthor": {
+      "id": "opencode",
+      "command": "npx",
+      "args": ["-y", "opencode-ai", "acp"],
+    },
   },
   "policy": { "maxRetries": 2 },
   "daemon": { "host": "127.0.0.1", "port": 7433 },
 }
 ```
 
-Any agent in the [acpx registry](https://acpx.sh/agents.html) works — `claude`, `codex`, `gemini`, `kimi`, etc. The defaults are written by `marshal init`; edit the file to override. See [`docs/ARCHITECTURE.md` §0.6](docs/ARCHITECTURE.md#06-config-keys) for the full key reference.
+Any ACP-compatible executable can be used by configuring its command directly. The defaults are written by `marshal init`; edit the file to override:
+
+```json
+{
+  "agents": {
+    "builder": {
+      "id": "opencode",
+      "command": "npx",
+      "args": ["-y", "opencode-ai", "acp"]
+    },
+    "validator": {
+      "id": "codex",
+      "command": "npx",
+      "args": ["-y", "@agentclientprotocol/codex-acp"]
+    }
+  }
+}
+```
+
+Commands are executed directly without a shell. Optional `env` values are merged into the child process environment. String agent IDs are not supported.
 
 ### Per-repo (`marshal.json`)
 

@@ -52,8 +52,8 @@ A conversational interface that is the **sole Phase 1 UI surface**:
 - **Repo-level chat**: not scoped to a single task. For asking questions about the codebase, planning work, discussing architecture, or interacting with agents for ad-hoc tasks.
 - **Task-scoped chat** (Phase 2 bridge): the existing spec-authoring chat, upgraded to feel like a first-class conversation (streaming responses, markdown rendering, code blocks with syntax highlighting). Becomes a "thread with a task_slug" once the kanban arrives.
 - **Agent selector**: top-level dropdown for the active agent, with per-thread agent identity for history. See ADR-0002.
-- **Session management**: threads are Marshal-owned abstractions wrapping acpx sessions. Draft → Active → Closed lifecycle. See ADR-0002.
-- **Streaming**: messages stream via NDJSON from acpx, broadcast to the UI via the existing WebSocket bus.
+- **Session management**: threads are Marshal-owned abstractions wrapping ACP sessions. Draft → Active → Closed lifecycle. See ADR-0002.
+- **Streaming**: ACP events are mapped by the daemon and broadcast to the UI via the existing WebSocket bus.
 
 #### Board (Phase 2 — builds on chat foundation)
 
@@ -73,7 +73,7 @@ Once the kanban arrives, task-scoped threads emerge naturally from the Phase 1 c
 - **Repo-level chat**: not scoped to a single task. For asking questions about the codebase, planning work, discussing architecture, or interacting with agents for ad-hoc tasks.
 - **Task-scoped chat**: the existing spec-authoring chat, upgraded to feel like a first-class conversation (streaming responses, markdown rendering, code blocks with syntax highlighting).
 - **Seamless switching**: chat panel can dock beside the board or open full-screen on mobile. Task-scoped threads are reachable from both the chat surface and the task detail.
-- **Agent-backed**: threads hit the daemon API which routes to acpx. The daemon manages session lifecycle; the webapp renders the stream. See ADR-0002 for the session model.
+- **Agent-backed**: threads hit the daemon API, which routes to the configured direct ACP command. The daemon manages session lifecycle; the webapp renders the stream. See ADR-0002 for the session model.
 
 > **API gap**: The current API has spec-chat (`/api/tasks/:slug/spec-messages`) but no repo-level chat endpoint. ADR-0002 defines the thread/session model; daemon-side API additions for threads will be implemented as part of Phase 1 delivery.
 
@@ -130,13 +130,13 @@ Mobile: single-panel with bottom nav
 
 ## Child ADRs
 
-| ID        | Topic                                  | Status                 | Scope                                                             |
-| --------- | -------------------------------------- | ---------------------- | ----------------------------------------------------------------- |
-| ADR-0001a | Frontend infrastructure (consolidated) | Proposed               | Routing, responsive layout, performance budget, accessibility,    |
-|           |                                        |                        | code editing/syntax highlighting — absorbs former ADR-0001c/d/e/f |
-|           |                                        |                        | and the routing slot                                              |
-| ADR-0002  | Chat interface                          | Proposed               | 4-pane layout (sessions/files/editor+preview/chat), ACP event rendering, thinking + image upload, agent selector, thread model summary (session/permission/attachments deferred to child ADRs) |
-| ADR-0001b | ~~Chat architecture~~                  | Superseded by ADR-0002 | ~~Daemon API additions, WS event extensions, streaming protocol~~ |
+| ID        | Topic                                  | Status                 | Scope                                                                                                                                                                                          |
+| --------- | -------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ADR-0001a | Frontend infrastructure (consolidated) | Proposed               | Routing, responsive layout, performance budget, accessibility,                                                                                                                                 |
+|           |                                        |                        | code editing/syntax highlighting — absorbs former ADR-0001c/d/e/f                                                                                                                              |
+|           |                                        |                        | and the routing slot                                                                                                                                                                           |
+| ADR-0002  | Chat interface                         | Proposed               | 4-pane layout (sessions/files/editor+preview/chat), ACP event rendering, thinking + image upload, agent selector, thread model summary (session/permission/attachments deferred to child ADRs) |
+| ADR-0001b | ~~Chat architecture~~                  | Superseded by ADR-0002 | ~~Daemon API additions, WS event extensions, streaming protocol~~                                                                                                                              |
 
 ---
 

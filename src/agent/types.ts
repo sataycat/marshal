@@ -1,5 +1,12 @@
 export type AgentId = string;
 
+export interface AgentCommand {
+  id: AgentId;
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+}
+
 export interface AgentSession {
   agentId: AgentId;
   cwd: string;
@@ -30,7 +37,6 @@ export interface PromptOptions extends SpawnOptions {
 }
 
 export interface Agent {
-  // Any string; the id is passed to ACPX as-is.
   spawn(cwd: string, agentId: AgentId, opts?: SpawnOptions): Promise<AgentSession>;
   prompt(session: AgentSession, text: string, opts?: PromptOptions): AsyncIterable<AgentEvent>;
   cancel(session: AgentSession): Promise<void>;

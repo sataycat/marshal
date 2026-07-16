@@ -3,12 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initGlobalConfig, initRepoState, getRepoStateDir } from "../daemon/config.js";
 import { openDb } from "../db/index.js";
-import { AGENT_ID_DEFAULTS, type GlobalConfig } from "../worktree/config.js";
+import { AGENT_COMMAND_DEFAULTS, isAgentCommand, type GlobalConfig } from "../worktree/config.js";
 import {
-  ACPX_ACCEPT_RANGE,
-  ACPX_INSTALL_PIN,
-  checkAcpx,
-  checkAgent,
+  checkDirectAgent,
   checkSystemPrerequisites,
   defaultRunCommand,
   formatCheckLine,
@@ -25,9 +22,6 @@ export interface InitOptions {
   repoRoot?: string;
   configPath?: string;
   runCmd?: CommandRunner;
-  acpxBin?: string;
-  versionRange?: string;
-  installPin?: string;
 }
 
 export interface InitResult {
@@ -46,17 +40,12 @@ function print(line: string): void {
 /**
  * Non-interactive init flow (ADR-024):
  *   1. System prereqs (node, git, pnpm) — skipped if already configured.
- *   2. acpx hard-gate — fail → single install message, exit non-zero.
- *   3. Generate/merge config + initialize repo state.
+ *   2. Generate/merge direct ACP config + initialize repo state.
  */
 export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   const runCmd = options.runCmd ?? defaultRunCommand;
   const repoRoot = options.repoRoot ?? process.cwd();
   const configPath = options.configPath ?? getGlobalConfigPath();
-  const versionRange = options.versionRange ?? ACPX_ACCEPT_RANGE;
-  const installPin = options.installPin ?? ACPX_INSTALL_PIN;
-  const acpxBin = options.acpxBin ?? "acpx";
-
   const alreadyConfigured = machineAlreadyConfigured(configPath);
 
   // Phase 1 — system prerequisites (skipped on fast path).
@@ -68,17 +57,6 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
       return { ok: false, skippedMachine: false };
     }
   }
-
-  // Phase 2 — acpx hard-gate. Print a single message on failure instead of
-  // echoing each sub-check (path + version) redundantly.
-  const phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
-  if (phase2.some((r) => r.status === "fail")) {
-    print(
-      `✗ acpx is required. Install with \`npm i -g acpx@${installPin}\` and re-run \`marshal init\`.`,
-    );
-    return { ok: false, skippedMachine: false };
-  }
-  for (const r of phase2) print(formatCheckLine(r));
 
   // Fast path — machine already configured, just ensure repo state.
   if (alreadyConfigured) {
@@ -92,16 +70,20 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
 
   // Phase 3 — generate config from defaults, merge with existing, write.
   const existing = readGlobalConfig(configPath) ?? {};
-  const builderId = existing.agents?.builder ?? AGENT_ID_DEFAULTS.builder;
-  const validatorId = existing.agents?.validator ?? AGENT_ID_DEFAULTS.validator;
-  const specAuthorId = existing.agents?.specAuthor ?? AGENT_ID_DEFAULTS.specAuthor;
+  const builder = isAgentCommand(existing.agents?.builder)
+    ? existing.agents.builder
+    : AGENT_COMMAND_DEFAULTS.builder;
+  const validator = isAgentCommand(existing.agents?.validator)
+    ? existing.agents.validator
+    : AGENT_COMMAND_DEFAULTS.validator;
+  const specAuthor = isAgentCommand(existing.agents?.specAuthor)
+    ? existing.agents.specAuthor
+    : AGENT_COMMAND_DEFAULTS.specAuthor;
 
   const generated = generateConfig({
-    acpxBin,
-    versionRange,
-    builder: builderId,
-    validator: validatorId,
-    specAuthor: specAuthorId,
+    builder,
+    validator,
+    specAuthor,
   });
   const merged =
     existing && Object.keys(existing).length > 0 ? mergeConfig(existing, generated) : generated;
@@ -151,9 +133,6 @@ function printReady(): void {
 export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolean }> {
   const runCmd = options.runCmd ?? defaultRunCommand;
   const configPath = options.configPath ?? getGlobalConfigPath();
-  const versionRange = options.versionRange ?? ACPX_ACCEPT_RANGE;
-  const acpxBin = options.acpxBin ?? "acpx";
-
   const existing = readGlobalConfig(configPath) ?? {};
   const builderId = existing.agents?.builder;
   const validatorId = existing.agents?.validator;
@@ -163,10 +142,6 @@ export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolea
   const phase1 = await checkSystemPrerequisites(runCmd);
   for (const r of phase1) print(formatCheckLine(r));
   if (phase1.some((r) => r.status === "fail")) ok = false;
-
-  const phase2 = await checkAcpx(runCmd, { binPath: acpxBin, versionRange });
-  for (const r of phase2) print(formatCheckLine(r));
-  if (phase2.some((r) => r.status === "fail")) ok = false;
 
   const tmpDir = initTmpDir();
   for (const { role, id } of [
@@ -179,15 +154,26 @@ export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolea
           label: `agents.${role}`,
           status: "fail",
           detail: `not configured in ${configPath}`,
-          fix: `set agents.${role} in ~/.marshal/config.json (see https://acpx.sh/agents.html)`,
+          fix: `set agents.${role} to { id, command, args, env? } in ~/.marshal/config.json`,
         }),
       );
       ok = false;
       continue;
     }
-    // ADR-024 Decision 2: session probe is the authoritative "can this agent
-    // run" signal. No provider env presence check is emitted here.
-    const result = await checkAgent(runCmd, id, acpxBin, role, tmpDir);
+    if (!isAgentCommand(id)) {
+      print(
+        formatCheckLine({
+          label: `agents.${role}`,
+          status: "fail",
+          detail: "string agent IDs are no longer supported",
+          fix: `replace agents.${role} with { id, command, args, env? } in ~/.marshal/config.json`,
+          docs: "https://agentclientprotocol.com",
+        }),
+      );
+      ok = false;
+      continue;
+    }
+    const result = await checkDirectAgent(id, role, tmpDir);
     print(formatCheckLine(result.handshake));
   }
 

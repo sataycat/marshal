@@ -223,7 +223,12 @@ describe("spec chat HTTP contract", () => {
     const cfgDir = mkdtempSync(join(tmpdir(), "marshal-spec-api-cfg-"));
     const cfgPath = join(cfgDir, "config.json");
     process.env.MARSHAL_GLOBAL_CONFIG = cfgPath;
-    writeFileSync(cfgPath, JSON.stringify({ agents: { specAuthor: "opencode" } }));
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        agents: { specAuthor: { id: "opencode", command: "opencode", args: ["acp"] } },
+      }),
+    );
     bus = new EventBus();
     agent = new FakeSpecAgent([
       { type: "text", text: "Here are gaps...\n\n" },

@@ -101,15 +101,16 @@ One worktree per task, created at the Ready transition, reused by both builder a
 
 ## 5. Agent layer
 
-Marshal is agent-agnostic. The `Agent` interface (spawn, prompt, cancel, close) is the only abstraction the orchestrator depends on. The ACPX adapter is the sole implementation — Marshal shells out to the `acpx` CLI (never imports it as a library).
+Marshal is agent-agnostic. The `Agent` interface (spawn, prompt, cancel, close) is the only abstraction the orchestrator depends on. `SdkAcpAgentAdapter`, built on `@agentclientprotocol/sdk`, is the sole runtime implementation.
 
-- **`AgentId`** is a plain string. Any ACP-compatible agent works by config alone. No allowlist or registry at runtime.
-- **Session scope**: `(agentCommand, cwd, name)`. Builder and validator share the same worktree (`cwd`) but have distinct session names.
-- **Events**: ACPX streams NDJSON; the adapter maps ACP `session/update` notifications to a typed `AgentEvent` union (text, thinking, tool, permission, log, done, error). Unknown variants pass through as log events.
-- **Permission mode**: `approve-all` for all roles (headless, no TTY). ACPX handles permission enforcement.
-- **Version pin**: ACPX version is pinned by semver range. A mismatch logs a warning on daemon startup.
+- **Role configuration**: every role uses a structured `{ id, command, args, env? }` value. Commands are spawned directly without a shell. Legacy string values are invalid and `marshal init` replaces them with generated direct defaults.
+- **`AgentId`** remains a plain string inside the orchestrator. Runtime-specific command details stop at the adapter factory.
+- **Session scope**: builder and validator share the task worktree (`cwd`) but have distinct session names. Direct runs currently use one process and one ACP session per run; restart-resumable direct sessions are not claimed.
+- **Events**: the adapter maps ACP `session/update` notifications to the stable `AgentEvent` union (text, thinking, tool, permission, log, done, error). Unknown updates pass through as log events.
+- **Permission mode**: headless roles use explicit Marshal policy. The adapter selects allow/reject options by ACP permission-option kind; it never assumes the first option is safe.
+- **Diagnostics**: `marshal doctor` probes roles with ACP initialize + `session/new` without sending a model prompt.
 
-Misconfiguration surfaces at `spawn` time, not config load. An unknown agent produces a child-process error surfaced as a run event.
+Misconfiguration surfaces at first role resolution or `spawn`, not daemon boot. Invalid role shapes, missing executables, and ACP protocol failures become actionable errors.
 
 ---
 
@@ -157,7 +158,7 @@ Re-freezing creates a new commit (not an amend) — audit trail preserved.
 
 The daemon is an **RCE-as-a-service** surface — it spawns agents with file/exec permissions. It binds to `127.0.0.1` only. Any exposure beyond localhost requires an authenticated tunnel or token-based auth. An unauthenticated listener reachable beyond localhost is never acceptable.
 
-ACPX does **not** sandbox the agent. The agent runs on the host with its own permissions. Isolation (container, VM) is the operator's responsibility. The worktree is the current filesystem scope boundary — the agent could escape it.
+ACP does **not** sandbox the agent. The agent runs on the host with its own permissions. Isolation (container, VM) is the operator's responsibility. The worktree is the current filesystem scope boundary — the agent could escape it.
 
 Provider API keys are the user's responsibility. Marshal never reads or stores them.
 
@@ -172,11 +173,11 @@ If the daemon dies mid-build or mid-validate, the task is **not** auto-retried. 
 `marshal init` is **non-interactive** — running it is the consent. Flow:
 
 1. Check system prereqs (node, git, pnpm).
-2. Hard-gate on acpx presence. If missing, print the install command and exit. Marshal never installs acpx itself.
+2. Write structured direct ACP role defaults. Marshal never installs agent runtimes itself.
 3. Write `~/.marshal/config.json` with agent role defaults if not already configured.
 4. Create `.marshal/` and `.marshal/state.db` for the current repo.
 
-`marshal doctor` is the read-only diagnostic. It re-runs prereq checks and probes each configured agent via a zero-token ACPX session handshake (`sessions new` + `close`). Marshal never checks provider env vars (e.g. `OPENAI_API_KEY`) — the session probe is the authoritative "can this agent run" signal.
+`marshal doctor` is the read-only diagnostic. It re-runs prereq checks and probes each role with direct ACP initialize + `session/new`. Marshal never checks provider env vars (e.g. `OPENAI_API_KEY`) — the session probe is the authoritative "can this agent run" signal.
 
 ---
 

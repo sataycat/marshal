@@ -53,7 +53,13 @@ function initAgentConfig(root: string): void {
   const cfgPath = join(root, ".marshal", "config.json");
   writeFileSync(
     cfgPath,
-    JSON.stringify({ agents: { builder: "opencode", validator: "pi", specAuthor: "opencode" } }),
+    JSON.stringify({
+      agents: {
+        builder: { id: "opencode", command: "opencode", args: ["acp"] },
+        validator: { id: "pi", command: "pi-acp", args: [] },
+        specAuthor: { id: "opencode", command: "opencode", args: ["acp"] },
+      },
+    }),
   );
   process.env.MARSHAL_GLOBAL_CONFIG = cfgPath;
 }
@@ -376,7 +382,13 @@ describe("runOnce", () => {
   it("uses resolveAgentId('builder') for the builder agent, not a hard-coded constant", async () => {
     writeFileSync(
       process.env.MARSHAL_GLOBAL_CONFIG!,
-      JSON.stringify({ agents: { builder: "codex", validator: "pi", specAuthor: "opencode" } }),
+      JSON.stringify({
+        agents: {
+          builder: { id: "codex", command: "codex-acp", args: [] },
+          validator: { id: "pi", command: "pi-acp", args: [] },
+          specAuthor: { id: "opencode", command: "opencode", args: ["acp"] },
+        },
+      }),
     );
     const agent = new FakeAgent({
       events: [{ type: "done", stopReason: "end_turn" }],

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { cwd } from "node:process";
-import { AcpxAgentAdapter } from "../agent/acpx-adapter.js";
+import { createConfiguredAgent } from "../agent/configured-agent.js";
 import type { Agent, AgentEvent, AgentSession, SpawnOptions } from "../agent/types.js";
 import { logger } from "../logger.js";
 import { openDb } from "../db/index.js";
@@ -166,7 +166,7 @@ export async function buildTask(
   const task = getTask(slug, root);
 
   const manager = options.manager ?? new WorktreeManager(root ?? cwd());
-  const agent = options.agent ?? new AcpxAgentAdapter();
+  const agent = options.agent ?? createConfiguredAgent("builder");
   const builderAgentId = options.builderAgentId ?? resolveAgentId("builder");
   const runLog = new RunLog(root, options.bus);
 
@@ -339,7 +339,7 @@ export async function validateTask(
   const task = getTask(slug, root);
 
   const manager = options.manager ?? new WorktreeManager(root ?? cwd());
-  const agent = options.agent ?? new AcpxAgentAdapter();
+  const agent = options.agent ?? createConfiguredAgent("validator");
   const validatorAgentId = options.validatorAgentId ?? resolveAgentId("validator");
   const runLog = new RunLog(root, options.bus);
 

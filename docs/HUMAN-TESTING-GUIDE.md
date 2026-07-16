@@ -34,7 +34,7 @@ It is written for local-first testing on one machine.
 1. Node.js >= 18
 2. git
 3. pnpm (recommended; missing pnpm is warning-level in onboarding)
-4. `acpx` plus configured builder/validator/spec author agents
+4. Configured direct ACP commands for builder/validator/spec author agents
 
 ### Build
 
@@ -95,13 +95,13 @@ Expected:
 
 ### 3.4 Negative onboarding checks
 
-1. Temporarily hide `acpx` from `PATH`, run `marshal doctor`
+1. Replace one structured role with a legacy string ID, then run `marshal doctor`
 2. unset provider API keys, run `marshal doctor`
 3. if possible, run with older Node major (<18)
 
 Expected:
 
-- missing `acpx` is a **fail**
+- a string role ID is a **fail** with a structured-command migration hint
 - missing auth env is **warning**
 - old Node major is **fail**
 

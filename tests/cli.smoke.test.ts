@@ -21,7 +21,7 @@ describe("CLI smoke tests", () => {
 
   beforeEach(() => {
     // `marshal init` is non-interactive (ADR-024 Decision 3): it checks
-    // prerequisites and acpx, writes config with AGENT_ID_DEFAULTS, and
+    // prerequisites, writes structured direct ACP defaults, and
     // initializes repo state. Tests exercise the already-configured fast
     // path (ADR-020 Decision 1): a complete ~/.marshal/config.json
     // collapses phases 1–5.
@@ -30,8 +30,10 @@ describe("CLI smoke tests", () => {
     writeFileSync(
       globalConfigPath,
       JSON.stringify({
-        acpx: { bin: "acpx", version: ">=0.12.0 <0.13.0" },
-        agents: { builder: "opencode", validator: "pi" },
+        agents: {
+          builder: { id: "opencode", command: "opencode", args: ["acp"] },
+          validator: { id: "pi", command: "pi-acp", args: [] },
+        },
       }),
     );
     process.env.MARSHAL_GLOBAL_CONFIG = globalConfigPath;

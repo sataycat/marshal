@@ -1,6 +1,6 @@
 import { cwd } from "node:process";
 import type { Agent, AgentEvent, AgentSession, SpawnOptions } from "../agent/types.js";
-import { AcpxAgentAdapter } from "../agent/acpx-adapter.js";
+import { createConfiguredAgent } from "../agent/configured-agent.js";
 import { logger } from "../logger.js";
 import { getTask } from "../tasks/store.js";
 import { resolveAgentId } from "../worktree/config.js";
@@ -169,7 +169,7 @@ export async function runSpecAuthorTurn(
 
   const userMessage = appendSpecMessage(slug, "user", userContent, root);
 
-  const agent = options.agent ?? new AcpxAgentAdapter();
+  const agent = options.agent ?? createConfiguredAgent("specAuthor");
   const agentId: AgentId = options.agentId ?? resolveAgentId("specAuthor");
 
   const specMessages = listSpecMessages(slug, root);

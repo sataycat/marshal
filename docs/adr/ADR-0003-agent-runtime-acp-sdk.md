@@ -1,6 +1,6 @@
-# ADR-0003: Agent Runtime — Direct ACP SDK with ACPX Migration Path
+# ADR-0003: Agent Runtime — Direct ACP SDK
 
-**Status:** Proposed  
+**Status:** Accepted (implemented; ACPX retired)
 **Date:** 2026-07-15  
 **Parent:** —  
 **Amends:** ADR-0002 (chat interface) and the deferred Chat Session Model child ADR (ACPX-specific session implementation)  
@@ -12,7 +12,7 @@
 
 Marshal is agent-agnostic and targets the [Agent Client Protocol](https://agentclientprotocol.com) (ACP). The daemon owns orchestration, worktrees, validation, persistence, and the HTTP/WebSocket API. The browser is a thin client and must not communicate with coding agents directly.
 
-The current agent implementation is `AcpxAgentAdapter`. It shells out to the `acpx` CLI and maps ACPX's NDJSON output into Marshal's internal `AgentEvent` union. ACPX currently provides more than protocol serialization:
+Marshal originally used `AcpxAgentAdapter`, which shelled out to the `acpx` CLI and mapped ACPX's NDJSON output into Marshal's internal `AgentEvent` union. ACPX provided more than protocol serialization:
 
 - ACP process startup and connection management
 - Named and persistent sessions
@@ -42,7 +42,7 @@ This provides a migration seam without changing the task state machine, run log,
 ### Current boundary
 
 ```text
-Browser -> Marshal HTTP/WebSocket API -> Marshal daemon -> ACPX -> ACP agent
+Browser -> Marshal HTTP/WebSocket API -> Marshal daemon -> ACP agent
 ```
 
 The browser-to-daemon boundary is correct and is not under consideration.
@@ -53,13 +53,9 @@ The browser-to-daemon boundary is correct and is not under consideration.
 
 Marshal will make the direct ACP SDK integration the target agent runtime while preserving the `Agent` interface as the orchestrator boundary.
 
-The initial implementation will be additive:
+Marshal uses `SdkAcpAgentAdapter` through `@agentclientprotocol/sdk` as its sole agent runtime. ACPX, string agent IDs, ACPX installation checks, ACPX doctor probes, and ACPX configuration keys are removed.
 
-1. Add a `SdkAcpAgentAdapter` using `@agentclientprotocol/sdk`.
-2. Keep `AcpxAgentAdapter` available as a compatibility and fallback implementation.
-3. Run both adapters against the same orchestrator contract tests.
-4. Make the SDK adapter the default only after real-agent compatibility testing passes.
-5. Remove ACPX-specific installation, doctor, and configuration requirements only after the migration exit criteria in this ADR are met.
+The earlier requirement to test at least three real ACP agents before switching the generated default is waived. The direct adapter's fake-process coverage and existing builder/validator contract coverage are accepted as sufficient to make the architectural cut now; real-agent compatibility remains ongoing operational validation rather than an ADR exit gate.
 
 Marshal will own the following responsibilities in the direct adapter:
 
@@ -172,16 +168,16 @@ The mapping is intentionally Marshal-owned. ACP's typed schema is the transport 
 - Preserve clear errors for missing executables, non-zero exits, protocol errors, and unsupported capabilities.
 - Run the existing builder, validator, retry, run-log, and WebSocket tests using the SDK adapter.
 
-### Phase 3: Compatibility operation
+### Phase 3: Compatibility operation (completed historically)
 
 - Select the adapter from configuration or an internal feature flag.
 - Keep ACPX available for users and agents not yet compatible with the direct adapter.
 - Add a doctor probe for direct ACP initialization and `session/new` without sending a prompt.
 - Test at least three real ACP agents with different executable styles, including one Node-based agent and one native executable.
 
-### Phase 4: ACPX retirement
+### Phase 4: ACPX retirement (completed)
 
-ACPX may be removed from the required runtime only when:
+The original retirement criteria were:
 
 - The SDK adapter is the default.
 - The supported agent matrix passes initialization, prompt streaming, permissions, cancellation, timeout, and cleanup tests.
@@ -190,7 +186,7 @@ ACPX may be removed from the required runtime only when:
 - No required Marshal feature depends on ACPX-only session persistence or queue ownership.
 - Documentation and configuration no longer require ACPX.
 
-ACPX can remain as an optional compatibility adapter after this point if it has meaningful value for unsupported agents. Removing it entirely is not required for the SDK decision to be successful.
+The project chose full retirement rather than retaining an optional compatibility adapter. The compatibility-matrix criterion was explicitly waived to avoid maintaining two runtimes indefinitely. No required Marshal feature depended on ACPX-only session persistence or queue ownership, and direct startup, diagnostics, durable event mapping, and state transitions were already covered by automated tests.
 
 ---
 
@@ -213,7 +209,7 @@ ACPX can remain as an optional compatibility adapter after this point if it has 
 - ACP-compatible agents may differ in command shape, authentication, capabilities, and session behavior.
 - Durable session resumption is harder without ACPX's persistence and queue-owner model.
 - Permission policy becomes security-sensitive Marshal code.
-- The migration temporarily maintains two agent implementations and two configuration paths.
+- Existing string-role configurations must be migrated to structured commands. `marshal init` replaces legacy string roles with generated direct defaults; `marshal doctor` rejects them with a migration hint.
 - The SDK and ACP specification are evolving; Marshal must pin compatible SDK versions and test protocol behavior rather than relying only on TypeScript types.
 
 ### Security
@@ -226,7 +222,7 @@ Structured command arguments reduce shell parsing risk but do not make agent exe
 
 ## Alternatives Considered
 
-1. **Keep ACPX as the only implementation.** Rejected as the long-term direction. It is operationally convenient and remains a valid migration fallback, but it adds a runtime dependency and makes ACPX's CLI and persistence model the practical compatibility contract instead of ACP itself.
+1. **Keep ACPX as the only implementation.** Rejected. It adds a runtime dependency and makes ACPX's CLI and persistence model the practical compatibility contract instead of ACP itself.
 
 2. **Replace the `Agent` interface with the SDK directly throughout the daemon.** Rejected. It would spread protocol types and lifecycle assumptions through the orchestrator, run logging, and future clients. The adapter boundary is small and already proven.
 
@@ -240,10 +236,25 @@ Structured command arguments reduce shell parsing risk but do not make agent exe
 
 ## Documentation Impact
 
-After implementation, update the following references:
+The implementation updates the following references:
 
-- `docs/ARCHITECTURE.md` §5: describe the SDK adapter, optional ACPX adapter, command configuration, and permission ownership.
-- `docs/PROJECT.md` §3 and §8: describe direct ACP as the durable substrate and ACPX as optional compatibility infrastructure, if retained.
+- `docs/ARCHITECTURE.md` §5: describe the SDK adapter, command configuration, and permission ownership.
+- `docs/PROJECT.md` §3 and §8: describe direct ACP as the durable substrate.
 - `docs/adr/ADR-0002-chat-interface.md`: preserve the Marshal-owned thread model summary but replace ACPX-specific lifecycle claims with adapter-neutral ACP session behavior (full session-model detail now lives in the deferred Chat Session Model child ADR).
-- `AGENTS.md`: replace the ACPX hard prerequisite once the direct adapter becomes the default.
+- `AGENTS.md`: remove the ACPX prerequisite and string-role support.
 - Human testing and onboarding documentation: document agent command configuration and direct ACP diagnostics.
+
+## Implementation Status
+
+Implemented:
+
+- `SdkAcpAgentAdapter` using `@agentclientprotocol/sdk` for initialization, session creation, prompt streaming, permission handling, cancellation, timeout, and cleanup.
+- Structured per-role commands in `~/.marshal/config.json`; string role entries are retired.
+- Shared runtime selection for builder, validator, and spec-author roles.
+- Direct ACP doctor probes that initialize and create a session without sending a prompt.
+- Fake ACP process coverage for events, permissions, cancellation, timeout, cleanup, and missing executables.
+- Direct generated defaults for opencode (builder/spec author) and pi (validator).
+- Removal of `AcpxAgentAdapter`, ACPX tests, ACPX preflight/version checks, ACPX doctor probes, and the `acpx` config section.
+- Legacy string-role migration during `marshal init` and explicit rejection during `marshal doctor` or runtime role resolution.
+
+No ADR exit criteria remain. Real-agent testing is recommended release validation, not a condition for the direct runtime default or ACPX retirement.

@@ -8,7 +8,7 @@ Read `docs/ARCHITECTURE.md` first. It is the consolidated reference for what the
 
 Read `docs/PROJECT.md` for the design tenets, vision, and rationale. It answers _why_ the system is shaped the way it is; `ARCHITECTURE.md` answers _what_ and _where_.
 
-`marshal init` is non-interactive: it checks prerequisites and acpx, writes `~/.marshal/config.json` with `AGENT_ID_DEFAULTS`, and initializes repo state. If acpx is missing it prints the install command and halts. Agent verification is `marshal doctor`'s job (zero-cost session probe via `acpx <agent> sessions new` + `close`).
+`marshal init` is non-interactive: it checks prerequisites, writes `~/.marshal/config.json` with structured direct ACP command defaults, and initializes repo state. String role entries and ACPX are no longer supported. Agent verification is `marshal doctor`'s job (zero-cost direct ACP initialize + `session/new`).
 
 ## Reference docs
 

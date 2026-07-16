@@ -37,6 +37,7 @@
     "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.2.1",
     "@hono/node-server": "^2.0.8",
     "better-sqlite3": "^12.11.1",
     "commander": "^15.0.0",

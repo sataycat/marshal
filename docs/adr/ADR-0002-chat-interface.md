@@ -9,17 +9,17 @@
 
 ## Context
 
-Marshal is pivoting to a **chat-first** Phase 1: the primary deliverable is a usable ACP chat UI in the daemon webapp, with the kanban board deferred to Phase 2. The board was speculative — we don't yet know what workflow shape it should encode. A working chat surface lets us dogfood agent interactions against one or more ACP-compatible coding agents through `acpx`, discover real planning patterns, and build the planning/kanban layer on a foundation of actual usage rather than guesses.
+Marshal is pivoting to a **chat-first** Phase 1: the primary deliverable is a usable ACP chat UI in the daemon webapp, with the kanban board deferred to Phase 2. The board was speculative — we don't yet know what workflow shape it should encode. A working chat surface lets us dogfood interactions against one or more ACP-compatible coding agents through Marshal's agent layer, discover real planning patterns, and build the planning/kanban layer on a foundation of actual usage rather than guesses.
 
 The reference point is **OpenChamber** (the OpenCode companion client) — a lightweight, focused chat surface over an editor — but **web-only** and built on **ACP**, not a native app. Marshal should feel like that kind of tool: a thin, fast, single-window workspace you live in while working with an agent against a repo, not a heavyweight IDE or a board-first project manager.
 
-The chat UI must talk to one or more ACP-compatible coding agents via `acpx` (the headless ACP gateway, see `docs/ARCHITECTURE.md` §agent-layer). acpx streams NDJSON `session/update` events that the daemon's `AcpxAgentAdapter` maps to a typed `AgentEvent` union (`text`, `thinking`, `tool`, `permission`, `log`, `done`, `error`). The UI's job is to render that stream, capture user input (including images and the new "thinking" channel), and stay out of the agent's way.
+The chat UI talks to ACP-compatible coding agents through the daemon's runtime-neutral `Agent` interface (see `docs/ARCHITECTURE.md` §5). The direct SDK adapter maps ACP `session/update` events to the typed `AgentEvent` union (`text`, `thinking`, `tool`, `permission`, `log`, `done`, `error`). The UI's job is to render that stream, capture user input (including images and the new "thinking" channel), and stay out of the agent's way.
 
 This ADR scopes the **interface**: what panes exist, what each pane does, how the chat surface renders ACP events, and what affordances the user gets. It deliberately does **not** settle session/state ownership, the daemon thread API, or the permission policy — those are deferred to child ADRs (see "Child ADRs"). ADR-0001 stack constraints (React 18, Tailwind v4, shadcn/Base UI, `<150KB` gzipped initial JS, CodeMirror as the code/markdown engine, light-mode only) and ADR-0001a's routing/layout/perf/accessibility decisions all apply unchanged.
 
 ### Why a new interface ADR
 
-The previous ADR-0002 framed the chat work as "session management" — DB schema, thread lifecycle, acpx bookkeeping. Those are real decisions but they are **plumbing**, not the product. Talking about the chat surface as "session management" sets the wrong north star. The product is the interface; the plumbing is in service of it. This revision flips the framing: define the interface first, then let the session/permission/persistence decisions fall out as child ADRs.
+The previous ADR-0002 framed the chat work as "session management" — DB schema, thread lifecycle, and runtime bookkeeping. Those are real decisions but they are **plumbing**, not the product. Talking about the chat surface as "session management" sets the wrong north star. The product is the interface; the plumbing is in service of it. This revision flips the framing: define the interface first, then let the session/permission/persistence decisions fall out as child ADRs.
 
 ---
 
@@ -59,13 +59,14 @@ Panes share the existing WebSocket bus that the board uses today; chat is not a 
 A vertical list of the user's threads in this repo, sorted `pinned → last_message_at desc`, with soft-deleted/archived entries hidden by default.
 
 - **One row per thread**: title, agent badge (icon + short agent_id), age, status dot (draft ○, active ●, closed ✓, error !).
-- **"+ New thread"** button creates a draft thread with the currently selected agent; no acpx session is created until the first message is sent (zero-cost sessionId = NULL draft). Drafts can be discarded by hovering and clicking ×.
+- **"+ New thread"** button creates a draft thread with the currently selected agent; no ACP session or process is created until the first message is sent (zero-cost sessionId = NULL draft). Drafts can be discarded by hovering and clicking ×.
 - **Inline actions**: pin, archive, close. Pinned threads always float to top; archived threads are hidden behind a "show archived" toggle at the bottom of the list.
 - **Agent filter**: a small dropdown at the top of the sidebar ("all agents" / one of the configured agents). When a thread's `agent_id` differs from the panel-level selector, the row still shows — only the filter narrows.
 - **Navigation**: click a row → `/chat/:threadId`; the chat pane swaps, the editor pane's contents swap to that thread's draft context (files sidebar stays repo-wide).
 - **Cmd/Ctrl+K** opens a `Dialog` thread switcher (Base UI Dialog, see ADR-0001a §2) with fuzzy match over titles + first message preview — fast keyboard navigation across many threads.
 
 ### Why a sidebar over a tab strip
+
 The session list is the user's short-term memory of "what was I doing" across multiple agents and contexts. A sidebar scales to dozens of threads; a tab strip doesn't. Matches Zed/OpenChamber conventions.
 
 ---
@@ -81,6 +82,7 @@ A slim tree of the repo the agent is operating against, scoped to the thread's `
 - **Search box** at the top of the sidebar: client-side fuzzy filter over names (fast, no daemon round-trip for short files; daemon-supported ripgrep filter is a Phase 2 nicety if client filtering becomes slow on the user's repo size).
 
 ### Why a files pane at all
+
 Agents work against file paths; the user needs to follow along without leaving the browser to `tree` the repo. A mini file sidebar is the cheapest way to give "which file are we talking about" continuity. It is not a feature surface — it is a map.
 
 ---
@@ -95,6 +97,7 @@ A CodeMirror 6 surface (ADR-0001a §5) used **two ways**, switchable by a header
 Per-thread, the editor holds **scratch state**: the in-progress draft the user is authoring. Scratch survives pane swap and reload (persisted to the daemon — see child session ADR for the persistence surface); it is the "what was I about to send" buffer.
 
 ### Send-to-chat affordance
+
 A "Send to chat" button (and `Cmd+Enter`) pushes the editor's markdown contents as a user message in the chat pane and either clears (default) or retains (toggle) the scratch buffer. Excerpts of files (#-mention syntax, see §4) pull from the Files sidebar; typing `@path/to/file.ts` in the editor (or in the chat input) attaches that file's contents inline to the outgoing message. Selecting text in the file view and pressing `Cmd+Shift+E` inserts the selection as a fenced excerpt into the draft.
 
 This is the "OpenChamber-like" loop: author the thought as markdown, preview it as the agent will see it, send it, watch the agent stream a reply, repeat.
@@ -107,17 +110,17 @@ The product surface. Renders conversation messages from ACP events and accepts n
 
 ### Message rendering
 
-Messages are typed by role and rendered by event variant. The `AcpxAgentAdapter` already maps ACP `session/update` notifications to an `AgentEvent` union (`text`, `thinking`, `tool`, `permission`, `log`, `done`, `error` — `docs/ARCHITECTURE.md` §agent-layer). Each variant gets a treatment:
+Messages are typed by role and rendered by event variant. `SdkAcpAgentAdapter` maps ACP `session/update` notifications to an `AgentEvent` union (`text`, `thinking`, `tool`, `permission`, `log`, `done`, `error` — `docs/ARCHITECTURE.md` §agent-layer). Each variant gets a treatment:
 
-| Event variant  | Render                                                                                              |
-| -------------- | --------------------------------------------------------------------------------------------------- |
-| `text`         | Markdown bubble. Inline `marked`-to-HTML; code fences hydrate a read-only `<CodeBlock>`.            |
-| `thinking`     | Collapsible block under the preceding assistant turn. Rendered as muted markdown. **Off by default**, expanded affordance (`▾ thinking`) per turn and "Show all thinking" toggle per thread. The thinking channel is forwarded by acpx when the upstream agent emits it; Marshal doesn't synthesize it. |
-| `tool`         | Tool-call card: tool name, args (collapsed JSON), status (▶ running / ✓ done / ✗ error), and a "view output" expander. "Open the touched file" jumps to it in the Files sidebar + Editor. Not inline-rendered output by default — dense stdout is the noise we want to collapse. |
-| `permission`   | Inline dialog inside the turn: "Agent wants to <action> <arg>". Approve / Deny buttons. Headless/`approve-all` is still the default for builder/validator runs; interactive threads in the web UI surface approval inline so the user can opt into stricter permission modes per thread. (Full policy in a child permission ADR.) |
-| `log`           | One-line system log entries — server stdout that doesn't belong to a variant. Neutral styling.     |
-| `done`         | Marks the end of an assistant turn; closes the streaming cursor.                                    |
-| `error`        | Red card with the error text and a "Retry"/"Reconnect" affordance. Thread status flips to `error`. |
+| Event variant | Render                                                                                                                                                                                                                                                                                                                            |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `text`        | Markdown bubble. Inline `marked`-to-HTML; code fences hydrate a read-only `<CodeBlock>`.                                                                                                                                                                                                                                          |
+| `thinking`    | Collapsible block under the preceding assistant turn. Rendered as muted markdown. **Off by default**, expanded affordance (`▾ thinking`) per turn and "Show all thinking" toggle per thread. The thinking channel is forwarded when the upstream agent emits it; Marshal doesn't synthesize it.                                   |
+| `tool`        | Tool-call card: tool name, args (collapsed JSON), status (▶ running / ✓ done / ✗ error), and a "view output" expander. "Open the touched file" jumps to it in the Files sidebar + Editor. Not inline-rendered output by default — dense stdout is the noise we want to collapse.                                                  |
+| `permission`  | Inline dialog inside the turn: "Agent wants to <action> <arg>". Approve / Deny buttons. Headless/`approve-all` is still the default for builder/validator runs; interactive threads in the web UI surface approval inline so the user can opt into stricter permission modes per thread. (Full policy in a child permission ADR.) |
+| `log`         | One-line system log entries — server stdout that doesn't belong to a variant. Neutral styling.                                                                                                                                                                                                                                    |
+| `done`        | Marks the end of an assistant turn; closes the streaming cursor.                                                                                                                                                                                                                                                                  |
+| `error`       | Red card with the error text and a "Retry"/"Reconnect" affordance. Thread status flips to `error`.                                                                                                                                                                                                                                |
 
 Streaming messages show a blinking cursor (`█`) and incrementally append; partial markdown is still rendered (re-render on each NDJSON line). Backpressure and reconnection are the adapter's job, not the UI's.
 
@@ -126,13 +129,14 @@ Streaming messages show a blinking cursor (`█`) and incrementally append; part
 - **Textarea** at the bottom: multiline with markdown preview-on-focus (a small ghost preview shows the rendered version below the input on hover/focus; collapses when blurred). `Enter` to send, `Shift+Enter` for newline (toggle-able in settings, but defaults match every other chat app).
 - **Image uploads**: a paperclip / drag-and-drop onto either the editor or the chat input. Images are POSTed to a daemon upload endpoint (multipart, scoped to the thread), and the returned attachment ref is inserted as a markdown image with a `data-attachment-id`. ACP image support is forwarded as ACP's image content parts when supported by the agent; if the agent doesn't accept images, the daemon surfaces a clear error before the send completes (no silent drop). Max size and accepted MIME types are daemon-config-defined (Phase 1 generous defaults: 10MB, png/jpeg/webp/gif).
 - **File mentions**: typing `@` opens a fuzzy file picker (Base UI `Combobox`) sourced from the Files sidebar. Selecting inserts `@<relpath>` which the daemon expands to file contents inline at send time (`@path/to/file.ts` → the file's text wrapped in a fenced block).
-- **Agent selector**: top-level dropdown showing the configured agents from `~/.marshal/config.json` (`AGENT_ID_DEFAULTS`) or repo-level `marshal.json`. New threads inherit it; opening an existing thread does not change it (the thread carries its own `agent_id`). Same model as Zed.
-- **Cancel** affordance: while a turn is streaming, the send button flips to a "Stop" that calls `acpx <agent> cancel -s marshal-<id>`. The turn ends in a `done`/`error` state and the user can edit-and-resend the prompt.
+- **Agent selector**: top-level dropdown showing the configured structured agent commands from `~/.marshal/config.json` or repo-level `marshal.json`. New threads inherit it; opening an existing thread does not change it (the thread carries its own `agent_id`). Same model as Zed.
+- **Cancel** affordance: while a turn is streaming, the send button flips to a "Stop" that calls the daemon's adapter-neutral cancellation path. The turn ends in a `done`/`error` state and the user can edit-and-resend the prompt.
 - **Edit-and-resend**: hover a past user message → "Edit" affordance → opens the message back in the input editor; resending forks the conversation (appends a new turn after the edited prompt, keeping the original history). Resend-by-regenerate ("↻ Retry") on an assistant turn re-issues the preceding user prompt.
 
 ### Thinking affordance details
 
 ACP exposes `thinking` as a structured notification. Marshal treats it as a **first-class but de-emphasized** channel:
+
 - Each `thinking` block is a separate collapsed unit under its assistant turn (one turn may have several).
 - Default state is collapsed; the affordance is a "▾ thinking" button inline; expanding does not move the rest of the conversation.
 - A per-thread "Show all thinking" toggle expands every block; the toggle is sticky per thread.
@@ -143,11 +147,11 @@ ACP exposes `thinking` as a structured notification. Marshal treats it as a **fi
 
 ## 5. Session / Thread Model (summary — full treatment in child ADR)
 
-The interface needs a notion of "what conversation am I in" that survives pane swap, reload, and agent crash. This is the **thread**: a UI-level unit that maps 1:1 to an acpx named session once the first message is sent. Marshal owns thread metadata (title, agent_id, cwd, status, archived, pinned, last_message_at, future `task_slug`) and a message cache; it never reads `~/.acpx/sessions/*.json` directly — the acpx CLI is the only stable contract.
+The interface needs a notion of "what conversation am I in" that survives pane swap, reload, and agent crash. This is the **thread**: a UI-level unit associated with an adapter-owned ACP session once the first message is sent. Marshal owns thread metadata (title, agent_id, cwd, status, archived, pinned, last_message_at, future `task_slug`) and a message cache; runtime-specific session persistence is not a frontend contract.
 
-Lifecycle: `draft` (no acpx session, zero-cost) → `active` (first message triggers `acpx <agent> sessions new --name marshal-<id8>`) → `closed` (explicit close) or `error` (agent died, retry affordance). Drafts are essential for the sidebar UX — a "+ New" thread is free until you actually send.
+Lifecycle: `draft` (no ACP process/session, zero-cost) → `active` (first message creates a session through the selected adapter) → `closed` (explicit close) or `error` (agent died, retry affordance). Drafts are essential for the sidebar UX — a "+ New" thread is free until you actually send.
 
-The exact DB schema, cache depth, title-generation policy, cross-tool visibility rules, and resumption semantics are deferred to a **child "Chat Session Model" ADR** because they're backend/daemon decisions, not interface ones. This ADR only asserts the shape the interface depends on: stable thread UUIDs that deep-link to `/chat/:threadId`, draft state that costs nothing, per-thread agent_id, and acpx as the sole agent substrate.
+The exact DB schema, cache depth, title-generation policy, cross-tool visibility rules, and resumption semantics are deferred to a **child "Chat Session Model" ADR** because they're backend/daemon decisions, not interface ones. This ADR only asserts the shape the interface depends on: stable thread UUIDs that deep-link to `/chat/:threadId`, draft state that costs nothing, per-thread agent identity, and ACP as the agent substrate.
 
 ---
 
@@ -171,7 +175,7 @@ To stay light and ship:
 
 - **Single surface, single mental model.** Sessions + files + draft editor + chat in one pane group. The user never context-switches apps mid-thought.
 - **Markdown-first authoring.** Authoring prompts/specs as previewed markdown in the editor, then sending, matches how agents actually consume input — no translation loss between "what you wrote" and "what the agent sees."
-- **ACP-native, agent-agnostic.** Everything the chat renders comes from the `AgentEvent` union the acpx adapter already emits. Supporting a new agent is config; the UI doesn't change.
+- **ACP-native, agent-agnostic.** Everything the chat renders comes from the `AgentEvent` union the direct adapter emits. Supporting a new agent is config; the UI doesn't change.
 - **Thinking and image upload first-class.** Both are ACP realities for modern agents; treating them as core rather than bolt-ons means we don't retrofit them later.
 - **Cheap drafts.** Draft threads cost nothing on the agent side, so the sidebar can host many half-formed ideas without burning session slots.
 - **Phase 2 runway.** The thread model is the bridge to the kanban: a task's spec-authoring chat is a thread with `task_slug`; builder/validator runs are threads; the board filters "task threads" vs free threads. Building chat first means the board isn't speculative.
@@ -208,11 +212,11 @@ To stay light and ship:
 
 ## Child ADRs (to be filed)
 
-| ID (TBD) | Topic                  | Scope                                                                                       |
-| -------- | ---------------------- | ------------------------------------------------------------------------------------------- |
-| TBD      | Chat Session Model     | Thread DB schema, cache depth, title-gen policy, resumption semantics, cross-tool visibility, daemon thread API surface, WS event extensions (`thread.*`). |
-| TBD      | Chat Permission Mode   | Interactive thread permission policy: per-thread mode, defaults, inline approval UX contract with `AgentEvent.permission`. |
-| TBD      | Chat Attachments       | Image/file upload endpoint, MIME/size limits, ACP image-part conversion, fallback when agent rejects images. |
+| ID (TBD) | Topic                | Scope                                                                                                                                                      |
+| -------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TBD      | Chat Session Model   | Thread DB schema, cache depth, title-gen policy, resumption semantics, cross-tool visibility, daemon thread API surface, WS event extensions (`thread.*`). |
+| TBD      | Chat Permission Mode | Interactive thread permission policy: per-thread mode, defaults, inline approval UX contract with `AgentEvent.permission`.                                 |
+| TBD      | Chat Attachments     | Image/file upload endpoint, MIME/size limits, ACP image-part conversion, fallback when agent rejects images.                                               |
 
 ---
 

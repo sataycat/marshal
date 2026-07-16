@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { logger } from "../logger.js";
-import type { AgentId } from "../agent/types.js";
+import type { AgentCommand, AgentId } from "../agent/types.js";
 
 export type AgentRole = "builder" | "validator" | "specAuthor";
 
@@ -11,7 +11,7 @@ export class MissingAgentIdError extends Error {
   constructor(role: AgentRole) {
     const key = `agents.${role}`;
     super(
-      `No agent configured for role "${role}". Set ~/.marshal/config.json →\n${key} to any acpx agent (see https://acpx.sh/agents.html), e.g.:\n  { "agents": { "builder": "codex", "validator": "claude", "specAuthor": "opencode" } }`,
+      `No agent configured for role "${role}". Set ~/.marshal/config.json -> ${key} to a direct ACP command.`,
     );
     this.name = "MissingAgentIdError";
     this.role = role;
@@ -28,14 +28,10 @@ export interface GlobalConfig {
   worktree?: {
     root?: string;
   };
-  acpx?: {
-    bin?: string;
-    version?: string;
-  };
   agents?: {
-    builder?: string;
-    validator?: string;
-    specAuthor?: string;
+    builder?: AgentConfig;
+    validator?: AgentConfig;
+    specAuthor?: AgentConfig;
   };
   policy?: {
     maxRetries?: number;
@@ -45,6 +41,8 @@ export interface GlobalConfig {
     port?: number;
   };
 }
+
+export type AgentConfig = AgentCommand;
 
 export function loadMarshalJson(repoRoot: string): MarshalJson {
   const path = resolve(repoRoot, "marshal.json");
@@ -74,24 +72,37 @@ export function loadGlobalConfig(): GlobalConfig {
   }
 }
 
-// Any non-empty string is a valid agent id: it is passed through to ACPX
-// as-is, and ACPX (or the agent's own auth handshake) is the source of
-// truth for whether it's actually usable. See ADR-019 / ADR-023.
-//
 // `resolveAgentId` has no silent defaults: if a role is missing from the
 // config it throws `MissingAgentIdError` at first real use (not at boot),
 // so the daemon starts fine without a config and only fails when a task
 // actually tries to build/validate/author a spec (ADR-023 Decision 3).
 //
-// `AGENT_ID_DEFAULTS` is the set of ids `marshal init` writes into a fresh
+// `AGENT_COMMAND_DEFAULTS` is the set of commands `marshal init` writes into a fresh
 // `~/.marshal/config.json` so the post-init state is immediately usable
 // (ADR-024 Decision 3). It is NOT consulted by `resolveAgentId` — the
 // config file is the single source of truth at runtime.
-export const AGENT_ID_DEFAULTS: Record<AgentRole, string> = {
-  builder: "opencode",
-  validator: "pi",
-  specAuthor: "opencode",
+export const AGENT_COMMAND_DEFAULTS: Record<AgentRole, AgentCommand> = {
+  builder: { id: "opencode", command: "npx", args: ["-y", "opencode-ai", "acp"] },
+  validator: { id: "pi", command: "npx", args: ["-y", "pi-acp"] },
+  specAuthor: { id: "opencode", command: "npx", args: ["-y", "opencode-ai", "acp"] },
 };
+
+export function isAgentCommand(value: unknown): value is AgentCommand {
+  if (typeof value !== "object" || value === null) return false;
+  const command = value as Partial<AgentCommand>;
+  return (
+    typeof command.id === "string" &&
+    command.id.length > 0 &&
+    typeof command.command === "string" &&
+    command.command.length > 0 &&
+    Array.isArray(command.args) &&
+    command.args.every((arg) => typeof arg === "string") &&
+    (command.env === undefined ||
+      (typeof command.env === "object" &&
+        command.env !== null &&
+        Object.values(command.env).every((value) => typeof value === "string")))
+  );
+}
 
 export function resolveAgentId(
   role: AgentRole,
@@ -100,6 +111,27 @@ export function resolveAgentId(
   const raw = config.agents?.[role];
   if (!raw) {
     throw new MissingAgentIdError(role);
+  }
+  if (!isAgentCommand(raw)) {
+    throw new Error(
+      `Invalid agent configuration for role "${role}". String agent IDs are no longer supported; configure agents.${role} with { id, command, args, env? }.`,
+    );
+  }
+  return raw.id;
+}
+
+export function resolveAgentCommand(
+  role: AgentRole,
+  config: GlobalConfig = loadGlobalConfig(),
+): AgentCommand {
+  const raw = config.agents?.[role];
+  if (!raw) {
+    throw new MissingAgentIdError(role);
+  }
+  if (!isAgentCommand(raw)) {
+    throw new Error(
+      `Invalid agent configuration for role "${role}". String agent IDs are no longer supported; configure agents.${role} with { id, command, args, env? }.`,
+    );
   }
   return raw;
 }

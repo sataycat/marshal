@@ -1,2 +1,3 @@
 export * from "./types.js";
-export { AcpxAgentAdapter, type AcpxAgentAdapterOptions } from "./acpx-adapter.js";
+export { SdkAcpAgentAdapter, type SdkAcpAgentAdapterOptions } from "./sdk-adapter.js";
+export { createConfiguredAgent } from "./configured-agent.js";
