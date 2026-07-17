@@ -133,16 +133,19 @@ Expected:
 ### 4.3 Build + validate loop
 
 ```sh
-marshal daemon run-once
-marshal task show manual-smoke
-marshal daemon run-once
+marshal start
+```
+
+In another shell, monitor the task:
+
+```sh
 marshal task show manual-smoke
 ```
 
 Expected:
 
-- first cycle: `ready -> building -> validating` path (or `building` on build error)
-- second cycle: validator routes to `review` on pass or back to `building` on fail
+- builder cycle: `ready -> building -> validating` path (or `building` on build error)
+- validator cycle: routes to `review` on pass or back to `building` on fail
 
 ### 4.4 Retry and escalation behavior
 
@@ -176,7 +179,7 @@ Expected:
 Start daemon:
 
 ```sh
-marshal daemon start --interval 5000
+marshal start --interval 5000
 ```
 
 In another shell, discover port:
@@ -391,7 +394,7 @@ Expected:
 
 ### 9.1 Daemon port-file lifecycle
 
-On `marshal daemon start`:
+On `marshal start`:
 
 - `.marshal/daemon.port` created with bound port
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Plus } from "lucide-react";
 import type { TaskCard, TaskStatus } from "../types";
 import { TaskCardView } from "./TaskCard";
@@ -18,7 +19,7 @@ const COLUMNS: { status: TaskStatus; title: string }[] = [
 ];
 
 export function Board() {
-  const tasks = useTaskStore(selectTasks);
+  const tasks = useTaskStore(useShallow(selectTasks));
   const [selected, setSelected] = useState<TaskCard | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
   const now = useNow(5000);

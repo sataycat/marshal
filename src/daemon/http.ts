@@ -924,7 +924,9 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   );
   const password = options.uiPassword ?? options.config?.daemon?.uiPassword ?? process.env.MARSHAL_UI_PASSWORD;
   if (!isLoopbackHost(host) && !password) {
-    throw new Error("Refusing non-loopback bind without a UI password.\nSet MARSHAL_UI_PASSWORD or provide the configured daemon auth password.");
+    throw new Error(
+      "LAN access requires a UI password.\n\nProvide one when starting Marshal:\n  marshal start --lan --password <password>\n\nAlternatively, set MARSHAL_UI_PASSWORD or configure daemon.uiPassword.\nFor local-only access, run:\n  marshal start",
+    );
   }
   const auth = new AuthService({ password, secureCookies: false });
   const version = options.version ?? readVersion();

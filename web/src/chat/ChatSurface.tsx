@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useShallow } from "zustand/react/shallow";
 import { Link, useLocation } from "wouter";
 import { Archive, AlertCircle, ArrowLeft, Bot, Check, ImagePlus, LoaderCircle, MessageSquare, Pencil, Pin, Plus, RefreshCw, Search, Send, Square, X } from "lucide-react";
 import { chatAttachmentUrl } from "../api/client";
@@ -20,8 +21,8 @@ import { FilesSidebar } from "./FilesSidebar";
 import { timeInState } from "../time";
 
 export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Element {
-  const threads = useChatStore(selectThreads);
-  const liveMessages = useChatStore(selectMessages(selectedId ?? ""));
+  const threads = useChatStore(useShallow(selectThreads));
+  const liveMessages = useChatStore(useShallow(selectMessages(selectedId ?? "")));
   const status = useTaskStore((state) => state.socketStatus);
   const applyChatEvent = useChatStore((state) => state.applyChatEvent);
   const pushError = useToastStore((state) => state.pushError);
@@ -156,7 +157,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
 
 function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad, onBack }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void }): JSX.Element {
   const pushError = useToastStore((state) => state.pushError);
-  const busPermissions = useChatStore(selectPermissions(thread?.id ?? ""));
+  const busPermissions = useChatStore(useShallow(selectPermissions(thread?.id ?? "")));
   const [scratch, setScratch] = useState(thread?.scratch_markdown ?? "");
   const [sending, setSending] = useState(false);
   const filesQuery = useChatFilesQuery(thread?.id);

@@ -42,10 +42,8 @@ marshal task create --slug add-feature --title "Add the feature" --spec-file ./s
 # 2. Freeze the spec and move to ready (creates the worktree + commits the spec).
 marshal task ready add-feature
 
-# 3. Run the loop.
-marshal daemon start              # long-running poll, every 5s
-# or
-marshal daemon run-once           # one cycle, then exit
+# 3. Start Marshal.
+marshal start                     # serves the UI and polls every 5s
 
 # 4. When the task reaches `review`, inspect and merge.
 marshal task show add-feature
@@ -83,11 +81,10 @@ marshal task freeze   <slug>             # re-freeze after editing the spec
 marshal task transition <slug> <state>   # manual transition (incl. escape hatches)
 marshal worktree create  --task <slug>
 marshal worktree destroy --task <slug>
-marshal daemon run-once
-marshal daemon start [--interval <ms>] [--port <port>] [--host <addr>]
+marshal start [--interval <ms>] [--port <port>] [--host <addr>] [--lan] [--password <password>]
 ```
 
-`marshal daemon start` exposes the HTTP + WebSocket API on the daemon port. `marshal daemon start --help` for the full flag list.
+`marshal start` exposes the HTTP + WebSocket API on the daemon port. Use `marshal start --help` for the full flag list. LAN access requires a UI password, for example `marshal start --lan --password <password>`.
 
 ## Configuration
 

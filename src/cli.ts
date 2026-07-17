@@ -4,8 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startHttpServer } from "./daemon/http.js";
-import { formatRunOnceResult, startDaemon } from "./daemon/loop.js";
-import { runOnce } from "./daemon/orchestrator.js";
+import { startDaemon } from "./daemon/loop.js";
 import { runDoctor, runInit } from "./setup/init.js";
 import { registerTaskCommands } from "./tasks/commands.js";
 import { WorktreeManager } from "./worktree/manager.js";
@@ -64,24 +63,15 @@ worktree
     manager.destroy(options.task);
   });
 
-const daemon = program.command("daemon").description("Daemon control");
-
-daemon
-  .command("run-once")
-  .description("Run a single orchestrator cycle (build or validate one task)")
-  .action(async () => {
-    const result = await runOnce({ root: process.cwd() });
-    console.log(formatRunOnceResult(result));
-  });
-
-daemon
+program
   .command("start")
   .description("Run the orchestrator daemon, polling for ready tasks")
   .option("--interval <ms>", "Poll interval in milliseconds", "5000")
   .option("--port <number>", "HTTP API port (default: 7433 or config daemon.port)")
   .option("--host <addr>", "HTTP API bind address (default: 127.0.0.1)")
-  .option("--lan", "Bind to all interfaces (0.0.0.0)")
-  .action(async (options: { interval: string; port?: string; host?: string; lan?: boolean }) => {
+  .option("--lan", "Bind to all interfaces (0.0.0.0); requires a UI password")
+  .option("--password <password>", "UI password required for non-loopback access")
+  .action(async (options: { interval: string; port?: string; host?: string; lan?: boolean; password?: string }) => {
     if (options.lan && options.host) {
       throw new Error("The --lan and --host options cannot be combined.");
     }
@@ -92,11 +82,12 @@ daemon
     try {
       const config = loadGlobalConfig();
       const port = options.port !== undefined ? Number(options.port) : config.daemon?.port;
-       const host = options.lan ? "0.0.0.0" : options.host ?? config.daemon?.host;
+      const host = options.lan ? "0.0.0.0" : options.host ?? config.daemon?.host;
       const http = await startHttpServer({
         root: process.cwd(),
         host,
         port,
+        uiPassword: options.password,
         version: pkg.version,
         config,
       });
@@ -116,4 +107,10 @@ daemon
     }
   });
 
-await program.parseAsync(process.argv);
+try {
+  await program.parseAsync(process.argv);
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Error: ${message}`);
+  process.exitCode = 1;
+}

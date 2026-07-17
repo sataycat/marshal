@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Send, Snowflake } from "lucide-react";
 import { useFreezeTaskMutation, useSendSpecMessageMutation, useSpecMessagesQuery, useUpdateTaskSpecMutation } from "../api/queries";
 import { extractMarshalSpec, MARSHAL_SPEC_FENCE } from "./marshalSpec";
@@ -18,7 +19,7 @@ interface Props {
 }
 
 export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
-  const streamed = useTaskStore(selectSpecMessages(slug));
+  const streamed = useTaskStore(useShallow(selectSpecMessages(slug)));
   const applyTaskEvent = useTaskStore((state) => state.applyTaskEvent);
   const sendSpecMessage = useSendSpecMessageMutation();
   const updateTaskSpec = useUpdateTaskSpecMutation();

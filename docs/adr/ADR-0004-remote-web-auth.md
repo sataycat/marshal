@@ -11,7 +11,7 @@
 
 Marshal's daemon serves the web application, HTTP API, and WebSocket event stream from one Node server. The API can create tasks, invoke agents, upload files, stream agent output, and merge branches. A listener reachable from a network is therefore an RCE-capable control plane, not an ordinary static web server.
 
-Marshal already binds to `127.0.0.1` by default and supports an explicitly requested non-loopback host through `marshal daemon start --host <addr>`. The current non-loopback path only logs a warning because the daemon has no authentication layer. That is insufficient for the target deployment: run Marshal on a VPS and access its web UI securely over the internet, using the same basic model as OpenChamber.
+Marshal already binds to `127.0.0.1` by default and supports an explicitly requested non-loopback host through `marshal start --host <addr>`. The current non-loopback path only logs a warning because the daemon has no authentication layer. That is insufficient for the target deployment: run Marshal on a VPS and access its web UI securely over the internet, using the same basic model as OpenChamber.
 
 The target use case is a single human operator accessing one Marshal instance from a browser. Device pairing, multi-device management, passkeys, and a private relay are useful future capabilities but are not required to make the first remote deployment usable.
 
@@ -40,7 +40,7 @@ No password is required for a loopback-only daemon unless the operator explicitl
 Marshal will support a deliberate LAN/remote bind, with a convenience flag matching the intended deployment vocabulary:
 
 ```sh
-marshal daemon start --lan --port 7433
+marshal start --lan --password 'use-a-long-random-password' --port 7433
 ```
 
 `--lan` resolves to `0.0.0.0`. The existing `--host` option remains available for binding to a specific interface, such as a VPN address. If both are supplied, the CLI rejects the combination rather than guessing.
@@ -48,17 +48,17 @@ marshal daemon start --lan --port 7433
 Non-loopback binds require a configured UI password. Daemon startup fails closed when remote serving is requested without one:
 
 ```text
-Refusing non-loopback bind without a UI password.
-Set MARSHAL_UI_PASSWORD or provide the configured daemon auth password.
+LAN access requires a UI password.
+Provide --password, set MARSHAL_UI_PASSWORD, or configure daemon.uiPassword.
 ```
 
-The password may be supplied through an environment variable or an equivalent secret-management mechanism. A password passed directly as a CLI argument may be supported for parity with OpenChamber, but environment/configuration input is preferred because process arguments can be visible to other users through system tools.
+The password may be supplied through `--password`, an environment variable, or an equivalent secret-management mechanism. Environment/configuration input is preferred for unattended deployments because process arguments can be visible to other users through system tools.
 
 Example VPS launch:
 
 ```sh
 MARSHAL_UI_PASSWORD='use-a-long-random-password' \
-  marshal daemon start --lan --port 7433
+  marshal start --lan --port 7433
 ```
 
 ### 3. Login creates a browser session
@@ -177,8 +177,8 @@ The exact password storage and session persistence format may be finalized durin
 
 ## Implementation acceptance criteria
 
-- `marshal daemon start` binds to `127.0.0.1:7433` by default.
-- `marshal daemon start --lan --port 7433` refuses to start without a UI password.
+- `marshal start` binds to `127.0.0.1:7433` by default.
+- `marshal start --lan --port 7433` refuses to start without a UI password and suggests `--password`.
 - A configured password allows the SPA login flow to establish a session.
 - Invalid passwords do not establish a session and are rate-limited.
 - Unauthenticated clients receive `401` from protected API routes.

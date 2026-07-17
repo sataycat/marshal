@@ -49,7 +49,7 @@ describe("authenticated HTTP server", () => {
 
   it("rejects non-loopback startup without a password", async () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-auth-bind-"));
-    await expect(startHttpServer({ root, host: "0.0.0.0", port: 0, version: "0.0.1" })).rejects.toThrow("Refusing non-loopback bind without a UI password");
+    await expect(startHttpServer({ root, host: "0.0.0.0", port: 0, version: "0.0.1" })).rejects.toThrow("LAN access requires a UI password");
   });
 });
 
@@ -167,7 +167,7 @@ describe("startHttpServer", () => {
   });
 });
 
-describe("marshal daemon start end-to-end", () => {
+describe("marshal start end-to-end", () => {
   it("serves /api/health on the discovered port and removes daemon.port on SIGTERM", async () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-cli-http-"));
     execFileSync("git", ["init", "-b", "main"], { cwd: root, stdio: "ignore" });
@@ -187,7 +187,17 @@ describe("marshal daemon start end-to-end", () => {
 
     const daemon = spawn(
       "node",
-      [binPath, "daemon", "start", "--port", String(requestedPort), "--interval", "1000"],
+      [
+        binPath,
+        "start",
+        "--lan",
+        "--password",
+        "test-password",
+        "--port",
+        String(requestedPort),
+        "--interval",
+        "1000",
+      ],
       { cwd: root, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, LOG_LEVEL: "error" } },
     );
 

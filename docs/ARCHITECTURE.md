@@ -163,7 +163,7 @@ Re-freezing creates a new commit (not an amend) — audit trail preserved.
 
 ## 8. Security and isolation
 
-The daemon is an **RCE-as-a-service** surface — it spawns agents with file/exec permissions. It binds to `127.0.0.1` only by default. `marshal daemon start --lan` binds to `0.0.0.0` and requires `MARSHAL_UI_PASSWORD` (or configured `daemon.uiPassword`). Browser sessions use an HttpOnly, SameSite cookie; API routes and WebSocket upgrades require that session. Put remote deployments behind HTTPS or a VPN. Authentication does not sandbox ACP agents.
+The daemon is an **RCE-as-a-service** surface — it spawns agents with file/exec permissions. It binds to `127.0.0.1` only by default. `marshal start --lan` binds to `0.0.0.0` and requires `--password`, `MARSHAL_UI_PASSWORD`, or configured `daemon.uiPassword`. Browser sessions use an HttpOnly, SameSite cookie; API routes and WebSocket upgrades require that session. Put remote deployments behind HTTPS or a VPN. Authentication does not sandbox ACP agents.
 
 ACP does **not** sandbox the agent. The agent runs on the host with its own permissions. Isolation (container, VM) is the operator's responsibility. The worktree is the current filesystem scope boundary — the agent could escape it.
 
