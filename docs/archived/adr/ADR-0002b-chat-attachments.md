@@ -1,6 +1,6 @@
 # ADR-0002b: Chat Attachments
 
-**Status:** Accepted for Slice 8 implementation  
+**Status:** Accepted
 **Date:** 2026-07-16  
 **Parent:** ADR-0002 (Chat Interface — Lightweight Web Client over ACP)
 

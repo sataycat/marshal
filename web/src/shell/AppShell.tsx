@@ -2,12 +2,12 @@ import { useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import { KanbanSquare, MessagesSquare, ArrowLeftRight } from "lucide-react";
 import { NAV_ITEMS, ROUTES, type StaticPath } from "../routes/routes";
-import { useBoardContext } from "../board/BoardContext";
+import { useTaskStore } from "../state/taskStore";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function AppShell({ children }: { children: React.ReactNode }): JSX.Element {
-  const { status } = useBoardContext();
+  const status = useTaskStore((state) => state.socketStatus);
   return (
     <div className="@container flex min-h-svh flex-col bg-bg text-text">
       <header className="sticky top-0 z-40 flex items-center gap-4 border-b border-border bg-panel/95 px-4 py-3 backdrop-blur md:px-5">

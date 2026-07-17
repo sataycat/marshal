@@ -1,6 +1,6 @@
 # ADR-0002: Chat Interface — Lightweight Web Client over ACP
 
-**Status:** Accepted for Slice 5 implementation
+**Status:** Accepted
 **Date:** 2026-07-15
 **Parent:** ADR-0001 (Daemon Webapp)
 **Children:** ADR-0002a (session model, permission mode), ADR-0002b (attachments)
@@ -210,13 +210,13 @@ To stay light and ship:
 
 ---
 
-## Child ADRs (to be filed)
+## Child ADRs
 
-| ID (TBD) | Topic                | Scope                                                                                                                                                      |
-| -------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| TBD      | Chat Session Model   | Thread DB schema, cache depth, title-gen policy, resumption semantics, cross-tool visibility, daemon thread API surface, WS event extensions (`thread.*`). |
-| TBD      | Chat Permission Mode | Interactive thread permission policy: per-thread mode, defaults, inline approval UX contract with `AgentEvent.permission`.                                 |
-| TBD      | Chat Attachments     | Image/file upload endpoint, MIME/size limits, ACP image-part conversion, fallback when agent rejects images.                                               |
+| ID                            | Topic                | Status   | Scope                                                                                                                                                      |
+| ----------------------------- | -------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ADR-0002a-chat-session-model  | Chat Session Model   | Accepted | Thread DB schema, cache depth, title-gen policy, resumption semantics, cross-tool visibility, daemon thread API surface, WS event extensions (`thread.*`). |
+| ADR-0002a-chat-permission-mode | Chat Permission Mode | Accepted | Interactive thread permission policy: per-thread mode, defaults, inline approval UX contract with `AgentEvent.permission`.                                 |
+| ADR-0002b                     | Chat Attachments     | Accepted | Image/file upload endpoint, MIME/size limits, ACP image-part conversion, fallback when agent rejects images.                                               |
 
 ---
 

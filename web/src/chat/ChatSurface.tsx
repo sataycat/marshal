@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Archive, AlertCircle, ArrowLeft, Bot, Check, ImagePlus, LoaderCircle, MessageSquare, Pencil, Pin, Plus, RefreshCw, Search, Send, Square, X } from "lucide-react";
-import { cancelChatTurn, chatAttachmentUrl, createChatThread, deleteChatThread, decideChatPermission, fetchChatAgents, fetchChatFiles, fetchChatFile, fetchChatPermissions, fetchChatThread, sendChatMessage, updateChatThread, uploadChatAttachment } from "../api/client";
+import { chatAttachmentUrl } from "../api/client";
+import { useChatAgentsQuery, useChatAttachmentsQuery, useChatFileQuery, useChatFilesQuery, useChatPermissionsQuery, useChatThreadQuery, useChatThreadsQuery, useCreateThreadMutation, useDeleteThreadMutation, usePermissionMutation, useSendChatMutation, useUpdateThreadMutation, useCancelChatMutation, useUploadAttachmentMutation } from "../api/queries";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
 import { EditorPane } from "./EditorPane";
-import { useBoardContext } from "../board/BoardContext";
+import { useChatStore, selectMessages, selectPermissions, selectThreads } from "../state/chatStore";
+import { useTaskStore } from "../state/taskStore";
+import { useToastStore } from "../state/toastStore";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,71 +16,34 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { ChatAttachment, ChatMessage, ChatThread, PendingPermission } from "../types";
-import type { ChatFileEntry } from "../types";
 import { FilesSidebar } from "./FilesSidebar";
 import { timeInState } from "../time";
 
 export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Element {
-  const { threads, messagesForThread, status, dispatch, pushError } = useBoardContext();
+  const threads = useChatStore(selectThreads);
+  const liveMessages = useChatStore(selectMessages(selectedId ?? ""));
+  const status = useTaskStore((state) => state.socketStatus);
+  const applyChatEvent = useChatStore((state) => state.applyChatEvent);
+  const pushError = useToastStore((state) => state.pushError);
   const [, navigate] = useLocation();
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<ChatThread | null>(null);
-  const [seeded, setSeeded] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(Boolean(selectedId));
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loadAttempt, setLoadAttempt] = useState(0);
+  const threadQuery = useChatThreadQuery(selectedId);
+  const agentsQuery = useChatAgentsQuery();
+  const archivedQuery = useChatThreadsQuery(true);
   const [showArchived, setShowArchived] = useState(false);
-  const [archivedThreads, setArchivedThreads] = useState<ChatThread[]>([]);
   const [agentFilter, setAgentFilter] = useState("all");
-  const [agents, setAgents] = useState<string[]>([]);
+  const agents = agentsQuery.data ?? [];
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [switcherQuery, setSwitcherQuery] = useState("");
+  const createThreadMutation = useCreateThreadMutation();
+  const updateThreadMutation = useUpdateThreadMutation();
+  const deleteThreadMutation = useDeleteThreadMutation();
 
   useEffect(() => {
-    if (!selectedId) {
-      setSelected(null);
-      setSeeded([]);
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setLoadError(null);
-    setSelected(null);
-    setSeeded([]);
-    fetchChatThread(selectedId)
-      .then((result) => {
-        if (cancelled) return;
-        setSelected(result.thread);
-        setSeeded(result.messages);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setLoadError(error instanceof Error ? error.message : "Unable to load this thread.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [selectedId, loadAttempt]);
-
-  useEffect(() => {
-    if (selectedId) {
-      const live = threads.find((thread) => thread.id === selectedId);
-      if (live) setSelected(live);
-    }
-  }, [selectedId, threads]);
-
-  useEffect(() => {
-    fetchChatAgents().then(setAgents).catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    if (!showArchived) return;
-    fetch("/api/threads?archived=true")
-      .then((response) => response.json() as Promise<{ threads: ChatThread[] }>)
-      .then((result) => setArchivedThreads(result.threads))
-      .catch(() => undefined);
-  }, [showArchived]);
+    if (selectedId) setSelected(threads.find((thread) => thread.id === selectedId) ?? threadQuery.data?.thread ?? null);
+    else setSelected(null);
+  }, [selectedId, threads, threadQuery.data?.thread]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -93,8 +60,8 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
     if (creating) return;
     setCreating(true);
     try {
-      const thread = await createChatThread({ agent_id: agents[0] ?? "builder" });
-      dispatch({ type: "thread.created", payload: { thread }, timestamp: new Date().toISOString() });
+      const thread = await createThreadMutation.mutateAsync({ agent_id: agents[0] ?? "builder" });
+       applyChatEvent({ type: "thread.created", payload: { thread }, timestamp: new Date().toISOString() });
       void navigate(`/chat/${thread.id}`);
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to create a chat thread.");
@@ -103,12 +70,12 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
     }
   };
 
-  const allThreads = showArchived ? [...threads, ...archivedThreads.filter((archived) => !threads.some((thread) => thread.id === archived.id))] : threads;
+  const allThreads = showArchived ? [...threads, ...(archivedQuery.data ?? []).filter((archived) => !threads.some((thread) => thread.id === archived.id))] : threads;
   const visibleThreads = allThreads.filter((thread) => (agentFilter === "all" || thread.agent_id === agentFilter) && (showArchived || !thread.archived));
-  const mutateThread = async (thread: ChatThread, input: Parameters<typeof updateChatThread>[1]): Promise<void> => {
+  const mutateThread = async (thread: ChatThread, input: Parameters<typeof updateThreadMutation.mutateAsync>[0]["input"]): Promise<void> => {
     try {
-      const updated = await updateChatThread(thread.id, input);
-      dispatch({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
+      const updated = await updateThreadMutation.mutateAsync({ id: thread.id, input });
+       applyChatEvent({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to update the thread.");
     }
@@ -116,8 +83,8 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
   const discardThread = async (thread: ChatThread): Promise<void> => {
     if (!window.confirm(`Discard ${thread.title}? This cannot be undone.`)) return;
     try {
-      await deleteChatThread(thread.id);
-      dispatch({ type: "thread.deleted", payload: { id: thread.id }, timestamp: new Date().toISOString() });
+      await deleteThreadMutation.mutateAsync(thread.id);
+       applyChatEvent({ type: "thread.deleted", payload: { id: thread.id }, timestamp: new Date().toISOString() });
       if (selectedId === thread.id) void navigate("/chat");
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to discard the thread.");
@@ -171,8 +138,8 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
           </div>
         </ScrollArea>
       </aside>
-      <section className={cn("min-h-0 flex-1", !selectedId && "hidden md:flex")}>
-         {selectedId ? <ThreadWorkspace thread={selected} seeded={seeded} live={messagesForThread(selectedId)} loading={loading} loadError={loadError} onRetryLoad={() => setLoadAttempt((attempt) => attempt + 1)} onBack={() => void navigate("/chat")} /> : <EmptyChat onNew={() => void openNewThread()} />}
+       <section className={cn("min-h-0 flex-1", !selectedId && "hidden md:flex")}>
+          {selectedId ? <ThreadWorkspace thread={selected} seeded={threadQuery.data?.messages ?? []} live={liveMessages} loading={threadQuery.isPending} loadError={threadQuery.error?.message ?? null} onRetryLoad={() => void threadQuery.refetch()} onBack={() => void navigate("/chat")} /> : <EmptyChat onNew={() => void openNewThread()} />}
       </section>
       <Dialog open={switcherOpen} onOpenChange={setSwitcherOpen}>
         <DialogContent className="max-w-lg">
@@ -188,14 +155,22 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
 }
 
 function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad, onBack }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void }): JSX.Element {
-  const { pushError, status, permissionsForThread } = useBoardContext();
+  const pushError = useToastStore((state) => state.pushError);
+  const busPermissions = useChatStore(selectPermissions(thread?.id ?? ""));
   const [scratch, setScratch] = useState(thread?.scratch_markdown ?? "");
   const [sending, setSending] = useState(false);
-  const [files, setFiles] = useState<ChatFileEntry[]>([]);
-  const [filesLoading, setFilesLoading] = useState(false);
+  const filesQuery = useChatFilesQuery(thread?.id);
+  const permissionsQuery = useChatPermissionsQuery(thread?.id);
+  const attachmentsQuery = useChatAttachmentsQuery(thread?.id);
+  const permissionMutation = usePermissionMutation();
+  const sendMutation = useSendChatMutation();
+  const updateMutation = useUpdateThreadMutation();
+  const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<{ path: string; content: string } | null>(null);
-  const [permissions, setPermissions] = useState<PendingPermission[]>([]);
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const fileQuery = useChatFileQuery(thread?.id, selectedFile?.path);
+  const files = filesQuery.data ?? [];
+  const permissions = permissionsQuery.data ?? [];
+  const attachments = attachmentsQuery.data ?? [];
   const [mobilePane, setMobilePane] = useState<"files" | "editor" | "chat">("chat");
 
   useEffect(() => {
@@ -205,42 +180,18 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
   useEffect(() => {
     if (!thread || scratch === thread.scratch_markdown) return;
     const timer = window.setTimeout(() => {
-      updateChatThread(thread.id, { scratch_markdown: scratch }).catch((error: unknown) => pushError(error instanceof Error ? error.message : "Unable to save the draft."));
+      updateMutation.mutate({ id: thread.id, input: { scratch_markdown: scratch } });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [pushError, scratch, thread]);
+  }, [scratch, thread, updateMutation]);
 
-  useEffect(() => {
-    if (!thread) return;
-    setFilesLoading(true);
-    fetchChatFiles(thread.id).then(setFiles).catch((error: unknown) => pushError(error instanceof Error ? error.message : "Unable to load files.")).finally(() => setFilesLoading(false));
-  }, [pushError, thread?.id]);
-
-  useEffect(() => {
-    if (!thread) { setPermissions([]); return; }
-    let cancelled = false;
-    const load = (): void => {
-    fetchChatPermissions(thread.id).then((items) => { if (!cancelled) setPermissions(items); }).catch(() => undefined);
-    };
-    load();
-    return () => { cancelled = true; };
-  }, [status, thread?.id]);
-
-  useEffect(() => {
-    if (!thread) return;
-    fetch(`/api/threads/${encodeURIComponent(thread.id)}/attachments`).then((response) => response.json() as Promise<{ attachments: ChatAttachment[] }>).then((body) => setAttachments(body.attachments)).catch(() => undefined);
-  }, [thread?.id]);
-
-  const busPermissions = thread ? permissionsForThread(thread.id) : [];
   const visiblePermissions = busPermissions.length > 0 ? busPermissions : permissions;
 
   const decide = async (requestId: string, action: "approve" | "deny"): Promise<void> => {
     if (!thread) return;
     try {
-      await decideChatPermission(thread.id, requestId, action);
-      setPermissions((current) => current.filter((request) => request.requestId !== requestId));
+      await permissionMutation.mutateAsync({ id: thread.id, requestId, action });
     } catch (error) {
-      setPermissions((current) => current.filter((request) => request.requestId !== requestId));
       pushError(error instanceof Error ? error.message : "Permission request is no longer active.");
     }
   };
@@ -248,8 +199,7 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
   const openFile = async (path: string): Promise<void> => {
     if (!thread) return;
     try {
-      const file = await fetchChatFile(thread.id, path);
-      setSelectedFile({ path: file.path, content: file.content });
+      setSelectedFile({ path, content: "" });
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to open file.");
     }
@@ -264,8 +214,7 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
     if (!thread || (!content && attachments.length === 0) || sending) return;
     setSending(true);
     try {
-      await sendChatMessage(thread.id, content, attachmentIds);
-      setAttachments((current) => current.filter((attachment) => !attachmentIds.includes(attachment.id)));
+      await sendMutation.mutateAsync({ id: thread.id, content, attachmentIds });
       setScratch("");
     } catch (error) {
       pushError(error instanceof Error ? error.message : "The agent could not complete the turn.");
@@ -274,8 +223,11 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
     }
   };
 
-  if (loading || loadError || !thread) return <ChatPane thread={thread} seeded={seeded} live={live} permissions={visiblePermissions} attachments={attachments} onAttachments={setAttachments} onPermission={decide} loading={loading} loadError={loadError} onRetryLoad={onRetryLoad} onBack={onBack} draft={scratch} onDraftChange={setScratch} onSendDraft={send} sending={sending} />;
-  return <div className="flex min-h-0 flex-1 flex-col"><div className="flex border-b border-border bg-panel p-1 md:hidden"><Button type="button" size="xs" variant={mobilePane === "files" ? "default" : "ghost"} className="flex-1" onClick={() => setMobilePane("files")}>Files</Button><Button type="button" size="xs" variant={mobilePane === "editor" ? "default" : "ghost"} className="flex-1" onClick={() => setMobilePane("editor")}>Draft</Button><Button type="button" size="xs" variant={mobilePane === "chat" ? "default" : "ghost"} className="flex-1" onClick={() => setMobilePane("chat")}>Chat</Button></div><div className="flex min-h-0 flex-1 flex-col md:flex-row"><div className={cn("min-h-0 flex-1", mobilePane !== "files" && "hidden md:flex")}><FilesSidebar files={files} loading={filesLoading} selectedPath={selectedFile?.path ?? null} onOpen={(path) => void openFile(path)} onMention={mentionFile} /></div><div className={cn("min-h-0 flex-1", mobilePane !== "editor" && "hidden md:flex")}><EditorPane value={scratch} onChange={setScratch} onSend={() => void send()} sending={sending} filePath={selectedFile?.path} fileContent={selectedFile?.content} onCloseFile={() => setSelectedFile(null)} /></div><div className={cn("min-h-0 flex-1", mobilePane !== "chat" && "hidden md:flex")}><ChatPane thread={thread} seeded={seeded} live={live} permissions={visiblePermissions} attachments={attachments} onAttachments={setAttachments} onPermission={decide} loading={loading} loadError={loadError} onRetryLoad={onRetryLoad} onBack={onBack} draft={scratch} onDraftChange={setScratch} onSendDraft={send} sending={sending} /></div></div></div>;
+  useEffect(() => {
+    if (fileQuery.data) setSelectedFile(fileQuery.data);
+  }, [fileQuery.data]);
+  if (loading || loadError || !thread) return <ChatPane thread={thread} seeded={seeded} live={live} permissions={visiblePermissions} attachments={attachments} onAttachments={(items) => queryClient.setQueryData(["thread", thread?.id, "attachments"], items)} onPermission={decide} loading={loading} loadError={loadError} onRetryLoad={onRetryLoad} onBack={onBack} draft={scratch} onDraftChange={setScratch} onSendDraft={send} sending={sending} />;
+  return <div className="flex min-h-0 flex-1 flex-col"><div className="flex border-b border-border bg-panel p-1 md:hidden"><Button type="button" size="xs" variant={mobilePane === "files" ? "default" : "ghost"} className="flex-1" onClick={() => setMobilePane("files")}>Files</Button><Button type="button" size="xs" variant={mobilePane === "editor" ? "default" : "ghost"} className="flex-1" onClick={() => setMobilePane("editor")}>Draft</Button><Button type="button" size="xs" variant={mobilePane === "chat" ? "default" : "ghost"} className="flex-1" onClick={() => setMobilePane("chat")}>Chat</Button></div><div className="flex min-h-0 flex-1 flex-col md:flex-row"><div className={cn("min-h-0 flex-1", mobilePane !== "files" && "hidden md:flex")}><FilesSidebar files={files} loading={filesQuery.isPending} selectedPath={selectedFile?.path ?? null} onOpen={(path) => void openFile(path)} onMention={mentionFile} /></div><div className={cn("min-h-0 flex-1", mobilePane !== "editor" && "hidden md:flex")}><EditorPane value={scratch} onChange={setScratch} onSend={() => void send()} sending={sending} filePath={selectedFile?.path} fileContent={selectedFile?.content} onCloseFile={() => setSelectedFile(null)} /></div><div className={cn("min-h-0 flex-1", mobilePane !== "chat" && "hidden md:flex")}><ChatPane thread={thread} seeded={seeded} live={live} permissions={visiblePermissions} attachments={attachments} onAttachments={(items) => queryClient.setQueryData(["thread", thread.id, "attachments"], items)} onPermission={decide} loading={loading} loadError={loadError} onRetryLoad={onRetryLoad} onBack={onBack} draft={scratch} onDraftChange={setScratch} onSendDraft={send} sending={sending} /></div></div></div>;
 }
 
 function StatusDot({ status }: { status: ChatThread["status"] }): JSX.Element {
@@ -287,10 +239,14 @@ function EmptyChat({ onNew }: { onNew: () => void }): JSX.Element {
 }
 
 function ChatPane({ thread, seeded, live, permissions, attachments, onAttachments, onPermission, loading, loadError, onRetryLoad, onBack, draft, onDraftChange, onSendDraft, sending: externalSending }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; permissions: PendingPermission[]; attachments: ChatAttachment[]; onAttachments: (items: ChatAttachment[]) => void; onPermission: (requestId: string, action: "approve" | "deny") => Promise<void>; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void; draft: string; onDraftChange: (value: string) => void; onSendDraft: (attachmentIds?: string[]) => Promise<void>; sending: boolean }): JSX.Element {
-  const { pushError, dispatch } = useBoardContext();
+  const pushError = useToastStore((state) => state.pushError);
+  const applyChatEvent = useChatStore((state) => state.applyChatEvent);
   const [draftSending, setDraftSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const sendMutation = useSendChatMutation();
+  const uploadMutation = useUploadAttachmentMutation();
+  const cancelMutation = useCancelChatMutation();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const messages = useMemo(() => {
@@ -314,9 +270,9 @@ function ChatPane({ thread, seeded, live, permissions, attachments, onAttachment
     setSendError(null);
     onDraftChange("");
     try {
-      const result = await sendChatMessage(thread.id, content, attachments.map((attachment) => attachment.id));
-      dispatch({ type: "thread.message", payload: { threadId: thread.id, message: result.userMessage }, timestamp: new Date().toISOString() });
-      dispatch({ type: "thread.message", payload: { threadId: thread.id, message: result.assistantMessage }, timestamp: new Date().toISOString() });
+       const result = await sendMutation.mutateAsync({ id: thread.id, content, attachmentIds: attachments.map((attachment) => attachment.id) });
+       applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.userMessage }, timestamp: new Date().toISOString() });
+       applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.assistantMessage }, timestamp: new Date().toISOString() });
     } catch (error) {
       const message = error instanceof Error ? error.message : "The agent could not complete the turn.";
       setSendError(message);
@@ -331,7 +287,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, onAttachment
     setUploading(true);
     try {
       const uploaded = [...attachments];
-      for (const file of [...files]) uploaded.push(await uploadChatAttachment(thread.id, file));
+       for (const file of [...files]) uploaded.push(await uploadMutation.mutateAsync({ id: thread.id, file }));
       onAttachments(uploaded);
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "Image upload failed. Check the type and 10 MiB limit.");
@@ -341,7 +297,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, onAttachment
   const cancel = async (): Promise<void> => {
     if (!thread) return;
     try {
-      await cancelChatTurn(thread.id);
+       await cancelMutation.mutateAsync(thread.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to cancel the turn.";
       setSendError(message);

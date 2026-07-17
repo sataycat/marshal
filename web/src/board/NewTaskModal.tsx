@@ -11,14 +11,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
-import { useBoardContext } from "../board/BoardContext";
+import { useTaskStore } from "../state/taskStore";
+import { useToastStore } from "../state/toastStore";
+import { useCreateTaskMutation } from "../api/queries";
 
 interface Props {
   onClose: () => void;
 }
 
 export function NewTaskModal({ onClose }: Props) {
-  const { createTask, pushError } = useBoardContext();
+  const applyTaskEvent = useTaskStore((state) => state.applyTaskEvent);
+  const createTask = useCreateTaskMutation();
+  const pushError = useToastStore((state) => state.pushError);
   const [title, setTitle] = useState("");
   const [spec, setSpec] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -30,12 +34,14 @@ export function NewTaskModal({ onClose }: Props) {
       return;
     }
     setSubmitting(true);
-    const task = await createTask({
+    const task = await createTask.mutateAsync({
       title: trimmed,
       spec_markdown: spec.trim().length > 0 ? spec : undefined,
     });
+    const { spec_markdown: _spec, last_failure: _failure, ...card } = task;
+    applyTaskEvent({ type: "task.created", payload: card, timestamp: new Date().toISOString() });
     setSubmitting(false);
-    if (task) onClose();
+    onClose();
   };
 
   return (

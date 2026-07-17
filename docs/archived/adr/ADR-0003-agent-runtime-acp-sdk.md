@@ -1,9 +1,9 @@
 # ADR-0003: Agent Runtime — Direct ACP SDK
 
-**Status:** Accepted (implemented; ACPX retired)
+**Status:** Accepted
 **Date:** 2026-07-15  
 **Parent:** —  
-**Amends:** ADR-0002 (chat interface) and the deferred Chat Session Model child ADR (ACPX-specific session implementation)  
+**Amends:** ADR-0002 (chat interface) and the Chat Session Model child ADR (ACPX-specific session implementation)  
 **Supersedes:** The planned implementation described by the archived M0 reference to ADR-003
 
 ---
@@ -240,7 +240,7 @@ The implementation updates the following references:
 
 - `docs/ARCHITECTURE.md` §5: describe the SDK adapter, command configuration, and permission ownership.
 - `docs/PROJECT.md` §3 and §8: describe direct ACP as the durable substrate.
-- `docs/adr/ADR-0002-chat-interface.md`: preserve the Marshal-owned thread model summary but replace ACPX-specific lifecycle claims with adapter-neutral ACP session behavior (full session-model detail now lives in the deferred Chat Session Model child ADR).
+- `docs/archived/adr/ADR-0002-chat-interface.md`: preserve the Marshal-owned thread model summary but replace ACPX-specific lifecycle claims with adapter-neutral ACP session behavior (full session-model detail now lives in the Chat Session Model child ADR).
 - `AGENTS.md`: remove the ACPX prerequisite and string-role support.
 - Human testing and onboarding documentation: document agent command configuration and direct ACP diagnostics.
 

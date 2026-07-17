@@ -29,23 +29,25 @@ export interface MergeResponse {
   task: TaskDetail;
 }
 
-export async function fetchTasks(): Promise<TaskCard[]> {
-  const res = await fetch("/api/tasks");
-  if (!res.ok) throw new Error(`Failed to list tasks: ${res.status}`);
-  const body = (await res.json()) as { tasks: TaskCard[] };
+export async function fetchTasks(signal?: AbortSignal): Promise<TaskCard[]> {
+  const res = await fetch("/api/tasks", { signal });
+  const body = await jsonOrThrow<{ tasks: TaskCard[] }>(res);
   return body.tasks;
 }
 
-export async function fetchTaskDetail(slug: string): Promise<TaskDetail> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}`);
-  if (!res.ok) throw new Error(`Failed to load task ${slug}: ${res.status}`);
-  const body = (await res.json()) as { task: TaskDetail };
+export async function fetchTaskDetail(slug: string, signal?: AbortSignal): Promise<TaskDetail> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}`, { signal });
+  const body = await jsonOrThrow<{ task: TaskDetail }>(res);
   return body.task;
 }
 
-export interface ApiError extends Error {
+export class ApiError extends Error {
   code?: string;
-  status: number;
+  constructor(message: string, public readonly status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
 }
 
 interface ErrorEnvelope {
@@ -61,10 +63,7 @@ async function readError(res: Response): Promise<ApiError> {
     envelope = null;
   }
   const message = envelope?.error ?? `Request failed: ${res.status}`;
-  const err = new Error(message) as ApiError;
-  err.status = res.status;
-  if (envelope?.code !== undefined) err.code = envelope.code;
-  return err;
+  return new ApiError(message, res.status, envelope?.code);
 }
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
@@ -107,8 +106,8 @@ export async function transitionTask(slug: string, to: TaskStatus): Promise<Task
   return json.task;
 }
 
-export async function fetchTaskDiff(slug: string): Promise<DiffResponse> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/diff`);
+export async function fetchTaskDiff(slug: string, signal?: AbortSignal): Promise<DiffResponse> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/diff`, { signal });
   return jsonOrThrow<DiffResponse>(res);
 }
 
@@ -121,8 +120,8 @@ export async function mergeTask(slug: string): Promise<MergeResponse> {
   return jsonOrThrow<MergeResponse>(res);
 }
 
-export async function fetchSpecMessages(slug: string): Promise<SpecMessage[]> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-messages`);
+export async function fetchSpecMessages(slug: string, signal?: AbortSignal): Promise<SpecMessage[]> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-messages`, { signal });
   const body = await jsonOrThrow<{ messages: SpecMessage[] }>(res);
   return body.messages;
 }
@@ -154,14 +153,14 @@ export async function updateTaskSpec(slug: string, specMarkdown: string): Promis
   return body.task;
 }
 
-export async function fetchChatThreads(includeArchived = false): Promise<ChatThread[]> {
-  const res = await fetch(`/api/threads${includeArchived ? "?archived=true" : ""}`);
+export async function fetchChatThreads(includeArchived = false, signal?: AbortSignal): Promise<ChatThread[]> {
+  const res = await fetch(`/api/threads${includeArchived ? "?archived=true" : ""}`, { signal });
   const body = await jsonOrThrow<{ threads: ChatThread[] }>(res);
   return body.threads;
 }
 
-export async function fetchChatAgents(): Promise<string[]> {
-  const res = await fetch("/api/chat-agents");
+export async function fetchChatAgents(signal?: AbortSignal): Promise<string[]> {
+  const res = await fetch("/api/chat-agents", { signal });
   const body = await jsonOrThrow<{ agents: string[] }>(res);
   return body.agents;
 }
@@ -186,8 +185,8 @@ export async function deleteChatThread(id: string): Promise<void> {
   await jsonOrThrow<{ deleted: boolean }>(res);
 }
 
-export async function fetchChatThread(id: string): Promise<{ thread: ChatThread; messages: ChatMessage[] }> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}`);
+export async function fetchChatThread(id: string, signal?: AbortSignal): Promise<{ thread: ChatThread; messages: ChatMessage[] }> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, { signal });
   return jsonOrThrow<{ thread: ChatThread; messages: ChatMessage[] }>(res);
 }
 
@@ -196,6 +195,11 @@ export async function uploadChatAttachment(id: string, file: File): Promise<Chat
   form.append("file", file);
   const res = await fetch(`/api/threads/${encodeURIComponent(id)}/attachments`, { method: "POST", body: form });
   return (await jsonOrThrow<{ attachment: ChatAttachment }>(res)).attachment;
+}
+
+export async function fetchChatAttachments(id: string, signal?: AbortSignal): Promise<ChatAttachment[]> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/attachments`, { signal });
+  return (await jsonOrThrow<{ attachments: ChatAttachment[] }>(res)).attachments;
 }
 
 export function chatAttachmentUrl(threadId: string, attachmentId: string): string {
@@ -216,8 +220,8 @@ export async function cancelChatTurn(id: string): Promise<void> {
   await jsonOrThrow<{ cancelled: boolean }>(res);
 }
 
-export async function fetchChatPermissions(id: string): Promise<PendingPermission[]> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/permissions`);
+export async function fetchChatPermissions(id: string, signal?: AbortSignal): Promise<PendingPermission[]> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/permissions`, { signal });
   return (await jsonOrThrow<{ permissions: PendingPermission[] }>(res)).permissions;
 }
 
@@ -230,13 +234,13 @@ export async function decideChatPermission(id: string, requestId: string, action
   await jsonOrThrow<{ requestId: string; action: string }>(res);
 }
 
-export async function fetchChatFiles(id: string): Promise<ChatFileEntry[]> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/files`);
+export async function fetchChatFiles(id: string, signal?: AbortSignal): Promise<ChatFileEntry[]> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/files`, { signal });
   return (await jsonOrThrow<{ files: ChatFileEntry[] }>(res)).files;
 }
 
-export async function fetchChatFile(id: string, path: string): Promise<ChatFileContent> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/files/content?path=${encodeURIComponent(path)}`);
+export async function fetchChatFile(id: string, path: string, signal?: AbortSignal): Promise<ChatFileContent> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/files/content?path=${encodeURIComponent(path)}`, { signal });
   return (await jsonOrThrow<{ file: ChatFileContent }>(res)).file;
 }
 

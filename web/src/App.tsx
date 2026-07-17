@@ -1,9 +1,10 @@
 import { lazy, Suspense } from "react";
 import { Route, Switch, Redirect } from "wouter";
-import { BoardProvider } from "./board/BoardContext";
 import { AppShell } from "./shell/AppShell";
 import { ToastHost } from "./toast/ToastHost";
 import { ROUTES } from "./routes/routes";
+import { WebSocketBridge } from "./state/WebSocketBridge";
+import { ConfirmProvider } from "./components/ConfirmDialog";
 
 const BoardRoute = lazy(() =>
   import("./routes/BoardRoute").then((m) => ({ default: m.BoardRoute })),
@@ -24,8 +25,9 @@ function RouteFallback(): JSX.Element {
 
 export function App(): JSX.Element {
   return (
-    <BoardProvider>
-      <AppShell>
+    <ConfirmProvider>
+      <WebSocketBridge>
+        <AppShell>
         <Suspense fallback={<RouteFallback />}>
           <Switch>
             <Route path={ROUTES.home}>
@@ -45,8 +47,9 @@ export function App(): JSX.Element {
             </Route>
           </Switch>
         </Suspense>
-      </AppShell>
-      <ToastHost />
-    </BoardProvider>
+        </AppShell>
+        <ToastHost />
+      </WebSocketBridge>
+    </ConfirmProvider>
   );
 }

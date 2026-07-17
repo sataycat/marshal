@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
-import { useBoardContext } from "../board/BoardContext";
+import { useToastStore } from "../state/toastStore";
 import { cn } from "@/lib/utils";
 import type { Toast } from "./toast";
 
@@ -11,7 +11,8 @@ const AUTO_DISMISS_MS: Record<Toast["kind"], number> = {
 };
 
 export function ToastHost() {
-  const { toasts, dismissToast } = useBoardContext();
+  const toasts = useToastStore((state) => state.toasts);
+  const dismissToast = useToastStore((state) => state.dismiss);
   return (
     <div
       className="fixed right-4 bottom-4 z-50 flex max-w-[min(360px,calc(100vw-2rem))] flex-col gap-2"

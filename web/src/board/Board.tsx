@@ -4,7 +4,7 @@ import type { TaskCard, TaskStatus } from "../types";
 import { TaskCardView } from "./TaskCard";
 import { TaskDetailPanel } from "../detail/TaskDetail";
 import { NewTaskModal } from "./NewTaskModal";
-import { useBoardContext } from "./BoardContext";
+import { useTaskStore, selectTasks } from "../state/taskStore";
 import { useNow } from "../hooks/useNow";
 import { Button } from "@/components/ui/button";
 
@@ -18,7 +18,7 @@ const COLUMNS: { status: TaskStatus; title: string }[] = [
 ];
 
 export function Board() {
-  const { tasks } = useBoardContext();
+  const tasks = useTaskStore(selectTasks);
   const [selected, setSelected] = useState<TaskCard | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
   const now = useNow(5000);

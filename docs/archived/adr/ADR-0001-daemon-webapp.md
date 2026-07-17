@@ -1,9 +1,9 @@
 # ADR-0001: Daemon Webapp — Full-Featured Web Client
 
-**Status:** Proposed (sequencing revised — chat-first)  
+**Status:** Accepted (sequencing revised — chat-first)
 **Date:** 2024-07-14  
 **Parent:** —  
-**Children:** ADR-0001a (Frontend Infrastructure), ADR-0002 (Chat Interface)
+**Children:** ADR-0001a (Frontend Infrastructure), [ADR-0001b (Frontend State and Data Fetching)](../../../adr/ADR-0001b-frontend-state-and-data-fetching.md), ADR-0002 (Chat Interface)
 
 ---
 
@@ -132,11 +132,11 @@ Mobile: single-panel with bottom nav
 
 | ID        | Topic                                  | Status                 | Scope                                                                                                                                                                                          |
 | --------- | -------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ADR-0001a | Frontend infrastructure (consolidated) | Proposed               | Routing, responsive layout, performance budget, accessibility,                                                                                                                                 |
+| ADR-0001a | Frontend infrastructure (consolidated) | Accepted               | Routing, responsive layout, performance budget, accessibility,                                                                                                                                 |
 |           |                                        |                        | code editing/syntax highlighting — absorbs former ADR-0001c/d/e/f                                                                                                                              |
 |           |                                        |                        | and the routing slot                                                                                                                                                                           |
-| ADR-0002  | Chat interface                         | Proposed               | 4-pane layout (sessions/files/editor+preview/chat), ACP event rendering, thinking + image upload, agent selector, thread model summary (session/permission/attachments deferred to child ADRs) |
-| ADR-0001b | ~~Chat architecture~~                  | Superseded by ADR-0002 | ~~Daemon API additions, WS event extensions, streaming protocol~~                                                                                                                              |
+| ADR-0002  | Chat interface                         | Accepted               | 4-pane layout (sessions/files/editor+preview/chat), ACP event rendering, thinking + image upload, agent selector, thread model summary (session/permission/attachments deferred to child ADRs) |
+| ADR-0001b | Frontend state and data fetching        | Proposed               | Zustand/TanStack Query refactoring; replaces the broad BoardProvider incrementally                                                                                                               |
 
 ---
 

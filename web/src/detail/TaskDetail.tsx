@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import {
   Sheet,
@@ -9,9 +10,12 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { fetchTaskDetail, fetchTaskDiff, type DiffStats } from "../api/client";
+import { useTaskDetailQuery, useTaskDiffQuery } from "../api/queries";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
-import { useBoardContext } from "../board/BoardContext";
+import { useTaskStore } from "../state/taskStore";
+import { queryKeys } from "../api/queryKeys";
+import { useFreezeTaskMutation, useMergeTaskMutation, useTransitionTaskMutation } from "../api/queries";
+import { useConfirmContext } from "../components/ConfirmDialog";
 import { actionsForStatus, confirmMessage, type BoardAction } from "../board/actions";
 import type { TaskDetail } from "../types";
 import { DiffView } from "../diff/DiffView";
@@ -24,57 +28,23 @@ interface Props {
 }
 
 export function TaskDetailPanel({ slug, onClose }: Props) {
-  const { freezeTask, transitionTask, mergeTask, confirm } = useBoardContext();
-  const [detail, setDetail] = useState<TaskDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const applyTaskEvent = useTaskStore((state) => state.applyTaskEvent);
+  const freezeTask = useFreezeTaskMutation();
+  const transitionTask = useTransitionTaskMutation();
+  const mergeTask = useMergeTaskMutation();
+  const queryClient = useQueryClient();
+  const { confirm } = useConfirmContext();
+  const detailQuery = useTaskDetailQuery(slug);
+  const detail = detailQuery.data ?? null;
+  const [localDetail, setLocalDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
-  const [diff, setDiff] = useState<string | null>(null);
-  const [diffError, setDiffError] = useState<string | null>(null);
-  const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setDetail(null);
-    setError(null);
-    setDiff(null);
-    setDiffError(null);
-    setDiffStats(null);
-    fetchTaskDetail(slug)
-      .then((d) => {
-        if (!cancelled) setDetail(d);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [slug]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setDiff(null);
-    setDiffError(null);
-    setDiffStats(null);
-    if (detail === null || detail.status !== "review") return;
-    fetchTaskDiff(slug)
-      .then((res) => {
-        if (cancelled) return;
-        setDiff(res.diff);
-        setDiffStats(res.stats);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setDiff(null);
-        setDiffError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [slug, detail?.status]);
+  const effectiveDetail = localDetail?.slug === slug ? localDetail : detail;
+  const diffQuery = useTaskDiffQuery(slug, effectiveDetail?.status === "review");
+  const diff = diffQuery.data?.diff ?? null;
+  const diffStats = diffQuery.data?.stats ?? null;
 
   const runAction = async (action: BoardAction): Promise<void> => {
-    if (detail === null || busy) return;
+    if (effectiveDetail === null || busy) return;
     if (action.confirm) {
       const ok = await confirm({
         title: "Are you sure?",
@@ -83,28 +53,31 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
       if (!ok) return;
     }
     setBusy(true);
-    const previous: TaskDetail = detail;
-    setDetail({ ...detail, status: action.to });
+    const previous: TaskDetail = effectiveDetail;
+    setLocalDetail({ ...effectiveDetail, status: action.to });
     try {
       let result: TaskDetail | null;
       if (action.kind === "freeze") {
-        result = await freezeTask(slug, previous);
+        result = await freezeTask.mutateAsync({ slug });
       } else if (action.kind === "merge") {
-        result = await mergeTask(slug, previous);
+        result = (await mergeTask.mutateAsync(slug)).task;
       } else {
-        result = await transitionTask(slug, action.to, previous);
+        result = await transitionTask.mutateAsync({ slug, to: action.to });
       }
       if (result) {
-        setDetail(result);
+        const { spec_markdown: _spec, last_failure: _failure, ...card } = result;
+        applyTaskEvent({ type: "task.updated", payload: card, timestamp: new Date().toISOString() });
+        queryClient.setQueryData(queryKeys.task(slug), result);
+        setLocalDetail(result);
       } else {
-        setDetail(previous);
+        setLocalDetail(previous);
       }
     } finally {
       setBusy(false);
     }
   };
 
-  const actions = detail ? actionsForStatus(detail.status) : [];
+  const actions = effectiveDetail ? actionsForStatus(effectiveDetail.status) : [];
 
   return (
     <Sheet open onOpenChange={(open) => !open && onClose()}>
@@ -116,10 +89,10 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <SheetTitle className="truncate text-base">
-                {detail?.title ?? "Task Detail"}
+                {effectiveDetail?.title ?? "Task Detail"}
               </SheetTitle>
               <SheetDescription className="font-mono text-xs">
-                {detail?.slug ?? slug}
+                 {effectiveDetail?.slug ?? slug}
               </SheetDescription>
             </div>
             <Button
@@ -133,45 +106,44 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
           </div>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto p-4">
-          {error && (
-            <p className="mb-3 text-sm text-[var(--color-error)]">{error}</p>
+          {detailQuery.error && (
+            <p className="mb-3 text-sm text-[var(--color-error)]">{detailQuery.error.message}</p>
           )}
-          {!detail && !error && <p className="text-sm text-muted">Loading…</p>}
-          {detail && (
+          {detailQuery.isPending && <p className="text-sm text-muted">Loading…</p>}
+          {effectiveDetail && (
             <div className="flex flex-col gap-3 text-sm">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-muted">
                 <span>
                   Status:{" "}
                   <strong className="font-semibold text-text">
-                    {detail.status}
+                    {effectiveDetail.status}
                   </strong>
                 </span>
-                <span>Retries: {detail.retry_count}</span>
+                <span>Retries: {effectiveDetail.retry_count}</span>
               </div>
-              {detail.last_failure && (
+                {effectiveDetail.last_failure && (
                 <details className="rounded-md border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-2 text-xs">
                   <summary className="cursor-pointer font-medium text-[var(--color-error)]">
                     Last failure
                   </summary>
                   <pre className="mt-2 whitespace-pre-wrap font-mono text-xs text-text">
-                    {detail.last_failure}
+                     {effectiveDetail.last_failure}
                   </pre>
                 </details>
               )}
               <Separator />
               <h3 className="text-sm font-semibold">Spec</h3>
-              <MarkdownWithCode className="spec leading-relaxed" src={detail.spec_markdown} />
-              {detail.status === "backlog" && (
+               <MarkdownWithCode className="spec leading-relaxed" src={effectiveDetail.spec_markdown} />
+               {effectiveDetail.status === "backlog" && (
                 <SpecChatPanel
                   slug={slug}
-                  detail={detail}
-                  onSpecUpdated={(updated) => setDetail(updated)}
+                    onSpecUpdated={(updated) => setLocalDetail(updated)}
                   onFrozen={(frozen) => {
-                    if (frozen) setDetail(frozen);
+                    if (frozen) setLocalDetail(frozen);
                   }}
                 />
               )}
-              {detail.status === "review" && (
+               {effectiveDetail.status === "review" && (
                 <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
                   <h3 className="flex items-baseline gap-2 text-sm font-semibold">
                     Diff
@@ -183,12 +155,12 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
                       </span>
                     )}
                   </h3>
-                  {diffError && (
+                   {diffQuery.error && (
                     <p className="text-sm text-[var(--color-error)]">
-                      {diffError}
+                       {diffQuery.error.message}
                     </p>
                   )}
-                  {!diff && !diffError && (
+                   {diffQuery.isPending && (
                     <p className="text-sm text-muted">Loading diff…</p>
                   )}
                   {diff !== null && <DiffView files={parseUnifiedDiff(diff)} />}

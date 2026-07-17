@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Send, Snowflake } from "lucide-react";
-import { fetchSpecMessages } from "../api/client";
+import { useFreezeTaskMutation, useSendSpecMessageMutation, useSpecMessagesQuery, useUpdateTaskSpecMutation } from "../api/queries";
 import { extractMarshalSpec, MARSHAL_SPEC_FENCE } from "./marshalSpec";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
-import { useBoardContext } from "../board/BoardContext";
+import { useTaskStore, selectSpecMessages } from "../state/taskStore";
+import { useToastStore } from "../state/toastStore";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
@@ -12,51 +13,31 @@ import type { SpecMessage, TaskDetail } from "../types";
 
 interface Props {
   slug: string;
-  detail: TaskDetail;
   onSpecUpdated: (task: TaskDetail) => void;
   onFrozen: (task: TaskDetail | null) => void;
 }
 
-export function SpecChatPanel({ slug, detail, onSpecUpdated, onFrozen }: Props) {
-  const { specMessagesFor, sendSpecMessage, updateTaskSpec, freezeTask, pushError, pushInfo } =
-    useBoardContext();
-  const streamed = specMessagesFor(slug);
-  const [seeded, setSeeded] = useState<SpecMessage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
+  const streamed = useTaskStore(selectSpecMessages(slug));
+  const applyTaskEvent = useTaskStore((state) => state.applyTaskEvent);
+  const sendSpecMessage = useSendSpecMessageMutation();
+  const updateTaskSpec = useUpdateTaskSpecMutation();
+  const freezeTask = useFreezeTaskMutation();
+  const pushError = useToastStore((state) => state.pushError);
+  const pushInfo = useToastStore((state) => state.pushInfo);
+  const messagesQuery = useSpecMessagesQuery(slug);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [applying, setApplying] = useState(false);
   const [freezing, setFreezing] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setSeeded([]);
-    fetchSpecMessages(slug)
-      .then((next) => {
-        if (cancelled) return;
-        setSeeded(next);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [slug]);
-
   const messages = useMemo<SpecMessage[]>(() => {
     const map = new Map<number, SpecMessage>();
-    for (const m of seeded) map.set(m.id, m);
+    for (const m of messagesQuery.data ?? []) map.set(m.id, m);
     for (const m of streamed) map.set(m.id, m);
     return [...map.values()].sort((a, b) => a.id - b.id);
-  }, [seeded, streamed]);
+  }, [messagesQuery.data, streamed]);
 
   const proposedSpec = useMemo<string | null>(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -80,14 +61,13 @@ export function SpecChatPanel({ slug, detail, onSpecUpdated, onFrozen }: Props) 
     setSending(true);
     setDraft("");
     try {
-      const res = await sendSpecMessage(slug, text);
-      if (res === null) {
+      const res = await sendSpecMessage.mutateAsync({ slug, content: text });
+      applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.userMessage }, timestamp: new Date().toISOString() });
+      applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.assistantMessage }, timestamp: new Date().toISOString() });
+      } catch (err) {
+        pushError(err instanceof Error ? err.message : String(err));
         setDraft(text);
-      }
-    } catch (err) {
-      pushError(err instanceof Error ? err.message : String(err));
-      setDraft(text);
-    } finally {
+      } finally {
       setSending(false);
     }
   };
@@ -96,8 +76,10 @@ export function SpecChatPanel({ slug, detail, onSpecUpdated, onFrozen }: Props) 
     if (proposedSpec === null || applying) return;
     setApplying(true);
     try {
-      const updated = await updateTaskSpec(slug, proposedSpec);
+      const updated = await updateTaskSpec.mutateAsync({ slug, specMarkdown: proposedSpec });
       if (updated) {
+        const { spec_markdown: _spec, last_failure: _failure, ...card } = updated;
+        applyTaskEvent({ type: "task.updated", payload: card, timestamp: new Date().toISOString() });
         pushInfo("Spec updated from the latest proposal.");
         onSpecUpdated(updated);
       }
@@ -112,7 +94,7 @@ export function SpecChatPanel({ slug, detail, onSpecUpdated, onFrozen }: Props) 
     if (freezing) return;
     setFreezing(true);
     try {
-      const result = await freezeTask(slug, detail, undefined);
+      const result = await freezeTask.mutateAsync({ slug });
       if (result) onFrozen(result);
     } finally {
       setFreezing(false);
@@ -122,11 +104,11 @@ export function SpecChatPanel({ slug, detail, onSpecUpdated, onFrozen }: Props) 
   return (
     <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
       <h3 className="text-sm font-semibold">Spec Authoring Chat</h3>
-      {loading && <p className="text-sm text-muted">Loading chat…</p>}
-      {error && <p className="text-sm text-[var(--color-error)]">{error}</p>}
+      {messagesQuery.isPending && <p className="text-sm text-muted">Loading chat…</p>}
+      {messagesQuery.error && <p className="text-sm text-[var(--color-error)]">{messagesQuery.error.message}</p>}
       <ScrollArea className="h-72 rounded-md border border-border bg-bg/30 p-2">
         <div ref={listRef}>
-          {messages.length === 0 && !loading && (
+          {messages.length === 0 && !messagesQuery.isPending && (
             <p className="my-1 text-sm text-muted">
               Describe the task and let the agent ask clarifying questions.
             </p>

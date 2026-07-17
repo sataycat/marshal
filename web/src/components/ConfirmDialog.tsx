@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,8 @@ export interface ConfirmApi {
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   dialog: React.ReactNode;
 }
+
+const ConfirmContext = createContext<ConfirmApi | null>(null);
 
 interface Pending {
   options: ConfirmOptions;
@@ -80,4 +82,15 @@ export function useConfirm(): ConfirmApi {
     );
 
   return { confirm, dialog };
+}
+
+export function ConfirmProvider({ children }: { children: ReactNode }): JSX.Element {
+  const api = useConfirm();
+  return <ConfirmContext.Provider value={api}>{children}{api.dialog}</ConfirmContext.Provider>;
+}
+
+export function useConfirmContext(): Pick<ConfirmApi, "confirm"> {
+  const api = useContext(ConfirmContext);
+  if (!api) throw new Error("useConfirmContext must be used inside a ConfirmProvider");
+  return api;
 }
