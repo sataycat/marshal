@@ -18,6 +18,30 @@ export interface DiffStats {
   deletions: number;
 }
 
+export interface AuthStatus {
+  enabled: boolean;
+  authenticated: boolean;
+}
+
+export async function fetchAuthStatus(signal?: AbortSignal): Promise<AuthStatus> {
+  const res = await fetch("/api/auth/status", { signal });
+  return jsonOrThrow<AuthStatus>(res);
+}
+
+export async function login(password: string): Promise<AuthStatus> {
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  return jsonOrThrow<AuthStatus>(res);
+}
+
+export async function logout(): Promise<void> {
+  const res = await fetch("/api/auth/logout", { method: "POST" });
+  await jsonOrThrow<AuthStatus>(res);
+}
+
 export interface DiffResponse {
   diff: string;
   stats: DiffStats;

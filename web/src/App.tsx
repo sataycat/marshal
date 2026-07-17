@@ -5,6 +5,7 @@ import { ToastHost } from "./toast/ToastHost";
 import { ROUTES } from "./routes/routes";
 import { WebSocketBridge } from "./state/WebSocketBridge";
 import { ConfirmProvider } from "./components/ConfirmDialog";
+import { AuthGate } from "./auth/AuthGate";
 
 const BoardRoute = lazy(() =>
   import("./routes/BoardRoute").then((m) => ({ default: m.BoardRoute })),
@@ -25,8 +26,9 @@ function RouteFallback(): JSX.Element {
 
 export function App(): JSX.Element {
   return (
-    <ConfirmProvider>
-      <WebSocketBridge>
+    <AuthGate>
+      <ConfirmProvider>
+        <WebSocketBridge>
         <AppShell>
         <Suspense fallback={<RouteFallback />}>
           <Switch>
@@ -49,7 +51,8 @@ export function App(): JSX.Element {
         </Suspense>
         </AppShell>
         <ToastHost />
-      </WebSocketBridge>
-    </ConfirmProvider>
+        </WebSocketBridge>
+      </ConfirmProvider>
+    </AuthGate>
   );
 }

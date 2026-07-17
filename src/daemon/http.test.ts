@@ -26,6 +26,33 @@ describe("buildApp /api/health", () => {
   });
 });
 
+describe("authenticated HTTP server", () => {
+  it("protects API routes and supports login/logout", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-auth-"));
+    const handle = await startHttpServer({ root, host: "127.0.0.1", port: 0, version: "0.0.1", uiPassword: "secret" });
+    try {
+      const base = `http://127.0.0.1:${handle.port}`;
+      expect((await fetch(`${base}/api/tasks`)).status).toBe(401);
+      const login = await fetch(`${base}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: "secret" }),
+      });
+      expect(login.status).toBe(200);
+      const cookie = login.headers.get("set-cookie");
+      expect(cookie).toContain("HttpOnly");
+      expect((await fetch(`${base}/api/tasks`, { headers: { Cookie: cookie?.split(";")[0] ?? "" } })).status).toBe(200);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("rejects non-loopback startup without a password", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-auth-bind-"));
+    await expect(startHttpServer({ root, host: "0.0.0.0", port: 0, version: "0.0.1" })).rejects.toThrow("Refusing non-loopback bind without a UI password");
+  });
+});
+
 describe("startHttpServer", () => {
   let root: string;
 

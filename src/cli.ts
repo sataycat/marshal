@@ -80,7 +80,11 @@ daemon
   .option("--interval <ms>", "Poll interval in milliseconds", "5000")
   .option("--port <number>", "HTTP API port (default: 7433 or config daemon.port)")
   .option("--host <addr>", "HTTP API bind address (default: 127.0.0.1)")
-  .action(async (options: { interval: string; port?: string; host?: string }) => {
+  .option("--lan", "Bind to all interfaces (0.0.0.0)")
+  .action(async (options: { interval: string; port?: string; host?: string; lan?: boolean }) => {
+    if (options.lan && options.host) {
+      throw new Error("The --lan and --host options cannot be combined.");
+    }
     const controller = new AbortController();
     const stop = (): void => controller.abort();
     process.on("SIGINT", stop);
@@ -88,7 +92,7 @@ daemon
     try {
       const config = loadGlobalConfig();
       const port = options.port !== undefined ? Number(options.port) : config.daemon?.port;
-      const host = options.host ?? config.daemon?.host;
+       const host = options.lan ? "0.0.0.0" : options.host ?? config.daemon?.host;
       const http = await startHttpServer({
         root: process.cwd(),
         host,

@@ -16,6 +16,8 @@ export interface WebSocketBridgeOptions {
   path: string;
   pingIntervalMs?: number;
   dropAfterMs?: number;
+  authenticate?: (req: import("node:http").IncomingMessage) => boolean;
+  allowedOrigins?: string[];
 }
 
 export interface WebSocketBridgeHandle {
@@ -47,6 +49,24 @@ export function attachWebSocket(
   function onUpgrade(req: import("node:http").IncomingMessage, socket: import("node:net").Socket, head: Buffer): void {
     const requestUrl = new URL(req.url ?? "", "http://127.0.0.1");
     if (requestUrl.pathname !== path) {
+      socket.destroy();
+      return;
+    }
+    const origin = req.headers.origin;
+    if (origin) {
+      let ownOrigin = false;
+      try {
+        ownOrigin = new URL(origin).host === req.headers.host;
+      } catch {
+        ownOrigin = false;
+      }
+      if (!ownOrigin && !options.allowedOrigins?.includes(origin)) {
+        socket.destroy();
+        return;
+      }
+    }
+    if (options.authenticate && !options.authenticate(req)) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
     }

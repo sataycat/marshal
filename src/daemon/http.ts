@@ -11,6 +11,7 @@ import {
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_PORT,
   resolveDaemonBind,
+  isLoopbackHost,
   type GlobalConfig,
 } from "../worktree/config.js";
 import {
@@ -64,6 +65,7 @@ import { publishThreadCreated, publishThreadDeleted, publishThreadMessage, publi
 import { ChatTurnBusyError, ChatTurnRunner } from "./chat-turn.js";
 import { ChatFileTooLargeError, InvalidChatPathError, listChatFiles, readChatFile } from "../chat/files.js";
 import { ChatAttachmentError, createChatAttachment, listChatAttachments, MAX_ATTACHMENT_BYTES, readChatAttachment } from "../chat/attachments.js";
+import { AuthService } from "./auth.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -76,6 +78,8 @@ export interface HttpServerOptions {
   bus?: EventBus;
   attachWebSockets?: boolean;
   webDir?: string;
+  uiPassword?: string;
+  trustedOrigins?: string[];
 }
 
 export interface HttpServerHandle {
@@ -104,6 +108,7 @@ export interface BuildAppOptions {
   webDir?: string;
   specAgent?: Agent;
   chatAgent?: Agent;
+  auth?: AuthService;
 }
 
 export function defaultWebDistDir(): string {
@@ -116,6 +121,27 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   const bus = options.bus;
   const webDir = options.webDir ?? defaultWebDistDir();
   const app = new Hono();
+  const auth = options.auth;
+  if (auth) {
+    app.use("/api/*", auth.middleware);
+    app.get("/api/auth/status", (c) => c.json({ enabled: auth.enabled, authenticated: auth.isAuthenticated(c.req.header("Cookie")) }));
+    app.post("/api/auth/login", async (c) => {
+      const body = await readJsonObject(c, new Set(["password"]));
+      if (typeof body.password !== "string") throw new ApiError(422, "password is required", "missing_field");
+      const result = auth.login(body.password, "direct");
+      if (result.retryAfter !== undefined) {
+        return new Response(JSON.stringify({ error: "Too many failed login attempts", code: "rate_limited" }), { status: 429, headers: { "Content-Type": "application/json", "Retry-After": String(result.retryAfter) } });
+      }
+      if (!result.token) return c.json({ authenticated: true });
+      return c.json({ authenticated: true }, 200, {
+        "Set-Cookie": auth.cookie(result.token, undefined, c.req.header("x-forwarded-proto") === "https"),
+      });
+    });
+    app.post("/api/auth/logout", (c) => {
+      auth.logout(c.req.header("Cookie"));
+      return c.json({ authenticated: false }, 200, { "Set-Cookie": auth.clearCookie() });
+    });
+  }
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
   registerRunRoutes(app, root);
@@ -896,11 +922,16 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     { host: options.host, port: options.port },
     options.config,
   );
+  const password = options.uiPassword ?? options.config?.daemon?.uiPassword ?? process.env.MARSHAL_UI_PASSWORD;
+  if (!isLoopbackHost(host) && !password) {
+    throw new Error("Refusing non-loopback bind without a UI password.\nSet MARSHAL_UI_PASSWORD or provide the configured daemon auth password.");
+  }
+  const auth = new AuthService({ password, secureCookies: false });
   const version = options.version ?? readVersion();
   const bus = options.bus ?? new EventBus();
   const attachWs = options.attachWebSockets ?? true;
 
-  const app = buildApp(version, { root, bus, webDir: options.webDir });
+  const app = buildApp(version, { root, bus, webDir: options.webDir, auth });
   const server = serve({ fetch: app.fetch, hostname: host, port });
 
   let bound: { host: string; port: number };
@@ -922,6 +953,8 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
       threads: listChatThreads(root),
     }), {
       path: "/ws",
+      authenticate: (req) => auth.isAuthenticated(req.headers.cookie),
+      allowedOrigins: options.trustedOrigins ?? options.config?.daemon?.trustedOrigins,
     });
   }
 

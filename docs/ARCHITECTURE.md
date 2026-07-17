@@ -47,6 +47,9 @@ All under `127.0.0.1:<port>` (default `7433`). Hono for routing; `ws` library fo
 | Method | Path                                   | Purpose                                                   |
 | ------ | -------------------------------------- | --------------------------------------------------------- |
 | GET    | `/api/health`                          | Health check.                                             |
+| GET    | `/api/auth/status`                      | Authentication status.                                    |
+| POST   | `/api/auth/login`                       | Create an authenticated browser session.                  |
+| POST   | `/api/auth/logout`                      | Revoke the current browser session.                       |
 | GET    | `/api/tasks`                           | List tasks.                                               |
 | GET    | `/api/tasks/:slug`                     | One task (board fields + spec + retry state).             |
 | POST   | `/api/tasks`                           | Create a `backlog` task.                                  |
@@ -66,7 +69,7 @@ All under `127.0.0.1:<port>` (default `7433`). Hono for routing; `ws` library fo
 | GET    | `/ws`                                  | WebSocket event stream.                                   |
 | GET    | `/`, `/assets/*`                       | Static SPA.                                               |
 
-Error envelope: `{ "error": "human message", "code": "machine_code" }`. Status codes: 400 (malformed), 404 (not found), 409 (lifecycle conflict), 422 (semantic error), 500 (unexpected).
+Error envelope: `{ "error": "human message", "code": "machine_code" }`. Status codes: 400 (malformed), 401 (authentication required), 404 (not found), 409 (lifecycle conflict), 422 (semantic error), 429 (login rate limit), 500 (unexpected).
 
 The freeze endpoint (`POST .../ready`) is intentionally separate from the transition endpoint because freeze has filesystem + git side effects; conflating it with a pure state move makes error recovery ambiguous.
 
@@ -160,7 +163,7 @@ Re-freezing creates a new commit (not an amend) — audit trail preserved.
 
 ## 8. Security and isolation
 
-The daemon is an **RCE-as-a-service** surface — it spawns agents with file/exec permissions. It binds to `127.0.0.1` only. Any exposure beyond localhost requires an authenticated tunnel or token-based auth. An unauthenticated listener reachable beyond localhost is never acceptable.
+The daemon is an **RCE-as-a-service** surface — it spawns agents with file/exec permissions. It binds to `127.0.0.1` only by default. `marshal daemon start --lan` binds to `0.0.0.0` and requires `MARSHAL_UI_PASSWORD` (or configured `daemon.uiPassword`). Browser sessions use an HttpOnly, SameSite cookie; API routes and WebSocket upgrades require that session. Put remote deployments behind HTTPS or a VPN. Authentication does not sandbox ACP agents.
 
 ACP does **not** sandbox the agent. The agent runs on the host with its own permissions. Isolation (container, VM) is the operator's responsibility. The worktree is the current filesystem scope boundary — the agent could escape it.
 

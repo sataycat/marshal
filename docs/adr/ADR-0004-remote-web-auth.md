@@ -1,6 +1,6 @@
 # ADR-0004: Authenticated Remote Web Access
 
-**Status:** Proposed  
+**Status:** Accepted 
 **Date:** 2026-07-17  
 **Parent:** —  
 **Children:** ADR-0004a (device pairing and private relay, deferred)

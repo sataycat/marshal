@@ -39,6 +39,8 @@ export interface GlobalConfig {
   daemon?: {
     host?: string;
     port?: number;
+    uiPassword?: string;
+    trustedOrigins?: string[];
   };
 }
 
@@ -178,12 +180,9 @@ export function resolveDaemonBind(
     }
   }
 
-  if (!LOOPBACK_HOSTS.has(host)) {
-    logger.warn(
-      { host },
-      "Binding to a non-loopback address. Daemon API has no auth layer. Expose only via an authenticated tunnel. Continuing because explicitly requested.",
-    );
-  }
-
   return { host, port };
+}
+
+export function isLoopbackHost(host: string): boolean {
+  return LOOPBACK_HOSTS.has(host);
 }
