@@ -6,6 +6,7 @@ import { ROUTES } from "./routes/routes";
 import { WebSocketBridge } from "./state/WebSocketBridge";
 import { ConfirmProvider } from "./components/ConfirmDialog";
 import { AuthGate } from "./auth/AuthGate";
+import { AppErrorBoundary } from "./components/AppErrorBoundary";
 
 const BoardRoute = lazy(() =>
   import("./routes/BoardRoute").then((m) => ({ default: m.BoardRoute })),
@@ -26,33 +27,35 @@ function RouteFallback(): JSX.Element {
 
 export function App(): JSX.Element {
   return (
-    <AuthGate>
-      <ConfirmProvider>
-        <WebSocketBridge>
-        <AppShell>
-        <Suspense fallback={<RouteFallback />}>
-          <Switch>
-            <Route path={ROUTES.home}>
-              <Redirect to={ROUTES.board} />
-            </Route>
-            <Route path={ROUTES.board}>
-              <BoardRoute />
-            </Route>
-            <Route path={ROUTES.chat}>
-              <ChatRoute />
-            </Route>
-            <Route path="/chat/:threadId">
-              {(params) => <ChatThreadRoute threadId={params.threadId ?? ""} />}
-            </Route>
-            <Route>
-              <NotFoundRoute />
-            </Route>
-          </Switch>
-        </Suspense>
-        </AppShell>
-        <ToastHost />
-        </WebSocketBridge>
-      </ConfirmProvider>
-    </AuthGate>
+    <AppErrorBoundary>
+      <AuthGate>
+        <ConfirmProvider>
+          <WebSocketBridge>
+          <AppShell>
+          <Suspense fallback={<RouteFallback />}>
+            <Switch>
+              <Route path={ROUTES.home}>
+                <Redirect to={ROUTES.board} />
+              </Route>
+              <Route path={ROUTES.board}>
+                <BoardRoute />
+              </Route>
+              <Route path={ROUTES.chat}>
+                <ChatRoute />
+              </Route>
+              <Route path="/chat/:threadId">
+                {(params) => <ChatThreadRoute threadId={params.threadId ?? ""} />}
+              </Route>
+              <Route>
+                <NotFoundRoute />
+              </Route>
+            </Switch>
+          </Suspense>
+          </AppShell>
+          <ToastHost />
+          </WebSocketBridge>
+        </ConfirmProvider>
+      </AuthGate>
+    </AppErrorBoundary>
   );
 }

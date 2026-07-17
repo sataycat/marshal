@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderMarkdown } from "./markdown";
+import { renderMarkdown, renderProse } from "./markdown";
 
 describe("renderMarkdown", () => {
   it("resolves to an HTML string", async () => {
@@ -24,5 +24,13 @@ describe("renderMarkdown", () => {
     const src = "| a | b |\n| - | - |\n| 1 | 2 |";
     const out = await renderMarkdown(src);
     expect(out).toContain("<table>");
+  });
+
+  it("replaces fenced code blocks with portal-safe hydration stubs", async () => {
+    const out = await renderProse("Before\n\n```ts\nconst answer = 42;\n```\n\nAfter");
+
+    expect(out.stubs).toEqual([{ idx: 0, lang: "ts", code: "const answer = 42;\n" }]);
+    expect(out.html).toContain('<div data-cm data-lang="ts" data-idx="0"></div>');
+    expect(out.html).not.toContain("<pre>");
   });
 });

@@ -38,6 +38,7 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    sourcemap: true,
     // Compressed-size reporting is diagnostic work and should not slow normal builds.
     reportCompressedSize: false,
     rollupOptions: {

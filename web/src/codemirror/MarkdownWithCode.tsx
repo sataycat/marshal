@@ -121,11 +121,12 @@ export function MarkdownWithCode({ src, editable = false, className }: Props): J
   }
 
   return (
-    <div
-      ref={containerRef}
-      className={cn("markdown", className)}
-      dangerouslySetInnerHTML={{ __html: html }}
-    >
+    <>
+      <div
+        ref={containerRef}
+        className={cn("markdown", className)}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
       {stubs.map((stub, i) => (
         <HydratedStub
           key={stub.idx}
@@ -135,6 +136,6 @@ export function MarkdownWithCode({ src, editable = false, className }: Props): J
           isEditing={editable || editing.has(i)}
         />
       ))}
-    </div>
+    </>
   );
 }
