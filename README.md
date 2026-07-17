@@ -163,6 +163,14 @@ Pre-commit staged checks: `vp staged`.
 The web board is a Vite + React SPA in `web/`. The daemon serves the built bundle from `web/dist/` in production and proxies the API/WS to itself in dev.
 
 ```sh
+pnpm dev                 # build the daemon, then run the daemon and Vite in parallel
+```
+
+The combined development command serves the API and WebSocket at `http://127.0.0.1:7433` and the Vite web app at `http://localhost:5173`.
+
+To run the processes separately:
+
+```sh
 pnpm run build:web    # build the SPA into web/dist/
 pnpm --filter marshal-web run dev   # Vite dev server with proxy to the daemon
 ```

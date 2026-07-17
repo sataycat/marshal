@@ -22,6 +22,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "dev": "pnpm run build && concurrently --kill-others --names daemon,web --prefix-colors blue,green \"pnpm exec marshal start\" \"pnpm --filter marshal-web run dev\"",
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
     "build:web": "pnpm --filter marshal-web run build",
     "build:all": "pnpm run build && pnpm run build:web",
@@ -49,6 +50,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.1.0",
     "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
     "shadcn": "^4.13.0",
     "typescript": "^6.0.3",
     "vitest": "^3.0.0"
