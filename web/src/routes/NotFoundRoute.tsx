@@ -7,8 +7,8 @@ export function NotFoundRoute(): JSX.Element {
       <h2 className="mb-2 text-lg font-semibold">Not Found</h2>
       <p className="my-2 leading-relaxed">That page does not exist.</p>
       <p className="my-2 leading-relaxed">
-        <Link href={ROUTES.board} className="text-primary hover:underline">
-          Back to the board
+        <Link href={ROUTES.chat} className="text-primary hover:underline">
+          Back to chat
         </Link>
       </p>
     </section>

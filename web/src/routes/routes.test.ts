@@ -4,7 +4,6 @@ import { NAV_ITEMS, ROUTES, matchChatPath, preloadStatic, preloadThread } from "
 describe("ROUTES", () => {
   it("exposes static paths as literals", () => {
     expect(ROUTES.home).toBe("/");
-    expect(ROUTES.board).toBe("/board");
     expect(ROUTES.chat).toBe("/chat");
   });
 
@@ -14,9 +13,9 @@ describe("ROUTES", () => {
 });
 
 describe("NAV_ITEMS", () => {
-  it("has a Board and a Chat entry, both pointing at static paths", () => {
+  it("has a Chat entry pointing at a static path", () => {
     const paths = NAV_ITEMS.map((i) => i.path);
-    expect(paths).toEqual([ROUTES.board, ROUTES.chat]);
+    expect(paths).toEqual([ROUTES.chat]);
   });
 
   it("gives every entry a non-empty label", () => {
@@ -41,7 +40,6 @@ describe("matchChatPath", () => {
   });
 
   it("returns null for unrelated paths", () => {
-    expect(matchChatPath("/board")).toBeNull();
     expect(matchChatPath("/")).toBeNull();
     expect(matchChatPath("")).toBeNull();
   });
@@ -52,9 +50,8 @@ describe("preload helpers", () => {
     expect(() => preloadStatic(ROUTES.home)).not.toThrow();
   });
 
-  it("preloadStatic kicks off the board or chat lazy import", () => {
+  it("preloadStatic kicks off the chat lazy import", () => {
     // We just need the call not to throw; the import is fire-and-forget.
-    expect(() => preloadStatic(ROUTES.board)).not.toThrow();
     expect(() => preloadStatic(ROUTES.chat)).not.toThrow();
   });
 

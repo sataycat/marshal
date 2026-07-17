@@ -8,9 +8,6 @@ import { ConfirmProvider } from "./components/ConfirmDialog";
 import { AuthGate } from "./auth/AuthGate";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
 
-const BoardRoute = lazy(() =>
-  import("./routes/BoardRoute").then((m) => ({ default: m.BoardRoute })),
-);
 const ChatRoute = lazy(() =>
   import("./routes/ChatRoute").then((m) => ({ default: m.ChatRoute })),
 );
@@ -35,10 +32,7 @@ export function App(): JSX.Element {
           <Suspense fallback={<RouteFallback />}>
             <Switch>
               <Route path={ROUTES.home}>
-                <Redirect to={ROUTES.board} />
-              </Route>
-              <Route path={ROUTES.board}>
-                <BoardRoute />
+                <Redirect to={ROUTES.chat} />
               </Route>
               <Route path={ROUTES.chat}>
                 <ChatRoute />

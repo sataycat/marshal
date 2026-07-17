@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import { Link, useLocation } from "wouter";
-import { Archive, AlertCircle, ArrowLeft, Bot, Check, ImagePlus, LoaderCircle, MessageSquare, Pencil, Pin, Plus, RefreshCw, Search, Send, Square, X } from "lucide-react";
+import { Archive, AlertCircle, ArrowLeft, Bot, Check, Folder, ImagePlus, LoaderCircle, MoreHorizontal, Pencil, Pin, Plus, RefreshCw, Search, Send, Square, Trash2, X } from "lucide-react";
 import { chatAttachmentUrl } from "../api/client";
 import { useChatAgentsQuery, useChatAttachmentsQuery, useChatFileQuery, useChatFilesQuery, useChatPermissionsQuery, useChatThreadQuery, useChatThreadsQuery, useCreateThreadMutation, useDeleteThreadMutation, usePermissionMutation, useSendChatMutation, useUpdateThreadMutation, useCancelChatMutation, useUploadAttachmentMutation } from "../api/queries";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { cn } from "@/lib/utils";
 import type { ChatAttachment, ChatMessage, ChatThread, PendingPermission } from "../types";
 import { FilesSidebar } from "./FilesSidebar";
-import { timeInState } from "../time";
+import { groupThreadsByProject } from "./sidebar";
 
 export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Element {
   const threads = useChatStore(useShallow(selectThreads));
@@ -73,6 +73,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
 
   const allThreads = showArchived ? [...threads, ...(archivedQuery.data ?? []).filter((archived) => !threads.some((thread) => thread.id === archived.id))] : threads;
   const visibleThreads = allThreads.filter((thread) => (agentFilter === "all" || thread.agent_id === agentFilter) && (showArchived || !thread.archived));
+  const projectGroups = groupThreadsByProject(visibleThreads);
   const mutateThread = async (thread: ChatThread, input: Parameters<typeof updateThreadMutation.mutateAsync>[0]["input"]): Promise<void> => {
     try {
       const updated = await updateThreadMutation.mutateAsync({ id: thread.id, input });
@@ -118,22 +119,25 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
         <ScrollArea className="max-h-[calc(100svh-11rem)] md:h-[calc(100svh-7rem)] md:max-h-none">
           <div className="p-2">
              {visibleThreads.length === 0 && <div className="px-3 py-8 text-center text-sm text-muted"><p>{showArchived ? "No matching conversations." : "No conversations yet."}</p>{!showArchived && <p className="mt-1 text-xs">Create a thread to start working with an agent.</p>}</div>}
-            {visibleThreads.map((thread) => (
-              <div key={thread.id} className={cn("group mb-1 rounded-md transition-colors hover:bg-secondary", thread.id === selectedId && "bg-secondary")}>
-                <Link href={`/chat/${thread.id}`} className="flex items-start gap-3 px-3 py-2.5">
-                <MessageSquare aria-hidden className="mt-0.5 size-4 shrink-0 text-muted" />
-                <span className="min-w-0">
-                  <span className="flex items-center gap-1 truncate text-sm font-medium">{thread.pinned && <Pin aria-hidden className="size-3 text-primary" />}{thread.title}</span>
-                  <span className="mt-1 flex items-center gap-1.5 text-xs text-muted"><StatusDot status={thread.status} />{thread.agent_id} · {timeInState(thread.last_message_at ?? thread.updated_at)}</span>
-                </span>
-                </Link>
-                <div className="hidden items-center justify-end gap-0.5 px-2 pb-1 group-hover:flex">
-                  <Button type="button" size="icon-xs" variant="ghost" onClick={() => void mutateThread(thread, { pinned: !thread.pinned })} aria-label={thread.pinned ? "Unpin thread" : "Pin thread"}><Pin aria-hidden /></Button>
-                  <Button type="button" size="icon-xs" variant="ghost" onClick={() => void mutateThread(thread, { archived: !thread.archived })} aria-label={thread.archived ? "Unarchive thread" : "Archive thread"}><Archive aria-hidden /></Button>
-                  {thread.status !== "closed" && <Button type="button" size="icon-xs" variant="ghost" onClick={() => void mutateThread(thread, { status: "closed" })} aria-label="Close thread"><Check aria-hidden /></Button>}
-                  {thread.status === "draft" && <Button type="button" size="icon-xs" variant="ghost" onClick={() => void discardThread(thread)} aria-label="Discard thread"><X aria-hidden /></Button>}
+            {projectGroups.map((group) => (
+              <section key={group.repoRoot} className="mb-4 last:mb-0">
+                <div className="flex items-center gap-2 px-2 pb-1.5 pt-1 text-xs font-medium text-muted" title={group.repoRoot}>
+                  <Folder aria-hidden className="size-3.5" />
+                  <span className="truncate">{group.name}</span>
                 </div>
-              </div>
+                <div className="space-y-0.5">
+                  {group.threads.map((thread) => (
+                    <div key={thread.id} className={cn("group relative rounded-md transition-colors hover:bg-secondary focus-within:bg-secondary", thread.id === selectedId && "bg-secondary")}>
+                      <Link href={`/chat/${thread.id}`} className="flex h-9 min-w-0 items-center gap-2 px-2 pr-16 text-sm">
+                        <StatusDot status={thread.status} />
+                        {thread.pinned && <Pin aria-label="Pinned" className="size-3 shrink-0 text-primary" />}
+                        <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+                      </Link>
+                      <ThreadActions thread={thread} onMutate={mutateThread} onDiscard={discardThread} />
+                    </div>
+                  ))}
+                </div>
+              </section>
             ))}
             <button type="button" className="mt-2 w-full px-3 text-left text-xs text-muted hover:text-text" onClick={() => setShowArchived((value) => !value)}>{showArchived ? "Hide archived" : "Show archived"}</button>
           </div>
@@ -233,6 +237,34 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
 
 function StatusDot({ status }: { status: ChatThread["status"] }): JSX.Element {
   return <span className={cn("inline-block size-1.5 rounded-full", status === "error" ? "bg-error" : status === "active" ? "bg-success" : "bg-muted")} aria-hidden />;
+}
+
+function ThreadActions({ thread, onMutate, onDiscard }: { thread: ChatThread; onMutate: (thread: ChatThread, input: { status?: ChatThread["status"]; archived?: boolean; pinned?: boolean }) => Promise<void>; onDiscard: (thread: ChatThread) => Promise<void> }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent): void => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className={cn("absolute inset-y-0 right-1 flex items-center gap-0.5 bg-secondary pl-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100", open && "md:opacity-100")}>
+      <Button type="button" size="icon-xs" variant="ghost" onClick={() => void onMutate(thread, { archived: !thread.archived })} aria-label={thread.archived ? "Unarchive thread" : "Archive thread"} title={thread.archived ? "Unarchive" : "Archive"}><Archive aria-hidden /></Button>
+      <Button type="button" size="icon-xs" variant="ghost" onClick={() => setOpen((value) => !value)} aria-label={`More actions for ${thread.title}`} aria-haspopup="menu" aria-expanded={open}><MoreHorizontal aria-hidden /></Button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-8 z-20 min-w-40 rounded-lg border border-border bg-panel p-1 shadow-lg">
+          <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-secondary" onClick={() => { setOpen(false); void onMutate(thread, { pinned: !thread.pinned }); }}><Pin aria-hidden className="size-3.5" />{thread.pinned ? "Unpin" : "Pin"}</button>
+          {thread.status !== "closed" && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-secondary" onClick={() => { setOpen(false); void onMutate(thread, { status: "closed" }); }}><Check aria-hidden className="size-3.5" />Close</button>}
+          {thread.status === "draft" && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-error hover:bg-error-bg" onClick={() => { setOpen(false); void onDiscard(thread); }}><Trash2 aria-hidden className="size-3.5" />Discard</button>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function EmptyChat({ onNew }: { onNew: () => void }): JSX.Element {

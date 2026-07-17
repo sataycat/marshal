@@ -47,9 +47,9 @@ All under `127.0.0.1:<port>` (default `7433`). Hono for routing; `ws` library fo
 | Method | Path                                   | Purpose                                                   |
 | ------ | -------------------------------------- | --------------------------------------------------------- |
 | GET    | `/api/health`                          | Health check.                                             |
-| GET    | `/api/auth/status`                      | Authentication status.                                    |
-| POST   | `/api/auth/login`                       | Create an authenticated browser session.                  |
-| POST   | `/api/auth/logout`                      | Revoke the current browser session.                       |
+| GET    | `/api/auth/status`                     | Authentication status.                                    |
+| POST   | `/api/auth/login`                      | Create an authenticated browser session.                  |
+| POST   | `/api/auth/logout`                     | Revoke the current browser session.                       |
 | GET    | `/api/tasks`                           | List tasks.                                               |
 | GET    | `/api/tasks/:slug`                     | One task (board fields + spec + retry state).             |
 | POST   | `/api/tasks`                           | Create a `backlog` task.                                  |
@@ -57,9 +57,9 @@ All under `127.0.0.1:<port>` (default `7433`). Hono for routing; `ws` library fo
 | POST   | `/api/tasks/:slug/ready`               | Freeze spec and move to ready (distinct from transition). |
 | GET    | `/api/tasks/:slug/diff`                | Unified diff of task branch vs trunk.                     |
 | POST   | `/api/tasks/:slug/merge`               | Local `git merge --no-ff` into trunk.                     |
-| GET    | `/api/threads/:id/attachments`         | List validated thread-scoped image metadata.             |
-| POST   | `/api/threads/:id/attachments`         | Validate and persist one bounded image upload.           |
-| GET    | `/api/threads/:id/attachments/:id`     | Read one thread-scoped persisted image.                  |
+| GET    | `/api/threads/:id/attachments`         | List validated thread-scoped image metadata.              |
+| POST   | `/api/threads/:id/attachments`         | Validate and persist one bounded image upload.            |
+| GET    | `/api/threads/:id/attachments/:id`     | Read one thread-scoped persisted image.                   |
 | GET    | `/api/tasks/:slug/runs`                | All runs for a task.                                      |
 | GET    | `/api/runs/:id`                        | One run (includes prompt).                                |
 | GET    | `/api/runs/:id/events?after_seq&limit` | Paginated run events.                                     |
@@ -194,15 +194,15 @@ React 18 SPA in `web/`, built by Vite to `web/dist/` and served by the daemon (t
 
 ### Routing
 
-History-mode routing via **wouter** (`web/src/routes/routes.ts` centralizes paths, nav items, and `lazy()` chunk loaders). `App.tsx` wraps a `Router` + `Switch` over `lazy()` route components; `/` redirects to `/board`; `BoardProvider` sits at app level to share the WebSocket bus. The daemon's existing SPA fallback (`src/daemon/http.ts` `spaNotFound`) serves deep links, so refreshing `/chat/<threadId>` boots the bundle and resolves the route client-side. `PrefetchNavLink` triggers a route chunk on `mouseenter`/`focus`.
+History-mode routing via **wouter** (`web/src/routes/routes.ts` centralizes paths, nav items, and `lazy()` chunk loaders). `App.tsx` wraps a `Router` + `Switch` over `lazy()` route components; `/` redirects to `/chat`. The WebSocket bridge sits at app level to share the event stream. The daemon's existing SPA fallback (`src/daemon/http.ts` `spaNotFound`) serves deep links, so refreshing `/chat/<threadId>` boots the bundle and resolves the route client-side. `PrefetchNavLink` triggers a route chunk on `mouseenter`/`focus`.
 
 ### Layout
 
-`<AppShell>` owns the header + main slot (and a `@container` on the main slot so the chat pane knows its own width). At `md:` (768px) the board + detail sit side-by-side; below `md:` they stack and a mobile bottom-nav (`Tabs` at `md:hidden`) toggles Board / Chat / Detail. Tailwind v4 breakpoints are overridden in `@theme` (`sm = 480px`, `md = 768px`) so the named scale matches the design intent. `styles.css` is gone — `web/src/index.css` imports Tailwind + the `@theme` tokens only.
+`<AppShell>` owns the header + main slot (and a `@container` on the main slot so the chat pane knows its own width). Chat is the primary navigation surface. Tailwind v4 breakpoints are overridden in `@theme` (`sm = 480px`, `md = 768px`) so the named scale matches the design intent. `styles.css` is gone — `web/src/index.css` imports Tailwind + the `@theme` tokens only.
 
-### Board surface
+### Deferred board surface
 
-The board is a thin client: initializes from the `connected` WebSocket snapshot, applies event deltas, and reconciles on reconnect. No durable client-side state. The board renders six columns matching the state machine, with task cards showing title, slug, and time-in-state. Task detail includes spec, diff view, run log, and spec-authoring chat.
+The board implementation remains in the codebase for a future revisit but is not registered in the current client route table. Task state and mutation helpers remain available to task detail and chat integrations.
 
 Optimistic updates on mutations; rollback on server error. The server-side state machine is always authoritative — the UI hides invalid actions but does not enforce them.
 
@@ -220,7 +220,7 @@ Chat reconnects report `connecting`/`open`/`closed`, reconnect automatically, an
 
 - `web/src/App.tsx`, `web/src/shell/AppShell.tsx` — app shell + routing root.
 - `web/src/routes/routes.ts` — paths, nav, chunk loaders.
-- `web/src/board/*` — board surface (reducer, actions, `TaskCard`, `BoardContext` WebSocket bus).
+- `web/src/board/*` — deferred board surface (reducer, actions, `TaskCard`).
 - `web/src/detail/TaskDetail.tsx`, `web/src/diff/DiffView.tsx`, `web/src/specchat/SpecChatPanel.tsx` — task surfaces (all consume `MarkdownWithCode`).
 - `web/src/codemirror/{CodeBlock,languages,MarkdownWithCode}.tsx` — CodeMirror integration.
 - `web/src/markdown.ts` — `renderMarkdown` / `renderProse` (lazy `marked`).
