@@ -44,9 +44,9 @@ export interface InstalledAgent {
   version: string;
   source: "registry";
   license: string;
-  distribution: "npx";
+  distribution: "npx" | "uvx";
   package_specifier: string;
-  launch: { command: "npx"; args: string[] };
+  launch: { command: "npx" | "uvx"; args: string[] };
   registry_snapshot_fetched_at: string;
   integrity_status: "not_applicable";
   status: InstalledAgentStatus;

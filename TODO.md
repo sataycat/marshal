@@ -24,11 +24,11 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 
 ### 3. Materialize exact `uvx` installations
 
-- [ ] Add exact-version `uvx` package validation with the same moving-alias protections as `npx`.
-- [ ] Implement a distribution adapter that invokes `uvx` without shell interpolation and records the exact package specifier.
-- [ ] Resolve and persist a launch specification that the shared ACP supervisor can consume without installing at process start.
-- [ ] Let the install API accept an explicit distribution and select `uvx` when it is the chosen or supported fallback.
-- [ ] Update the Agents area so a `uvx`-only agent can be installed, probed, authenticated, and selected for a thread or workflow.
+- [x] Add exact-version `uvx` package validation with the same moving-alias protections as `npx`.
+- [x] Implement a distribution adapter that invokes `uvx` without shell interpolation and records the exact package specifier.
+- [x] Resolve and persist a launch specification that the shared ACP supervisor can consume without installing at process start.
+- [x] Let the install API accept an explicit distribution and select `uvx` when it is the chosen or supported fallback.
+- [x] Update the Agents area so a `uvx`-only agent can be installed, probed, authenticated, and selected for a thread or workflow.
 - [ ] Add installer, API, readiness, and downstream thread/workflow tests for a `uvx` agent.
 
 ### 4. Secure binary installation

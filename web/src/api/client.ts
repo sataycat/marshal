@@ -71,8 +71,8 @@ export async function fetchInstalledAgents(signal?: AbortSignal): Promise<Instal
   return (await jsonOrThrow<{ agents: InstalledAgent[] }>(res)).agents;
 }
 
-export async function installRegistryAgent(agentId: string, version: string): Promise<InstallationOperation> {
-  const res = await fetch("/api/agents/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent_id: agentId, version }) });
+export async function installRegistryAgent(agentId: string, version: string, distribution?: "npx" | "uvx" | "binary"): Promise<InstallationOperation> {
+  const res = await fetch("/api/agents/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent_id: agentId, version, ...(distribution ? { distribution } : {}) }) });
   return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation;
 }
 

@@ -6,7 +6,7 @@ const agent = { id: "demo", name: "Demo", version: "1.2.3", description: "A demo
 describe("registry parser", () => {
   it("keeps safe metadata and ignores unknown fields and launch arguments", () => {
     const parsed = parseRegistryDocument({ version: "1.0.0", agents: [{ ...agent, future_field: { ignored: true } }], extensions: [{ unknown: true }] });
-    expect(parsed.agents[0]).toEqual(expect.objectContaining({ id: "demo", distributions: [{ kind: "npx", package: "demo@1.2.3" }] }));
+    expect(parsed.agents[0]).toEqual(expect.objectContaining({ id: "demo", distributions: [{ kind: "npx", package: "demo@1.2.3", args: ["--acp"] }] }));
     expect(parsed.agents[0]).not.toHaveProperty("future_field");
   });
 

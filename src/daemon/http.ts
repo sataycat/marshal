@@ -615,14 +615,16 @@ function registerAgentRoutes(app: Hono, machineDir?: string): void {
     return c.json({ authentication: getAgentAuthenticationOperation(operation.id, machineDir) });
   });
   app.post("/api/agents/install", async (c) => {
-    const body = await readJsonObject(c, new Set(["agent_id", "version"]));
+     const body = await readJsonObject(c, new Set(["agent_id", "version", "distribution"]));
     const agentId = assertString(body.agent_id, "agent_id");
-    const version = assertString(body.version, "version");
+     const version = assertString(body.version, "version");
+     const distribution = body.distribution === undefined ? undefined : assertString(body.distribution, "distribution");
+     if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution)) throw new ApiError(422, "distribution is invalid", "installation_invalid");
     const catalog = getRegistryCatalog(machineDir);
     const registryAgent = catalog.snapshot?.agents.find((agent) => agent.id === agentId && agent.version === version);
     if (!registryAgent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
     try {
-      return c.json({ operation: await startInstallation(registryAgent, machineDir) }, 202);
+       return c.json({ operation: await startInstallation(registryAgent, machineDir, undefined, distribution as "npx" | "uvx" | "binary" | undefined) }, 202);
     } catch (error) {
       throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid");
     }
