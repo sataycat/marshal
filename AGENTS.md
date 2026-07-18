@@ -1,20 +1,35 @@
 # Project overview
 
-Marshal is a local-first, agent-agnostic coding-agent orchestrator ("software factory" loop). A human authors a spec, a coding agent (the "builder") autonomously implements it in an isolated git worktree, a different agent (the "validator") runs the verification gate, and the human reviews and merges.
+Marshal is a local-first, browser-based ACP client for software work. It discovers agents through the ACP Registry, installs and authenticates them, supervises ACP sessions, and uses the same installed-agent inventory for interactive repository threads and build-validate-review workflows.
+
+Marshal is pre-1.0. Prefer the target architecture over compatibility with legacy direct-command role configuration, CLI onboarding, or agent-specific defaults.
 
 ## Session start
 
-Read `docs/ARCHITECTURE.md` first. It is the consolidated reference for what the system is today: state machine, HTTP/WS API, worktree model, agent layer, build/validate flow, retry routing, onboarding preflight, and the file/module map.
+Read `docs/ARCHITECTURE.md` first. It is the canonical target architecture: daemon and web boundaries, ACP Registry integration, installation, authentication, sessions, permissions, repositories, and factory workflows.
 
-Read `docs/PROJECT.md` for the design tenets, vision, and rationale. It answers _why_ the system is shaped the way it is; `ARCHITECTURE.md` answers _what_ and _where_.
+Read `docs/PROJECT.md` for the product thesis, design tenets, primary experience, and delivery sequence. `PROJECT.md` explains why; `ARCHITECTURE.md` defines what.
 
-`marshal init` is non-interactive: it checks prerequisites, writes `~/.marshal/config.json` with structured direct ACP command defaults, and initializes repo state. String role entries and ACPX are no longer supported. Agent verification is `marshal doctor`'s job (zero-cost direct ACP initialize + `session/new`).
+The web application is the complete product interface. Normal agent discovery, installation, authentication, configuration, diagnostics, and workflow assignment must be designed for the web application and daemon API. The CLI is limited to starting, stopping, and inspecting the daemon; do not add product workflows to it.
+
+## Architecture rules
+
+- ACP is the only agent runtime contract. Do not add provider- or agent-specific adapters when standard ACP can express the behavior.
+- The ACP Registry is the default catalog, not runtime truth. Validate and cache registry metadata, then install pinned local versions.
+- Keep registry, installation, authentication, ACP runtime, repository, thread, and workflow concerns in separate modules.
+- Threads and workflow runs both execute through the same ACP process/session supervisor.
+- Builder, validator, and spec-author are workflow assignments of installed agents, not executable configuration types.
+- Persist the resolved agent ID and version with every thread and run. Updates never rewrite history.
+- Reflect negotiated ACP capabilities in the UI instead of assuming feature parity across agents.
+- Installation, authentication, assignment, and unattended execution are separate trust transitions.
+- ACP permissions are not a sandbox. Keep isolation policy explicit.
+- Existing code that conflicts with these rules may be deleted or migrated without backward-compatibility layers unless persisted user data requires a concrete migration.
 
 ## Reference docs
 
-- `docs/ARCHITECTURE.md` — consolidated reference (read first)
-- `docs/PROJECT.md` — design tenets, vision, state machine narrative, milestone sequence
-- `docs/HUMAN-TESTING-GUIDE.md` — manual QA guide
+- `docs/ARCHITECTURE.md` — canonical target architecture (read first)
+- `docs/PROJECT.md` — product vision and design tenets
+- `docs/HUMAN-TESTING-GUIDE.md` — manual QA guide; update it when product flows change
 
 # Toolchain
 
@@ -28,20 +43,20 @@ Use standard package-manager commands for development. The repo pins `pnpm@11.10
 
 ## Pre-commit hooks
 
-Vite+ is still used only for staged pre-commit formatting and linting:
+Vite+ is used only for staged pre-commit formatting and linting:
 
 - Staged pre-commit checks: `vp staged`
 
-Run verification commands sequentially, never in parallel: `pnpm install` (after pull) → `pnpm run check` → `pnpm run test` → any extra `pnpm run …` scripts before finishing. For the aggregate checks, run `pnpm run check:all` first and only start `pnpm run test:all` after it completes.
+Run verification commands sequentially, never in parallel: `pnpm install` after pulling, then `pnpm run check`, then `pnpm run test`, then any extra scripts. For aggregate checks, finish `pnpm run check:all` before starting `pnpm run test:all`.
 
 ## Bundle analysis
 
-- `pnpm run analyze` — rebuilds with `ANALYZE=1` to emit `web/dist/stats.html` (a rollup-plugin-visualizer treemap) for manual triage when a chunk surprises. Not a production-graph dep.
+- `pnpm run analyze` rebuilds with `ANALYZE=1` and emits `web/dist/stats.html`.
 
-Before adding a non-trivial new dependency to `web/`, check its bundle cost with `pnpm run analyze`, keep heavy libraries such as `marked` and CodeMirror out of the initial chunk, and prefer dynamic `import()` at point of use.
+Before adding a non-trivial frontend dependency, check its bundle cost. Keep heavy libraries out of the initial chunk and prefer dynamic imports at point of use.
 
 ## Testing
 
-Always write tests for new functionality and bug fixes wherever possible. Running `pnpm run test` should stay green.
+Write tests for new backend functionality and bug fixes wherever possible. Registry parsing, distribution selection, integrity verification, archive safety, authentication state, ACP session lifecycle, permission policy, durable operations, and workflow transitions are high-value test boundaries. Running `pnpm run test` should stay green.
 
-**Do NOT test the frontend.** Visual / component-appearance / "did the right thing render" tests for React components under `web/` are a waste of time and tokens. The shadcn/Base UI primitives, the Tailwind utility classes, and the DOM environment are somebody else's problem; we own the wiring. Pure logic that lives in `web/src/**/*.ts` (reducers, parsers, helpers, route tables, markdown rendering, time formatting, etc.) is fair game — it's the same kind of testable unit code as the Node side and lives next to it in `.test.ts` files. Anything that needs a DOM (jsdom / happy-dom / @testing-library/react) is out: skip the test, ship the component, and let the human-testing guide and the daemon end-to-end flow catch visual regressions.
+Do not write visual or component-appearance tests for React components under `web/`. Pure logic in `web/src/**/*.ts` is appropriate for unit tests. Anything requiring jsdom, happy-dom, or React Testing Library should be covered through manual product testing and daemon end-to-end flows instead.

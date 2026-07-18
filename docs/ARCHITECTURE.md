@@ -1,228 +1,497 @@
 # Architecture
 
-The consolidated reference for Marshal. `PROJECT.md` owns the vision and design tenets (_why_); this document owns the concrete shape of the system (_what_). For implementation-level detail — file paths, config keys, constants, prompt templates — read the code directly.
+The canonical target architecture for Marshal. `PROJECT.md` owns the vision and design tenets; this document owns the product boundaries, state, protocols, and module responsibilities.
+
+Marshal is pre-1.0. Existing code that conflicts with this architecture is migration material, not a compatibility constraint.
 
 ---
 
-## 1. Task state machine
+## 1. Product shape
 
-Statuses:
+Marshal is a local-first, browser-based ACP client for software work.
 
-| Status       | Meaning                                                               |
-| ------------ | --------------------------------------------------------------------- |
-| `backlog`    | Working spec is mutable in SQLite; task is not yet buildable.         |
-| `ready`      | Spec is frozen and committed; worktree exists; builder can claim it.  |
-| `building`   | A builder agent is running (or has just failed) in the task worktree. |
-| `validating` | A validator agent is running against the build commit.                |
-| `review`     | Human review; diff is visible; can be merged or sent back.            |
-| `done`       | Merged and cleaned up. Terminal.                                      |
+The daemon owns durable state, agent processes, ACP connections, repository access, and background workflows. The web application is the primary and complete product interface. The CLI is only a daemon launcher and lifecycle utility; it is not an agent manager, onboarding wizard, or parallel product surface.
 
-Transitions:
+Marshal has two layers:
 
+1. **ACP workbench** — discover, install, authenticate, configure, and converse with ACP agents in a repository context.
+2. **Software factory** — compose those agents into durable build, validate, review, and merge workflows.
+
+The workbench is the foundation. Builder, validator, and spec-author are workflow assignments of installed agents, not distinct integration types.
+
+```text
+ACP Registry + custom agents
+            |
+            v
+  agent catalog and installer
+            |
+            v
+ authentication + capabilities
+            |
+            v
+ ACP process/session supervisor
+       |               |
+       v               v
+ interactive threads   workflow runs
+                       build -> validate -> review
 ```
-backlog    → ready
-ready      → building
-building   → validating, ready*, backlog*
-validating → building, review, backlog*
-review     → done, backlog*
-done       → (none)
 
-* = escape hatch (human-driven only; resets retry_count and last_failure)
+---
+
+## 2. System boundaries
+
+### Daemon
+
+The daemon is the sole privileged backend. It owns:
+
+- ACP Registry fetching, validation, and caching.
+- Agent installation, versioning, and removal.
+- Agent authentication and readiness checks.
+- ACP process and session lifecycle.
+- Permission mediation and policy enforcement.
+- Repository discovery, files, git operations, and worktrees.
+- Threads, messages, artifacts, tasks, runs, and events.
+- Background orchestration and crash recovery.
+- The HTTP and WebSocket API.
+- Serving the web application.
+
+### Web application
+
+The web application owns all user-facing product flows:
+
+- First-run setup.
+- Registry browsing and search.
+- Agent installation, update, removal, and login.
+- Custom/private ACP agent registration.
+- Agent readiness and capability display.
+- Thread creation and agent selection.
+- Permission prompts.
+- Workflow role assignment.
+- Task authoring, progress, review, and merge.
+- Daemon and repository diagnostics.
+
+It never spawns agents or accesses the filesystem directly.
+
+### CLI
+
+The CLI is intentionally narrow:
+
+```text
+marshal start
+marshal stop
+marshal status
 ```
 
-The orchestrator drives automated edges. Escape hatches are reached only via explicit human action (CLI or API). `transitionTask` is the single function that changes status; it enforces the graph inside a SQLite transaction.
-
-### Retry state
-
-`retry_count` tracks validator failures consumed. The default cap is 2 retries (3 total attempts). On cap exceeded, the task escalates to `review` with a failure summary. A passing validation resets the counter. Builder errors do **not** consume the retry budget — they leave the task stuck in `building` for human inspection.
+Development-only or recovery commands may exist, but normal product setup and agent management must not depend on them.
 
 ---
 
-## 2. HTTP / WebSocket API
+## 3. ACP Registry
 
-All under `127.0.0.1:<port>` (default `7433`). Hono for routing; `ws` library for WebSocket upgrade on the same Node server.
+The public ACP Registry is Marshal's default catalog:
 
-### Routes
+```text
+https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json
+```
 
-| Method | Path                                   | Purpose                                                   |
-| ------ | -------------------------------------- | --------------------------------------------------------- |
-| GET    | `/api/health`                          | Health check.                                             |
-| GET    | `/api/auth/status`                     | Authentication status.                                    |
-| POST   | `/api/auth/login`                      | Create an authenticated browser session.                  |
-| POST   | `/api/auth/logout`                     | Revoke the current browser session.                       |
-| GET    | `/api/tasks`                           | List tasks.                                               |
-| GET    | `/api/tasks/:slug`                     | One task (board fields + spec + retry state).             |
-| POST   | `/api/tasks`                           | Create a `backlog` task.                                  |
-| POST   | `/api/tasks/:slug/transition`          | Body `{ to }`. Enforces state machine.                    |
-| POST   | `/api/tasks/:slug/ready`               | Freeze spec and move to ready (distinct from transition). |
-| GET    | `/api/tasks/:slug/diff`                | Unified diff of task branch vs trunk.                     |
-| POST   | `/api/tasks/:slug/merge`               | Local `git merge --no-ff` into trunk.                     |
-| GET    | `/api/threads/:id/attachments`         | List validated thread-scoped image metadata.              |
-| POST   | `/api/threads/:id/attachments`         | Validate and persist one bounded image upload.            |
-| GET    | `/api/threads/:id/attachments/:id`     | Read one thread-scoped persisted image.                   |
-| GET    | `/api/tasks/:slug/runs`                | All runs for a task.                                      |
-| GET    | `/api/runs/:id`                        | One run (includes prompt).                                |
-| GET    | `/api/runs/:id/events?after_seq&limit` | Paginated run events.                                     |
-| GET    | `/api/tasks/:slug/spec-messages`       | Spec-authoring chat history.                              |
-| POST   | `/api/tasks/:slug/spec-messages`       | Send a user message; invokes the spec author agent.       |
-| POST   | `/api/tasks/:slug/spec`                | Replace `spec_markdown` with proposed text.               |
-| GET    | `/ws`                                  | WebSocket event stream.                                   |
-| GET    | `/`, `/assets/*`                       | Static SPA.                                               |
+The registry is a discovery and distribution source, not runtime truth. Marshal validates and caches a registry snapshot, then materializes selected entries into local installations.
 
-Error envelope: `{ "error": "human message", "code": "machine_code" }`. Status codes: 400 (malformed), 401 (authentication required), 404 (not found), 409 (lifecycle conflict), 422 (semantic error), 429 (login rate limit), 500 (unexpected).
+Each registry agent may provide:
 
-The freeze endpoint (`POST .../ready`) is intentionally separate from the transition endpoint because freeze has filesystem + git side effects; conflating it with a pure state move makes error recovery ambiguous.
+- Stable ID, name, description, version, icon, license, and links.
+- A version-pinned `npx` distribution.
+- A version-pinned `uvx` distribution.
+- Platform-specific binary archives, command paths, arguments, environment, and optional SHA-256 checksums.
 
-### WebSocket events
+Registry parsing rules:
 
-On connect, the server sends a `connected` event with a full task snapshot. Subsequent events are deltas: `task.created`, `task.updated`, `task.transitioned`, `run.started`, `run.event`, `run.finished`, `daemon.idle`, `daemon.cycle_complete`, `spec.message`.
+- Validate required fields at the daemon boundary.
+- Reject unsupported registry major versions.
+- Ignore safe unknown fields for forward compatibility.
+- Enforce response size, timeout, and redirect limits.
+- Cache the last valid snapshot and use it when refresh fails.
+- Never execute data directly from an unvalidated response.
 
-Events are broadcast **only after** the underlying durable write succeeds. No replay buffer or sequence numbers — reconnect for a fresh snapshot. Server pings every 30s; drops clients silent for 90s.
+The public registry is not exclusive. Users can add custom ACP agents for local binaries, private packages, development builds, or private registries. Custom agents enter the same installed-agent and ACP runtime model as public entries.
 
 ---
 
-## 3. Data model
+## 4. Agent lifecycle
 
-SQLite, WAL mode. Four tables:
+An agent moves through explicit states:
 
-- **`tasks`** — `slug` (unique), `title`, `status`, `spec_markdown`, `retry_count`, `last_failure`.
-- **`runs`** — one row per build or validate attempt. Links to `task_id`, tracks `role` (builder/validator), `agent_id`, `status`, `prompt`, `commit_sha`, timestamps, `error`.
-- **`run_events`** — one row per agent event within a run, with monotonic `seq` for ordering and JSON `payload`. Inserted as events stream in (not buffered).
-- **`spec_messages`** — chat history for the spec-authoring phase. `role` is `user` or `assistant`.
-- **`chat_attachments`** — bounded thread-scoped image metadata; bytes live below `.marshal/attachments/<thread-id>/` and are never general static assets. Chat messages carry a JSON list of attachment UUIDs.
+```text
+available -> installing -> installed -> authenticating -> ready
+                |             |              |
+                v             v              v
+              failed       updateable      auth-required
+```
 
----
+These states are independent:
 
-## 4. Worktree model
+- **Available** means an entry exists in a catalog.
+- **Installed** means Marshal can resolve a pinned local launch specification.
+- **Authenticated** means the agent's required ACP authentication has completed.
+- **Ready** means Marshal has successfully initialized the agent and created a probe session.
 
-One worktree per task, created at the Ready transition, reused by both builder and validator.
+Installing an agent never assigns it to a workflow or starts an unattended task. Assignment and execution require separate user actions.
 
-- **Location**: `~/.marshal/worktrees/<repo-hash>/<slug>-<descriptor>/`. Overridable via config.
-- **Branch**: `marshal/task/<slug>-<descriptor>`, based on `origin/<trunk>` (auto-detected, with fetch before branch creation). The source checkout is never mutated.
-- **`.worktreeinclude`**: gitignore-syntax file at repo root listing gitignored files to copy into new worktrees (e.g. `.env`).
-- **Setup**: optional shell command from `marshal.json` → `worktree.setup`, run after worktree creation.
-- **Idempotent**: `create(slug)` returns the existing worktree if one exists. This lets freeze, builder, validator, and manual re-queue all share one worktree without re-running setup.
-- **Cleanup**: worktree is destroyed only on successful merge to `done`. Escape hatches preserve it.
+### Distribution installation
 
----
+Marshal chooses a supported distribution for the host platform:
 
-## 5. Agent layer
+1. Verified platform binary.
+2. Version-pinned `npx` package.
+3. Version-pinned `uvx` package.
 
-Marshal is agent-agnostic. The `Agent` interface (spawn, prompt, cancel, close) is the only abstraction the orchestrator depends on. `SdkAcpAgentAdapter`, built on `@agentclientprotocol/sdk`, is the sole runtime implementation.
+Preference may be user-configurable, but version pinning is mandatory.
 
-- **Role configuration**: every role uses a structured `{ id, command, args, env? }` value. Commands are spawned directly without a shell. Legacy string values are invalid and `marshal init` replaces them with generated direct defaults.
-- **`AgentId`** remains a plain string inside the orchestrator. Runtime-specific command details stop at the adapter factory.
-- **Session scope**: builder and validator share the task worktree (`cwd`) but have distinct session names. Direct runs currently use one process and one ACP session per run; restart-resumable direct sessions are not claimed.
-- **Events**: the adapter maps ACP `session/update` notifications to the stable `AgentEvent` union (text, thinking, tool, permission, log, done, error). Unknown updates pass through as log events.
-- **Permission mode**: headless roles use explicit Marshal policy. The adapter selects allow/reject options by ACP permission-option kind; it never assumes the first option is safe.
-- **Diagnostics**: `marshal doctor` probes roles with ACP initialize + `session/new` without sending a model prompt.
+Binary installation must:
 
-Misconfiguration surfaces at first role resolution or `spawn`, not daemon boot. Invalid role shapes, missing executables, and ACP protocol failures become actionable errors.
+- Download into a temporary location.
+- Verify SHA-256 when supplied.
+- Reject unsafe archive paths, links, device files, and extraction limits.
+- Resolve the declared command inside the installation root.
+- Mark the version installed with an atomic rename.
+- Retain enough provenance to reproduce and audit the installation.
 
----
+Package distributions are also installations, not moving aliases. The exact package specifier and registry version are persisted. Updating is explicit.
 
-## 6. Build → validate → review flow
+Suggested machine state:
 
-The daemon runs a polling loop (`runOnce` per cycle). Each cycle claims the oldest `ready` or `validating` task (FIFO, `ready` wins ties to keep the pipeline moving).
+```text
+~/.marshal/
+  daemon.json
+  registry/
+    public-v1.json
+  agents/
+    <agent-id>/
+      <version>/
+        manifest.json
+        payload/
+  logs/
+```
 
-### Builder (ready → building → validating)
-
-1. Worktree exists from the freeze. Transition to `building`.
-2. Spawn builder agent in the worktree. Stream events to the run log and WebSocket bus.
-3. On completion, commit with `git add -A && git commit --allow-empty -m "build: <slug>"`. The `--allow-empty` ensures a clear build commit even if the agent committed internally.
-4. Transition to `validating`. On error, task stays in `building` for human inspection.
-
-The builder prompt inlines the spec from SQLite (not from the frozen file) and instructs the agent to follow repo conventions, write tests, and run checks. The in-loop gate (typecheck, lint, tests) is the builder's own responsibility — the orchestrator does not verify it.
-
-### Validator (validating → review or → building for retry)
-
-1. Reuses the builder's worktree (no second worktree). Computes diff against trunk, excluding `specs/`.
-2. Spawn validator agent. The prompt includes the spec and diff, and instructs the agent to run the test suite and emit a gate sentinel.
-3. Parse text events for `MARSHAL_GATE: pass` or `MARSHAL_GATE: fail <reason>`. First well-formed match wins. Missing sentinel = conservative `fail`.
-4. On pass → `review`. On fail → bounce to `building` (retry accounting). On cap exceeded → escalate to `review` with failure summary.
-
-The gate signal is a sentinel in agent text output — deterministic and auditable, not free-form model judgment.
-
-### Review (review → done or → backlog)
-
-- **Approve & Merge**: `git merge --no-ff` into trunk, transition to `done`, destroy worktree. Merge conflicts return 409 and leave the task in `review`.
-- **Send Back**: escape hatch to `backlog`. Preserves worktree and commit history for inspection.
+Secrets do not belong in installation manifests or repository config.
 
 ---
 
-## 7. Spec lifecycle
+## 5. Agent catalog and assignments
 
-Two artifacts per task:
+Marshal distinguishes an installed agent from its use in the product.
 
-1. **Working spec** (SQLite, mutable): `tasks.spec_markdown`. Editable during backlog via the spec-authoring chat. The agent is prompted to include proposed spec revisions in a fenced `marshal-spec` block; the human chooses whether to apply.
-2. **Frozen spec** (committed file, immutable): At the Ready transition, the spec is written to `specs/<NNNN>-<slug>.md` in the worktree with YAML front-matter and committed. The frozen file is for auditability and git history; the builder prompt reads from SQLite.
+### Installed agent
 
-Re-freezing creates a new commit (not an amend) — audit trail preserved.
+An installed agent has a stable local identity:
+
+```ts
+interface InstalledAgent {
+  id: string;
+  source: "registry" | "custom";
+  version: string;
+  distribution: "binary" | "npx" | "uvx" | "command";
+  launch: AgentLaunchSpec;
+  provenance: AgentProvenance;
+}
+```
+
+`AgentLaunchSpec` is daemon-owned executable detail. It does not appear in task, thread, or workflow APIs.
+
+### Assignment
+
+Product features refer to installed agent IDs:
+
+- A thread selects one installed agent.
+- A workflow profile assigns installed agents to `specAuthor`, `builder`, and `validator`.
+- Different repositories may use different workflow profiles.
+- The same installed agent may fill multiple assignments.
+- A validator may be required to differ from the builder by policy.
+
+Assignments can also carry ACP configuration selected after initialization, such as model and mode. They must not duplicate installation details.
+
+There are no agent-specific adapters and no role-specific executable commands. Supporting a new agent is a function of ACP and registry coverage.
 
 ---
 
-## 8. Security and isolation
+## 6. Authentication and readiness
 
-The daemon is an **RCE-as-a-service** surface — it spawns agents with file/exec permissions. It binds to `127.0.0.1` only by default. `marshal start --lan` binds to `0.0.0.0` and requires `--password`, `MARSHAL_UI_PASSWORD`, or configured `daemon.uiPassword`. Browser sessions use an HttpOnly, SameSite cookie; API routes and WebSocket upgrades require that session. Put remote deployments behind HTTPS or a VPN. Authentication does not sandbox ACP agents.
+Authentication is a first-class product flow, not a prerequisite documented outside Marshal.
 
-ACP does **not** sandbox the agent. The agent runs on the host with its own permissions. Isolation (container, VM) is the operator's responsibility. The worktree is the current filesystem scope boundary — the agent could escape it.
+After ACP `initialize`, Marshal records the agent's declared authentication methods and capabilities. If authentication is required, the web application presents supported choices.
 
-Provider API keys are the user's responsibility. Marshal never reads or stores them.
+Supported flows:
 
-### Crash recovery
+- **Agent auth** — Marshal invokes ACP authentication and the agent owns its browser/OAuth flow.
+- **Terminal auth** — Marshal opens a browser-accessible terminal backed by a daemon PTY and launches the installed agent with its declared auth arguments and environment.
+- **Environment-variable auth** — Marshal collects or references required values and restarts the process with them. Secret storage must use an OS credential store or an explicit external secret source, not plaintext project state.
 
-If the daemon dies mid-build or mid-validate, the task is **not** auto-retried. The worktree is preserved, the in-flight run stays in `running` status, and the operator re-queues manually via escape hatches. Conservative by design.
+The readiness probe performs:
 
----
+1. Process spawn with a bounded timeout.
+2. ACP `initialize` and protocol negotiation.
+3. Authentication status resolution.
+4. ACP `session/new` in a temporary workspace.
+5. Session close and process cleanup.
 
-## 9. Onboarding
-
-`marshal init` is **non-interactive** — running it is the consent. Flow:
-
-1. Check system prereqs (node, git, pnpm).
-2. Write structured direct ACP role defaults. Marshal never installs agent runtimes itself.
-3. Write `~/.marshal/config.json` with agent role defaults if not already configured.
-4. Create `.marshal/` and `.marshal/state.db` for the current repo.
-
-`marshal doctor` is the read-only diagnostic. It re-runs prereq checks and probes each role with direct ACP initialize + `session/new`. Marshal never checks provider env vars (e.g. `OPENAI_API_KEY`) — the session probe is the authoritative "can this agent run" signal.
+Readiness results include protocol version, supported prompt content, session capabilities, authentication state, and actionable failures. A registry listing alone never implies readiness.
 
 ---
 
-## 10. Frontend
+## 7. ACP runtime
 
-React 18 SPA in `web/`, built by Vite to `web/dist/` and served by the daemon (the Vite dev server proxies `/api/*` and `/ws`). Stack: **React 18 + Vite + Tailwind v4 (`@tailwindcss/vite`) + shadcn/Base UI primitives + wouter + `@uiw/react-codemirror` + `marked`**, light-mode only.
+ACP is the only agent runtime contract.
 
-### Routing
+The runtime supervisor owns:
 
-History-mode routing via **wouter** (`web/src/routes/routes.ts` centralizes paths, nav items, and `lazy()` chunk loaders). `App.tsx` wraps a `Router` + `Switch` over `lazy()` route components; `/` redirects to `/chat`. The WebSocket bridge sits at app level to share the event stream. The daemon's existing SPA fallback (`src/daemon/http.ts` `spaNotFound`) serves deep links, so refreshing `/chat/<threadId>` boots the bundle and resolves the route client-side. `PrefetchNavLink` triggers a route chunk on `mouseenter`/`focus`.
+- Direct process spawning without a shell.
+- ACP connection setup over stdin/stdout.
+- Protocol negotiation.
+- Authentication requests.
+- Session create, load, fork, cancel, and close when supported.
+- Prompt streaming.
+- Capability and configuration negotiation.
+- Permission requests.
+- Process stderr and lifecycle diagnostics.
+- Bounded startup, prompt, idle, and shutdown timeouts.
 
-### Layout
+The product consumes normalized ACP events but preserves the original ACP payload for audit and forward compatibility. Unknown updates are retained rather than discarded.
 
-`<AppShell>` owns the header + main slot (and a `@container` on the main slot so the chat pane knows its own width). Chat is the primary navigation surface. Tailwind v4 breakpoints are overridden in `@theme` (`sm = 480px`, `md = 768px`) so the named scale matches the design intent. `styles.css` is gone — `web/src/index.css` imports Tailwind + the `@theme` tokens only.
+Marshal must not build provider- or agent-specific behavior into the runtime. Compatibility exceptions belong only in narrowly scoped, documented shims when an agent is demonstrably non-conformant and strategically necessary.
 
-### Deferred board surface
+### Process and session scope
 
-The board implementation remains in the codebase for a future revisit but is not registered in the current client route table. Task state and mutation helpers remain available to task detail and chat integrations.
+An ACP process is an implementation resource; an ACP session is the product-level execution context.
 
-Optimistic updates on mutations; rollback on server error. The server-side state machine is always authoritative — the UI hides invalid actions but does not enforce them.
+- Interactive threads own or reference an ACP session.
+- Workflow runs own an ACP session scoped to their worktree and attempt.
+- Session persistence is used when the agent supports it, but Marshal's durable thread and run records remain authoritative.
+- Process reuse is an optimization, not an API guarantee.
+- Daemon restart recovery depends on recorded session capabilities and IDs; unsupported sessions fail conservatively and remain inspectable.
 
-### Code rendering & editing
+---
 
-One engine — `@uiw/react-codemirror` (CodeMirror 6) — serves both read-only highlighting and editable code. `web/src/codemirror/CodeBlock.tsx` is the public surface (`editable: boolean` prop); `languages.ts` maps fence strings (`ts`, `tsx`, `js`, `jsx`, `md`, `json`, `css`, `py`, `sql`, `diff`, …) to per-language extension imports, falling back to plain text. `MarkdownWithCode.tsx` integrates it with `marked`: prose is rendered with `marked`, then a hydration pass replaces `<pre><code class="language-…">` stubs with mounted `<CodeBlock>` instances. The first block of a session briefly renders as plain monospace, then hydrates; the CodeMirror module is cached for the session after. CodeMirror is wired into `TaskDetail` (spec), `SpecChatPanel` (chat messages), and `DiffView` (hunk bodies as `lang="diff"`). The spec-block "Edit this block" affordance flips a block to `editable` locally (no PATCH in Phase 1).
+## 8. Threads and messages
 
-### Performance
+A thread is Marshal's durable wrapper around an ACP conversation in one repository context.
 
-Code-split aggressively: route-level `lazy()` chunks + point-of-use lazy loads for `marked` (`web/src/markdown.ts` `renderMarkdown`/`renderProse` dynamic-import on first call) and the CodeMirror engine (lazy on first `<CodeBlock>` mount, never in the initial chunk). **`rollup-plugin-visualizer`** behind `ANALYZE=1` (`pnpm run analyze`) emits `web/dist/stats.html` for manual triage; it is not a production-graph dep. Lighthouse (P≥90 / BP≥95) is a release-cadence gate, not per-PR. A11y is inherited from Base UI; not gated or tracked.
+Thread state includes:
 
-Chat reconnects report `connecting`/`open`/`closed`, reconnect automatically, and rehydrate durable thread/message state through the WebSocket snapshot plus thread detail fetch. Empty thread lists, empty transcripts, failed loads, and failed turns have actionable copy and retry paths. Phase 1 chat supports PNG, JPEG, WebP, and GIF uploads up to 10 MiB each, with an 8-image send limit and 40 MiB per-thread quota. MIME, filename extension, and file signatures are checked by the daemon. ACP image content blocks are sent only when the negotiated `promptCapabilities.image` is true; otherwise the turn fails explicitly.
+- Repository and working directory.
+- Installed agent ID and resolved agent version.
+- ACP session ID when available.
+- Selected model, mode, and agent configuration.
+- Status, title, pin/archive state, and timestamps.
+- Durable user messages, normalized agent events, attachments, and permissions.
 
-### File map (frontend)
+The daemon streams live ACP updates over WebSocket and persists them before broadcasting durable events. Reconnection hydrates from HTTP state and resumes the live stream where possible.
 
-- `web/src/App.tsx`, `web/src/shell/AppShell.tsx` — app shell + routing root.
-- `web/src/routes/routes.ts` — paths, nav, chunk loaders.
-- `web/src/board/*` — deferred board surface (reducer, actions, `TaskCard`).
-- `web/src/detail/TaskDetail.tsx`, `web/src/diff/DiffView.tsx`, `web/src/specchat/SpecChatPanel.tsx` — task surfaces (all consume `MarkdownWithCode`).
-- `web/src/codemirror/{CodeBlock,languages,MarkdownWithCode}.tsx` — CodeMirror integration.
-- `web/src/markdown.ts` — `renderMarkdown` / `renderProse` (lazy `marked`).
-- `web/src/components/ui/*` — shadcn/Base UI primitives (`Sheet`, `Dialog`, `Button`, `Tooltip`, `Tabs`, …) + the `cn()` helper.
-- `web/vite.config.ts`, `web/src/index.css` — build/theming config.
+Threads must expose ACP capabilities honestly. Image attachment, session resume, model selection, modes, and commands appear only when negotiated with the selected agent.
+
+---
+
+## 9. Permissions
+
+ACP permission requests are mediated centrally by the daemon.
+
+Interactive threads default to user-mediated permissions in the web application. Workflow runs use an explicit policy attached to the workflow profile, such as:
+
+- Reject all.
+- Allow reads, ask for writes.
+- Allow within the task workspace.
+- Unattended allow-all inside an external sandbox.
+
+Permission option selection is based on ACP option kinds, never array position or label text.
+
+ACP permissions are advisory interaction controls, not a sandbox. The process already runs with host-level access. Strong isolation requires a container, VM, or OS sandbox supplied by the execution environment.
+
+---
+
+## 10. Repositories and workspaces
+
+A repository is a durable Marshal resource rather than an implicit consequence of the daemon's current working directory.
+
+The web application can add and open repositories. The daemon validates repository paths and stores repository-scoped preferences, threads, workflow profiles, tasks, and worktrees.
+
+Interactive threads normally use the source checkout unless the user chooses an isolated workspace. Factory tasks always use a dedicated worktree.
+
+Task worktrees are:
+
+- Created from the configured trunk branch.
+- Reused across build and validation attempts for that task unless policy requires stronger isolation.
+- Never created or mutated by the browser directly.
+- Preserved on failure for inspection.
+- Removed only after successful merge or explicit cleanup.
+
+---
+
+## 11. Software factory
+
+The software factory is orchestration over installed ACP agents and repository workspaces.
+
+Default task states:
+
+```text
+backlog -> ready -> building -> validating -> review -> done
+```
+
+The state machine remains durable and daemon-owned, but it is not part of the agent integration layer.
+
+### Workflow profile
+
+A repository workflow profile defines:
+
+- `specAuthor`, `builder`, and `validator` agent assignments.
+- Optional model, mode, and agent configuration per assignment.
+- Permission and sandbox policy.
+- Retry, timeout, and spend limits.
+- Worktree setup and deterministic verification commands.
+- Whether builder and validator must be decorrelated.
+
+### Build
+
+1. Create or reuse the task worktree.
+2. Resolve the pinned builder installation and assignment configuration.
+3. Create a workflow ACP session in the worktree.
+4. Send the frozen spec and previous validation context.
+5. Persist events and artifacts.
+6. Run deterministic checks and create a build commit.
+7. Transition to validation or stop with an inspectable failure.
+
+### Validate
+
+1. Resolve the pinned validator installation independently.
+2. Create a fresh validator ACP session against the build result.
+3. Provide the spec, diff, and deterministic verification contract.
+4. Run the boundary checks under daemon supervision.
+5. Record structured test results and advisory agent findings separately.
+6. Pass to review, retry the builder, or escalate according to policy.
+
+The deterministic command result is the gate. Agent narrative is evidence and advice, not the authoritative pass/fail signal.
+
+### Review
+
+The web application presents the frozen spec, diff, checks, agent transcripts, artifacts, and retry history. The human can merge, send back, or abandon. Merge and cleanup remain daemon-owned git operations.
+
+---
+
+## 12. Data model
+
+SQLite is the durable local store. The conceptual model is:
+
+- `repositories` — registered source repositories and settings.
+- `registry_sources` and `registry_snapshots` — catalog provenance and cached metadata.
+- `installed_agents` — pinned installations and launch provenance.
+- `agent_auth` — non-secret auth state and credential references.
+- `agent_probes` — readiness and capability snapshots.
+- `workflow_profiles` and `agent_assignments` — repository-scoped orchestration configuration.
+- `threads` and `messages` — durable interactive conversations.
+- `sessions` — ACP session metadata and recovery information.
+- `permission_requests` — pending and resolved user decisions.
+- `tasks` — factory lifecycle and frozen spec state.
+- `runs` and `run_events` — build/validate attempts and streamed evidence.
+- `artifacts` and `attachments` — bounded metadata for files stored outside SQLite.
+
+Historical records store the resolved agent ID and version used at execution time. Updating an installation never rewrites history.
+
+---
+
+## 13. HTTP and WebSocket API
+
+The API is organized by product resources rather than CLI operations:
+
+```text
+/api/repositories
+/api/registry
+/api/agents
+/api/agents/:id/install
+/api/agents/:id/authenticate
+/api/agents/:id/probe
+/api/workflow-profiles
+/api/threads
+/api/threads/:id/messages
+/api/permissions
+/api/tasks
+/api/runs
+/api/artifacts
+/api/system
+/ws
+```
+
+Long-running operations such as installation, authentication, prompts, and workflow runs expose durable operation state and stream progress over WebSocket. A browser refresh must not lose ownership of an operation.
+
+Mutation APIs are idempotent where practical. Errors use a stable machine code plus a human-readable message.
+
+---
+
+## 14. Security
+
+Marshal is an RCE control plane because it installs and runs third-party agent software.
+
+Required controls:
+
+- Bind to localhost by default.
+- Require authentication and trusted origins when exposed beyond localhost.
+- Treat registry and package metadata as untrusted input.
+- Pin versions and preserve provenance.
+- Verify checksums and extract archives safely.
+- Never interpolate registry fields through a shell.
+- Store secrets outside SQLite and JSON config where platform support permits.
+- Require explicit user action before installation, authentication, assignment, and unattended execution.
+- Make permission and sandbox policy visible at the point of workflow assignment.
+- Preserve logs and failed workspaces for audit.
+
+Registry curation establishes interoperability, not trust. ACP permission requests do not confine a malicious process.
+
+---
+
+## 15. Failure and recovery
+
+All long-running operations are durable state machines.
+
+- Registry refresh failure falls back to the last valid snapshot.
+- Interrupted installation leaves no active partial version.
+- Authentication can be resumed or restarted without reinstalling.
+- Agent startup and ACP handshake have hard timeouts.
+- Prompt cancellation records both the user action and agent outcome.
+- Daemon restart reconciles running operations and processes conservatively.
+- Unsupported session resume produces an inspectable stopped state, never a silent retry.
+- Workflow retries are policy-driven and recorded as new attempts.
+
+The system prefers explicit failure over pretending an agent is ready, authenticated, resumed, or validated.
+
+---
+
+## 16. Module map
+
+The target backend boundaries are:
+
+```text
+src/
+  registry/       catalog sources, schema validation, cache
+  installations/  distribution selection, download, verify, extract
+  agents/         installed catalog, assignments, readiness
+  acp/            process supervisor, protocol client, auth, sessions
+  permissions/    interactive decisions and workflow policies
+  repositories/   repository registry, files, git, worktrees
+  threads/        conversations, messages, attachments
+  workflows/      profiles, task state machine, build/validate/review
+  storage/        SQLite schema and repositories
+  daemon/         HTTP, WebSocket, operation supervision
+  cli/            daemon lifecycle only
+```
+
+The frontend mirrors product domains rather than backend implementation details:
+
+```text
+web/src/
+  agents/
+  repositories/
+  chat/
+  workflows/
+  tasks/
+  settings/
+  api/
+  shell/
+```
+
+Legacy direct-command role configuration, CLI-driven onboarding, and agent-specific defaults should be removed as these boundaries land.

@@ -1,83 +1,217 @@
 # Marshal
 
-A local-first, agent-agnostic coding-agent orchestrator — a "software factory" loop where a human authors the spec, a coding agent (the "builder") autonomously implements it in an isolated worktree, a different agent (the "validator") runs the verification gate, and the human reviews and merges.
+A local-first, browser-based client for ACP coding agents, with a built-in software factory for turning conversations and specifications into verified changes.
 
-The state machine, HTTP/WS API, agent layer, retry routing, and security model are documented in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). This document is the higher-level vision and design tenets — the _why_ behind the shape, not the _what_ or the _where_.
+`docs/ARCHITECTURE.md` defines the concrete target architecture. This document defines why Marshal exists and how product decisions should be made.
 
 ---
 
 ## 1. Vision
 
-A self-hosted control plane for driving coding agents through a build-verify-review loop with human-in-the-loop only at the two points where judgment matters: authoring the spec (front) and reviewing the merge (back). Everything in between runs unattended.
+ACP makes coding agents interchangeable at the protocol boundary, and the ACP Registry makes them discoverable and distributable. Marshal should be the place where a user can browse those agents, install one, authenticate, open a repository, and start working without manually assembling commands or editing configuration files.
 
-The reason to exist is the part vibe kanban never had a strong opinion about: a first-class verification and validation gate. The board, worktrees, and PR flow are table stakes; the opinionated gate is the differentiator.
+The product starts as a great ACP workbench and grows into a software factory:
 
-Deployment target is a single box or a VPS. Models are accessed via API; "local" refers to the orchestration and verification running on infrastructure you control.
+```text
+discover -> install -> authenticate -> converse -> delegate -> verify -> review
+```
 
-## 2. Design tenets
+Interactive work and autonomous workflows use the same installed agents, sessions, permissions, repository context, and event model. The factory is not a separate integration stack bolted onto chat.
 
-1. **Verification is the product.** With the human out of the per-diff loop, the only thing preventing silent corruption is the gate. Build the gate before the autonomy.
-2. **Agent-agnostic.** The supported-agent count must be a function of protocol coverage, not our labor. Marshal ships no preferred agent; the user picks at init time.
-3. **Minimize HITL to the two ends.** Human owns the spec and the merge. The middle is unattended.
-4. **Decorrelated builder and validator.** Build with one model, validate with a different one, so the validator does not share the builder's blind spots.
-5. **Incremental trust.** Start HITL-heavy, remove human gates only as automated gates prove reliable. Auto-merge is earned per change-class, not granted up front.
-6. **Concurrency 1 to start.** Worktrees solve file-level conflicts, not semantic ones. One task at a time sidesteps the one genuinely unsolved problem until the gate is strong enough to trust more.
-7. **Thin clients, fat daemon.** The backend owns all real state and work; clients are faces over one API.
+The deployment target is a developer machine, single server, or private VPS. The daemon and durable state run on infrastructure the user controls. Models and agent services may be remote.
 
-## 3. Architecture, at a glance
+---
 
-A daemon owns the orchestrator, the worktree manager, the agent layer, the validation gate, the state, and the HTTP + WebSocket API. State is per-repo and discovered via the cwd-walked repo root. Clients (the web board, the CLI, future TUI) are thin adapters over the same API.
+## 2. Product thesis
 
-The agent layer targets the [Agent Client Protocol](https://agentclientprotocol.com) directly through the official TypeScript SDK. Marshal owns process lifecycle, permission policy, timeout, cancellation, and event mapping behind its stable `Agent` interface. Structured executable commands are required for every role. The safety and portability contract is ACP.
+Most agent clients stop at conversation. Most coding orchestrators hard-code a small set of executors. Marshal combines the open ACP ecosystem with a durable repository workbench and an opinionated verification loop.
 
-A task's lifecycle is `backlog → ready → building → validating → review → done`, with human-driven escape hatches out of `building`, `validating`, and `review` back to earlier states. The spec is mutable in SQLite while the task is in `backlog`; the freeze at the Ready transition commits it to the task branch as the immutable build contract.
+The ACP Registry should determine the breadth of agents Marshal can offer. Marshal's engineering effort should concentrate on the capabilities a generic editor-like ACP client must own:
 
-## 4. The verification gate
+- Safe installation and updates.
+- Authentication.
+- Session and process supervision.
+- Permissions.
+- Repository context and workspaces.
+- Durable transcripts and artifacts.
+- Workflow composition.
+- Deterministic verification and review.
 
-Two levels, borrowed from the mainstream software-factory framing:
+Marshal wins by being an excellent client and orchestrator of the protocol, not by maintaining agent-specific adapters.
 
-- **In-loop** (fast, cheap, deterministic): typecheck, lint, unit tests. Runs inside the builder's iteration. The builder sees and fixes these.
-- **Boundary** (comprehensive): integration and scenario tests, run in a different agent in a separate worktree (or the builder's, after a clean commit) after the build.
+---
 
-The decorrelated validator — a different model, re-executing the full boundary test suite against the builder's diff — is the single highest-leverage design choice for "no mistakes."
+## 3. Design tenets
 
-The gate signal is the exit code and structured report from deterministic test execution, not free-form model judgment on whether the diff satisfies the spec. Tenet #1 holds only when the gate is deterministic and auditable. Advisory, narrative model judgments may exist alongside, but they are explicitly labeled advisory — never conflated with the gate result.
+1. **Registry-first, ACP-native.** Public registry agents work through standard metadata and ACP. Custom agents use the same runtime path.
+2. **The web application is the product.** Installation, authentication, configuration, chat, workflows, diagnostics, and recovery live in the browser. The CLI starts the daemon.
+3. **Capabilities over assumptions.** The UI and workflows reflect negotiated ACP capabilities instead of pretending all agents support the same features.
+4. **Installations are pinned and auditable.** Discovery may track the latest registry, but execution uses a known agent version and provenance.
+5. **Sessions are the shared primitive.** Chat threads and workflow runs are durable products built over ACP sessions, not separate agent integrations.
+6. **Workflows assign agents; they do not configure executables.** Builder, validator, and spec-author are repository workflow roles selected from installed agents.
+7. **Verification remains the factory's differentiator.** Agent output is useful evidence, but deterministic checks own the pass/fail gate.
+8. **Decorrelate build and validation.** Prefer different agents, models, or configurations so validation does not inherit the builder's blind spots.
+9. **Explicit trust transitions.** Discovering, installing, authenticating, assigning, and running unattended are separate user decisions.
+10. **Local-first does not mean unsandboxed by default.** Marshal owns local state and control, while strong agent isolation remains an explicit execution policy.
+11. **Durable operations survive the browser.** Refreshing or disconnecting must not orphan installation, authentication, prompts, or workflow runs.
+12. **Pre-1.0 simplicity beats compatibility.** Remove structures that conflict with the product model rather than preserving obsolete command and onboarding formats.
 
-## 5. The spec and human ownership
+---
 
-The human owns the spec from start to finish. An agent can help draft, ask clarifying questions, and surface gaps before the task is frozen — but the human approves acceptance criteria. A spec must be scoped to a single mergeable diff completable within the configured step and spend budgets, not a multi-day epic. Larger work is decomposed before authoring.
+## 4. Primary experience
 
-The spec-authoring surface is a grill-me chat where the human and an agent iterate on the spec conversationally. The working spec is mutable in SQLite during this phase; the freeze at the Ready transition commits it to the task branch. The frozen spec and the boundary test files freeze together as one atomic build contract. If the spec is wrong mid-build, that is a new build run — unfreeze, revise, re-freeze.
+On first launch, the user opens the web application and:
 
-## 6. Failure routing
+1. Adds or selects a repository.
+2. Browses the ACP Registry.
+3. Installs an agent with visible version, source, license, and distribution.
+4. Authenticates through a browser, terminal, or supported credential flow.
+5. Sees a successful ACP readiness probe and negotiated capabilities.
+6. Starts a thread with that agent in the repository.
 
-Validator failures bounce back to a fresh build attempt, with the previous failure as context, up to a configured cap. Cap exceeded escalates to human review with a failure summary. Builder failures leave the task stuck for human inspection — manual recovery via the escape hatches. Recovery is explicit and conservative, not automatic; the orchestrator never silently retries after a crash.
+Nothing in this flow should require editing JSON or knowing the agent's executable command.
 
-A per-task spend ceiling is a non-functional requirement alongside the step budget. Steps vary arbitrarily in token cost; the retry loop compounds spend further. The ceiling caps total cost regardless of step count or size. Reaching the ceiling is treated identically to exceeding the retry cap — escalate to human review.
+From a useful thread, the user can continue interactively or promote intent into a factory task. A workflow profile selects the spec author, builder, validator, permissions, isolation, and deterministic checks from the same installed-agent inventory.
 
-## 7. Security and isolation
+---
 
-The daemon's HTTP + WebSocket API can spawn processes with file/exec permissions on request. It is therefore an RCE-as-a-service surface when reachable beyond localhost. The daemon binds to `127.0.0.1` only by default. Any exposure beyond localhost requires an authenticated tunnel or token-based auth. An unauthenticated listener reachable beyond localhost is never acceptable.
+## 5. The ACP workbench
 
-ACP does **not** sandbox the agent. The agent runs on the host with its own CLI file/exec permissions, and headless runs need a permissive profile because there is no TTY to approve prompts. Isolation — running the builder inside a container or throwaway VM scoped to the task worktree — is therefore the operator's responsibility. Running approve-all agents bare on the host is unsafe in any scenario where the agent can reach paths beyond the task worktree.
+The workbench should feel like an editor-oriented agent client, not a settings page wrapped around a chatbot.
 
-## 8. Build sequencing
+It includes:
 
-- **M0** — vertical slice / go-no-go. Daemon spawns the configured builder through the `Agent` interface on a Ready task, runs headless in a worktree to completion, hands the diff to the configured validator, and routes pass/fail through the state machine. No UI. Proves or kills the whole design.
-- **M1** — control plane. HTTP + WebSocket API, Kanban board, task lifecycle visible and driveable from the browser, local merge flow.
-- **M2** — the gate, first-class. Two-level verification, decorrelated validator with the discipline of §4, retry/escalation routing made load-bearing. The differentiator; invest here.
-- **M3** — more agents. Mostly config, not code.
-- **M4** — additional clients. TUI, optional VS Code webview. Editor deep-links.
+- Repository navigation and file context.
+- Multiple durable threads.
+- Per-thread agent, model, mode, and capability-aware controls.
+- Streaming text, thought, tool, plan, permission, and artifact events.
+- Attachments and image prompts when supported.
+- Session recovery and explicit failure states.
+- Installation and authentication status close to agent selection.
+- A path from discussion to an executable task specification.
 
-## 9. Open questions
+Marshal should expose what ACP agents actually provide rather than flattening them into a lowest-common-denominator text stream.
 
-- Container vs VM for builder isolation on the VPS? (devcontainer is probably enough; VM if paranoid.)
-- Auto-merge change-class taxonomy: which classes graduate first (docs, tests, pure refactors)?
-- Naming. (Working title is "Marshal".)
+---
 
-## 10. Prior art and references
+## 6. The software factory
 
-- **vibe kanban** (BloopAI) — the board/worktree/PR model; community-maintained after Bloop's shutdown. The shape Marshal's M1 inherits.
-- **no-mistakes** (kunchenguid) — local git proxy that runs an AI validation pipeline in a disposable worktree and forwards a clean PR only after checks pass. The gate model to steal.
-- **ACP** (Zed) — the agent-editor protocol standard; the durable substrate.
-- **opencode**, **pi** — early executors used to prove the loop; any ACP-compatible executable is now a config choice.
+The factory turns a frozen human-owned specification into a reviewable change:
+
+```text
+backlog -> ready -> building -> validating -> review -> done
+```
+
+The human owns the two judgment-heavy ends:
+
+- The specification and acceptance criteria.
+- The final review and merge decision.
+
+The middle can run unattended once the user has explicitly assigned agents and accepted the permission and isolation policy.
+
+Builder and validator are ordinary installed ACP agents running in workflow sessions. The validator independently examines the implementation and executes the verification contract. Retries, timeouts, spend limits, transcripts, commits, and artifacts are durable evidence.
+
+The deterministic test result is authoritative. Model commentary may explain risks, identify missing coverage, or recommend rejection, but it is not silently converted into a gate result.
+
+---
+
+## 7. Trust and security
+
+Installing and running a registry agent is remote code execution by consent. Registry curation says that an agent interoperates and supports authentication; it does not make the executable safe.
+
+Marshal must make trust transitions legible:
+
+- What source and version will be installed?
+- Was the binary checksum verified?
+- Which authentication method will run?
+- Which repository and workspace will the agent access?
+- Which permission policy applies?
+- Is the process sandboxed?
+- Which agent version produced this conversation, diff, or validation?
+
+ACP permission prompts are valuable controls but not process isolation. Unattended workflows should make container, VM, or OS sandbox execution an explicit profile concern.
+
+---
+
+## 8. Product boundaries
+
+Marshal owns ACP client behavior and repository orchestration. It does not own:
+
+- Model provider accounts or pricing.
+- Agent implementation quality.
+- A proprietary agent marketplace.
+- Agent-specific command documentation.
+- Provider-specific adapters when ACP is available.
+- A general-purpose package manager beyond installing declared ACP distributions.
+- A security sandbox disguised as permission prompts.
+
+Private registries and custom agents may be supported, but they must enter through the same catalog, installation, authentication, readiness, and session abstractions.
+
+---
+
+## 9. Delivery sequence
+
+### M0: Registry-backed ACP workbench
+
+- Daemon lifecycle CLI.
+- Repository selection.
+- Public registry browsing and cache.
+- One installation path with pinned versions.
+- Agent authentication and readiness.
+- Durable ACP chat with permissions and events.
+
+This proves Marshal as an ACP client.
+
+### M1: Complete agent lifecycle
+
+- Binary, `npx`, and `uvx` distributions.
+- Updates, removal, provenance, and failure recovery.
+- Agent, terminal, and environment authentication flows.
+- Capability-aware model, mode, attachment, and session controls.
+- Custom agents and optional private registries.
+
+### M2: Repository workbench
+
+- Multi-repository management.
+- Files, diffs, artifacts, and isolated interactive workspaces.
+- Strong thread/session recovery.
+- A polished path from chat to specification.
+
+### M3: Software factory
+
+- Workflow profiles and agent assignments.
+- Worktrees and frozen specifications.
+- Build, validate, review, and merge state machine.
+- Deterministic verification, retries, and escalation.
+- Decorrelated builder and validator policy.
+
+### M4: Isolation and autonomy
+
+- Container or VM execution profiles.
+- Spend and resource budgets.
+- Concurrent task policy.
+- Trust-based automation and narrowly scoped auto-merge.
+
+---
+
+## 10. Success criteria
+
+Marshal is succeeding when:
+
+- Adding a conformant registry agent requires no Marshal code change.
+- A new user can install, authenticate, and chat with an agent entirely in the web application.
+- Every execution records the exact agent version and capabilities used.
+- The same agent inventory powers interactive threads and factory workflows.
+- Agent failures are understandable and recoverable without terminal archaeology.
+- A factory review contains enough deterministic and conversational evidence for a human to merge confidently.
+
+---
+
+## 11. References
+
+- [Agent Client Protocol](https://agentclientprotocol.com) — runtime interoperability contract.
+- [ACP Registry](https://agentclientprotocol.com/get-started/registry) — default catalog and distribution metadata.
+- OpenChamber — product reference for a daemon-backed, browser-first ACP workbench.
+- Zed — reference ACP client and capability surface.
+- vibe kanban — worktree and review workflow precedent.
+- no-mistakes — independent validation and verification-gate precedent.
