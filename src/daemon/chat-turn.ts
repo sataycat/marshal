@@ -1,6 +1,7 @@
 import type { Agent, AgentEvent, AgentPromptPart, AgentSession } from "../agent/types.js";
 import { resolve } from "node:path";
-import { createConfiguredAgent } from "../agent/configured-agent.js";
+import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
+import { getInstalledAgent } from "../agents/store.js";
 import {
   appendChatMessage,
   getChatThread,
@@ -21,6 +22,13 @@ export class ChatTurnBusyError extends Error {
   }
 }
 
+export class ChatAgentUnavailableError extends Error {
+  constructor(public readonly code: "agent_not_installed" | "agent_not_ready", message: string) {
+    super(message);
+    this.name = "ChatAgentUnavailableError";
+  }
+}
+
 interface ActiveTurn {
   session: AgentSession;
   prompt: Promise<void>;
@@ -28,15 +36,18 @@ interface ActiveTurn {
 
 export interface ChatTurnRunnerOptions {
   root?: string;
+  machineDir?: string;
   bus?: EventBus;
   agent?: Agent;
 }
 
 export class ChatTurnRunner {
   private readonly root?: string;
+  private readonly machineDir?: string;
   private readonly bus?: EventBus;
   private configuredAgent?: Agent;
   private readonly sessions = new Map<string, AgentSession>();
+  private readonly agents = new Map<string, Agent>();
   private readonly active = new Map<string, ActiveTurn>();
   private readonly starting = new Set<string>();
   private readonly touched = new Map<string, Set<string>>();
@@ -44,6 +55,7 @@ export class ChatTurnRunner {
 
   constructor(options: ChatTurnRunnerOptions = {}) {
     this.root = options.root;
+    this.machineDir = options.machineDir;
     this.bus = options.bus;
     this.configuredAgent = options.agent;
     this.permissions = new PermissionBroker(this.bus);
@@ -69,7 +81,7 @@ export class ChatTurnRunner {
     this.permissions.cancelThread(threadId);
     const session = this.sessions.get(threadId);
     if (session) {
-      await this.getAgent().close(session);
+      await this.getAgent(threadId).close(session);
       this.sessions.delete(threadId);
     }
   }
@@ -84,7 +96,7 @@ export class ChatTurnRunner {
     const expandedContent = expandChatFileMentions(content, thread.cwd);
     let userMessage: ChatMessage | undefined;
 
-    const agent = this.getAgent();
+    const agent = this.getAgent(threadId);
     let session = this.sessions.get(threadId);
     this.starting.add(threadId);
     try {
@@ -123,7 +135,7 @@ export class ChatTurnRunner {
     this.permissions.cancelThread(threadId);
     const turn = this.active.get(threadId);
     if (!turn) return;
-    await this.getAgent().cancel(turn.session);
+    await this.getAgent(threadId).cancel(turn.session);
   }
 
   private async runPrompt(threadId: string, session: AgentSession, content: string | AgentPromptPart[], agent: Agent): Promise<void> {
@@ -161,8 +173,22 @@ export class ChatTurnRunner {
     }
   }
 
-  private getAgent(): Agent {
-    return (this.configuredAgent ??= createConfiguredAgent("builder"));
+  private getAgent(threadId: string): Agent {
+    if (this.configuredAgent) return this.configuredAgent;
+    const thread = getChatThread(threadId, this.root);
+    const installed = getInstalledAgent(thread.agent_id, thread.agent_version, this.machineDir);
+    if (!installed || installed.status !== "installed") {
+      throw new ChatAgentUnavailableError("agent_not_installed", `Installed agent ${thread.agent_id}@${thread.agent_version} is not available`);
+    }
+    if (installed.readiness_status !== "ready") {
+      throw new ChatAgentUnavailableError("agent_not_ready", `Agent ${thread.agent_id}@${thread.agent_version} is not ready (${installed.readiness_status})`);
+    }
+    const key = `${installed.id}@${installed.version}`;
+    const existing = this.agents.get(key);
+    if (existing) return existing;
+    const agent = new SdkAcpAgentAdapter({ commands: [{ id: installed.id, command: installed.launch.command, args: installed.launch.args }] });
+    this.agents.set(key, agent);
+    return agent;
   }
 
   private publishMessage(threadId: string, message: ChatMessage): void {

@@ -39,7 +39,7 @@ export function useSpecMessagesQuery(slug: string) {
   return useQuery({ queryKey: queryKeys.specMessages(slug), queryFn: ({ signal }) => api.fetchSpecMessages(slug, signal), ...queryOptions });
 }
 export function useChatAgentsQuery() {
-  return useQuery({ queryKey: queryKeys.chatAgents, queryFn: ({ signal }) => api.fetchChatAgents(signal), ...queryOptions });
+  return useInstalledAgentsQuery();
 }
 export function useChatThreadsQuery(archived: boolean) {
   return useQuery({ queryKey: queryKeys.threads(archived), queryFn: ({ signal }) => api.fetchChatThreads(archived, signal), ...queryOptions });

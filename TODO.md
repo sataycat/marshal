@@ -194,7 +194,7 @@ start daemon
 
 **Implemented:** Agent-managed ACP authentication now has durable operation history, explicit method validation, cancellation, daemon-restart interruption handling, automatic readiness re-probing, and browser controls for progress, retry, and failure recovery. Terminal and environment-variable methods remain explicitly unsupported in this slice.
 
-## [ ] Slice 6: Create A Thread With An Installed Agent
+## [x] Slice 6: Create A Thread With An Installed Agent
 
 **Depends on:** Slices 1, 4, and 5. No-auth agents may exercise the path without Slice 5 state.
 
@@ -223,6 +223,8 @@ start daemon
 **Likely areas:** `src/chat/`, `src/daemon/chat-turn.ts`, agent APIs, storage schema, `web/src/chat/`, chat API and store tests.
 
 **Out of scope:** ACP session resume after daemon restart; Slice 7 owns durable session supervision.
+
+**Implemented:** Chat threads persist repository ownership plus exact installed agent ID/version. Production thread creation and turns resolve only the machine-scoped installed launch specification and require `installed` plus `ready`; the legacy `/api/chat-agents` role-command path and interactive `createConfiguredAgent("builder")` fallback are removed. The browser selector uses the installed-agent inventory, shows version/readiness context, gates new threads to ready agents, and preserves capability-aware image behavior. Injected agents remain a test-only seam for chat protocol coverage.
 
 ## [ ] Slice 7: Supervise Interactive ACP Sessions Durably
 

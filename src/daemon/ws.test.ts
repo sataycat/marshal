@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { startHttpServer } from "./http.js";
+import { createInstallation, finishInstallation, setAgentReadiness } from "../agents/store.js";
 
 function initGitRepo(root: string): void {
   execSync("git init -b main", { cwd: root, stdio: "ignore" });
@@ -121,7 +122,11 @@ describe("WebSocket event bus", () => {
   });
 
   it("sends repository threads in the connected snapshot and broadcasts thread mutations", async () => {
-    const handle = await startHttpServer({ root: repoRoot, host: "127.0.0.1", port: 0, version: "0.0.1" });
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-ws-machine-"));
+    const agent = createInstallation({ id: "agent-a", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "agent-a@1.0.0", launch: { command: "npx", args: ["--yes", "agent-a@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "install-op", machineDir);
+    finishInstallation(agent.id, "installed", null, machineDir);
+    setAgentReadiness("agent-a", "1.0.0", { readiness_status: "ready", readiness_error: null, protocol_version: 1, capabilities: { prompt: { text: true, image: false, audio: false, embedded_context: false }, session: { close: true, list: false, load: false, fork: false, resume: false }, load_session: false, auth: { logout: false } }, auth_methods: [], raw_initialize: {}, probed_at: new Date().toISOString() }, machineDir);
+    const handle = await startHttpServer({ root: repoRoot, machineDir, host: "127.0.0.1", port: 0, version: "0.0.1" });
     const { ws, collector } = await openSocket(`ws://127.0.0.1:${handle.port}/ws`);
     try {
       const connected = await collector.next();
@@ -129,7 +134,7 @@ describe("WebSocket event bus", () => {
       const created = await fetch(`http://127.0.0.1:${handle.port}/api/threads`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agent_id: "agent-a" }),
+        body: JSON.stringify({ agent_id: "agent-a", agent_version: "1.0.0" }),
       });
       const thread = (await created.json() as { thread: { id: string } }).thread;
       expect((await collector.next()).type).toBe("thread.created");

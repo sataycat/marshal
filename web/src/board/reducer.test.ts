@@ -125,7 +125,7 @@ function thread(overrides: Partial<ChatThread> = {}): ChatThread {
     id: "thread-1",
     repo_root: "/repo",
     cwd: "/repo",
-    agent_id: "builder",
+    agent_id: "builder", agent_version: "1.0.0",
     title: "Thread",
     status: "draft",
     archived: false,

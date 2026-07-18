@@ -261,13 +261,7 @@ export async function fetchChatThreads(includeArchived = false, signal?: AbortSi
   return body.threads;
 }
 
-export async function fetchChatAgents(signal?: AbortSignal): Promise<string[]> {
-  const res = await fetch("/api/chat-agents", { signal });
-  const body = await jsonOrThrow<{ agents: string[] }>(res);
-  return body.agents;
-}
-
-export async function createChatThread(input: { agent_id: string }): Promise<ChatThread> {
+export async function createChatThread(input: { agent_id: string; agent_version: string }): Promise<ChatThread> {
   const res = await fetch("/api/threads", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

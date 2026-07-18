@@ -51,7 +51,7 @@ import { runSpecAuthorTurn, SpecChatClosedError } from "./spec-chat.js";
 import { listSpecMessages, type SpecMessage } from "../tasks/spec-store.js";
 import { publishSpecMessage } from "./bus.js";
 import type { Agent } from "../agent/types.js";
-import { loadGlobalConfig, resolveAgentId, MissingAgentIdError, isAgentCommand } from "../worktree/config.js";
+import { resolveAgentId, MissingAgentIdError } from "../worktree/config.js";
 import {
   appendChatMessage,
   ChatThreadNotFoundError,
@@ -64,7 +64,7 @@ import {
   updateChatThread,
 } from "../chat/store.js";
 import { publishThreadCreated, publishThreadDeleted, publishThreadMessage, publishThreadUpdated } from "./bus.js";
-import { ChatTurnBusyError, ChatTurnRunner } from "./chat-turn.js";
+import { ChatAgentUnavailableError, ChatTurnBusyError, ChatTurnRunner } from "./chat-turn.js";
 import { ChatFileTooLargeError, InvalidChatPathError, listChatFiles, readChatFile } from "../chat/files.js";
 import { ChatAttachmentError, createChatAttachment, listChatAttachments, MAX_ATTACHMENT_BYTES, readChatAttachment } from "../chat/attachments.js";
 import { AuthService } from "./auth.js";
@@ -167,7 +167,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
   registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent);
-  registerChatRoutes(app, root, bus, options.chatAgent);
+  registerChatRoutes(app, root, bus, options.chatAgent, options.machineDir);
   registerStaticRoutes(app, webDir);
   app.notFound((c) => spaNotFound(c, webDir));
   app.onError((err, c) => {
@@ -401,6 +401,7 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof ChatTurnBusyError) {
     return new ApiError(409, err.message, "thread_busy");
   }
+  if (err instanceof ChatAgentUnavailableError) return new ApiError(409, err.message, err.code);
   if (err instanceof InvalidChatPathError) return new ApiError(422, err.message, "invalid_path");
   if (err instanceof ChatFileTooLargeError) return new ApiError(422, err.message, "file_too_large");
   if (err instanceof ChatAttachmentError) return new ApiError(422, err.message, err.code);
@@ -567,23 +568,22 @@ function registerAgentRoutes(app: Hono, machineDir?: string): void {
   });
 }
 
-function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus | undefined, chatAgent?: Agent): void {
-  const turns = new ChatTurnRunner({ root, bus, agent: chatAgent });
-  app.get("/api/chat-agents", (c) => {
-    const config = loadGlobalConfig();
-    const configured = [config.agents?.builder, config.agents?.validator, config.agents?.specAuthor]
-      .filter(isAgentCommand)
-      .map((agent) => agent.id);
-    return c.json({ agents: [...new Set(configured)] });
-  });
+function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus | undefined, chatAgent?: Agent, machineDir?: string): void {
+  const turns = new ChatTurnRunner({ root, bus, agent: chatAgent, machineDir });
   app.get("/api/threads", (c) => c.json({ threads: listChatThreads(root, c.req.query("archived") === "true") }));
   app.post("/api/threads", async (c) => {
-    const body = await readJsonObject(c, new Set(["agent_id", "cwd", "title", "task_slug"]));
+    const body = await readJsonObject(c, new Set(["agent_id", "agent_version", "cwd", "title", "task_slug"]));
     if (body.agent_id === undefined) throw new ApiError(422, "agent_id is required", "missing_field");
     const agentId = assertString(body.agent_id, "agent_id");
+    if (body.agent_version === undefined) throw new ApiError(422, "agent_version is required", "missing_field");
+    const agentVersion = assertString(body.agent_version, "agent_version");
     if (!agentId.trim()) throw new ApiError(422, "agent_id must not be empty", "invalid_field");
+    const installed = getInstalledAgent(agentId, agentVersion, machineDir);
+    if (!chatAgent && (!installed || installed.status !== "installed")) throw new ApiError(409, "Only an installed agent can be selected for a thread", "agent_not_installed");
+    if (!chatAgent && installed?.readiness_status !== "ready") throw new ApiError(409, `Agent ${agentId}@${agentVersion} is not ready`, "agent_not_ready");
     const thread = createChatThread({
       agentId,
+      agentVersion,
       cwd: body.cwd === undefined ? undefined : assertString(body.cwd, "cwd"),
       title: body.title === undefined ? undefined : assertString(body.title, "title"),
       taskSlug: body.task_slug === undefined ? undefined : assertString(body.task_slug, "task_slug"),

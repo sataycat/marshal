@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import type { ChatAttachment, ChatMessage, ChatThread, PendingPermission } from "../types";
+import type { ChatAttachment, ChatMessage, ChatThread, InstalledAgent, PendingPermission } from "../types";
 import { FilesSidebar } from "./FilesSidebar";
 import { groupThreadsByProject } from "./sidebar";
 
@@ -33,7 +33,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
   const archivedQuery = useChatThreadsQuery(true);
   const [showArchived, setShowArchived] = useState(false);
   const [agentFilter, setAgentFilter] = useState("all");
-  const agents = agentsQuery.data ?? [];
+  const agents = (agentsQuery.data ?? []).filter((agent) => agent.status === "installed" && agent.readiness_status === "ready");
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [switcherQuery, setSwitcherQuery] = useState("");
   const deleteThreadMutation = useDeleteThreadMutation();
@@ -58,7 +58,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
   const openNewThread = (): void => { void navigate("/chat"); };
 
   const allThreads = showArchived ? [...threads, ...(archivedQuery.data ?? []).filter((archived) => !threads.some((thread) => thread.id === archived.id))] : threads;
-  const visibleThreads = allThreads.filter((thread) => (agentFilter === "all" || thread.agent_id === agentFilter) && (showArchived || !thread.archived));
+  const visibleThreads = allThreads.filter((thread) => (agentFilter === "all" || `${thread.agent_id}@${thread.agent_version}` === agentFilter) && (showArchived || !thread.archived));
   const projectGroups = groupThreadsByProject(visibleThreads);
   const mutateThread = async (thread: ChatThread, input: Parameters<typeof updateThreadMutation.mutateAsync>[0]["input"]): Promise<void> => {
     try {
@@ -97,7 +97,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
             <label className="sr-only" htmlFor="agent-filter">Filter agents</label>
             <select id="agent-filter" value={agentFilter} onChange={(event) => setAgentFilter(event.target.value)} className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2 text-xs">
               <option value="all">All agents</option>
-              {agents.map((agent) => <option key={agent} value={agent}>{agent}</option>)}
+              {agents.map((agent) => <option key={`${agent.id}@${agent.version}`} value={`${agent.id}@${agent.version}`}>{agent.id}@{agent.version}</option>)}
             </select>
             <Button type="button" size="icon-sm" variant="outline" onClick={() => setSwitcherOpen(true)} aria-label="Switch thread" title="Switch thread (Cmd/Ctrl+K)"><Search aria-hidden /></Button>
           </div>
@@ -137,7 +137,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
           <DialogHeader><DialogTitle>Switch thread</DialogTitle><DialogDescription>Search titles, agents, and recent activity.</DialogDescription></DialogHeader>
           <Input autoFocus value={switcherQuery} onChange={(event) => setSwitcherQuery(event.target.value)} placeholder="Search threads..." />
           <div className="max-h-72 space-y-1 overflow-y-auto">
-            {threads.filter((thread) => !thread.archived && `${thread.title} ${thread.agent_id}`.toLowerCase().includes(switcherQuery.toLowerCase())).map((thread) => <button key={thread.id} type="button" className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-secondary" onClick={() => { setSwitcherOpen(false); setSwitcherQuery(""); void navigate(`/chat/${thread.id}`); }}><StatusDot status={thread.status} /><span className="min-w-0 flex-1 truncate text-sm">{thread.title}</span><span className="text-xs text-muted">{thread.agent_id}</span></button>)}
+            {threads.filter((thread) => !thread.archived && `${thread.title} ${thread.agent_id} ${thread.agent_version}`.toLowerCase().includes(switcherQuery.toLowerCase())).map((thread) => <button key={thread.id} type="button" className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-secondary" onClick={() => { setSwitcherOpen(false); setSwitcherQuery(""); void navigate(`/chat/${thread.id}`); }}><StatusDot status={thread.status} /><span className="min-w-0 flex-1 truncate text-sm">{thread.title}</span><span className="text-xs text-muted">{thread.agent_id}@{thread.agent_version}</span></button>)}
           </div>
         </DialogContent>
       </Dialog>
@@ -152,6 +152,7 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
   const filesQuery = useChatFilesQuery(thread?.id);
   const permissionsQuery = useChatPermissionsQuery(thread?.id);
   const attachmentsQuery = useChatAttachmentsQuery(thread?.id);
+  const agentsQuery = useChatAgentsQuery();
   const permissionMutation = usePermissionMutation();
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<{ path: string; content: string } | null>(null);
@@ -159,6 +160,7 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
   const files = filesQuery.data ?? [];
   const permissions = permissionsQuery.data ?? [];
   const attachments = attachmentsQuery.data ?? [];
+  const supportsImages = Boolean(thread && agentsQuery.data?.find((agent) => agent.id === thread.agent_id && agent.version === thread.agent_version)?.capabilities?.prompt.image);
   const [filesOpen, setFilesOpen] = useState(false);
 
   const visiblePermissions = busPermissions.length > 0 ? busPermissions : permissions;
@@ -186,7 +188,7 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
   useEffect(() => {
     if (fileQuery.data) setSelectedFile(fileQuery.data);
   }, [fileQuery.data]);
-  return <div className="flex min-h-0 flex-1"><ChatPane thread={thread} seeded={seeded} live={live} permissions={visiblePermissions} attachments={attachments} onAttachments={(items) => queryClient.setQueryData(["thread", thread?.id, "attachments"], items)} onPermission={decide} loading={loading} loadError={loadError} onRetryLoad={onRetryLoad} onBack={onBack} draft={draft} onDraftChange={setDraft} sending={false} filesOpen={filesOpen} onToggleFiles={() => setFilesOpen((open) => !open)} /><aside className={cn("hidden min-h-0 shrink-0 border-l border-border bg-panel transition-[width] md:flex md:flex-col", filesOpen ? "w-72" : "w-0 overflow-hidden border-l-0")}><div className="flex min-h-0 flex-1 flex-col"><div className="min-h-0 flex-1"><FilesSidebar files={files} loading={filesQuery.isPending} selectedPath={selectedFile?.path ?? null} onOpen={(path) => void openFile(path)} onMention={mentionFile} /></div>{selectedFile && <div className="flex min-h-0 basis-1/2 flex-col border-t border-border"><div className="flex items-center gap-2 px-3 py-2"><FileText className="size-4 text-primary" aria-hidden /><span className="truncate text-xs font-medium">{selectedFile.path}</span><button type="button" className="ml-auto text-xs text-muted hover:text-text" onClick={() => setSelectedFile(null)}>Close</button></div><div className="min-h-0 flex-1 overflow-auto px-3 pb-3"><CodeBlock value={fileQuery.isPending ? "Loading file..." : selectedFile.content} lang={selectedFile.path.split(".").pop()} /></div></div>}</div></aside></div>;
+  return <div className="flex min-h-0 flex-1"><ChatPane thread={thread} seeded={seeded} live={live} permissions={visiblePermissions} attachments={attachments} supportsImages={supportsImages} onAttachments={(items) => queryClient.setQueryData(["thread", thread?.id, "attachments"], items)} onPermission={decide} loading={loading} loadError={loadError} onRetryLoad={onRetryLoad} onBack={onBack} draft={draft} onDraftChange={setDraft} sending={false} filesOpen={filesOpen} onToggleFiles={() => setFilesOpen((open) => !open)} /><aside className={cn("hidden min-h-0 shrink-0 border-l border-border bg-panel transition-[width] md:flex md:flex-col", filesOpen ? "w-72" : "w-0 overflow-hidden border-l-0")}><div className="flex min-h-0 flex-1 flex-col"><div className="min-h-0 flex-1"><FilesSidebar files={files} loading={filesQuery.isPending} selectedPath={selectedFile?.path ?? null} onOpen={(path) => void openFile(path)} onMention={mentionFile} /></div>{selectedFile && <div className="flex min-h-0 basis-1/2 flex-col border-t border-border"><div className="flex items-center gap-2 px-3 py-2"><FileText className="size-4 text-primary" aria-hidden /><span className="truncate text-xs font-medium">{selectedFile.path}</span><button type="button" className="ml-auto text-xs text-muted hover:text-text" onClick={() => setSelectedFile(null)}>Close</button></div><div className="min-h-0 flex-1 overflow-auto px-3 pb-3"><CodeBlock value={fileQuery.isPending ? "Loading file..." : selectedFile.content} lang={selectedFile.path.split(".").pop()} /></div></div>}</div></aside></div>;
 }
 
 function StatusDot({ status }: { status: ChatThread["status"] }): JSX.Element {
@@ -221,8 +223,8 @@ function ThreadActions({ thread, onMutate, onDiscard }: { thread: ChatThread; on
   );
 }
 
-function NewChatComposer({ agents, onCreated }: { agents: string[]; onCreated: (thread: ChatThread) => void }): JSX.Element {
-  const [agent, setAgent] = useState(agents[0] ?? "builder");
+function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCreated: (thread: ChatThread) => void }): JSX.Element {
+  const [agent, setAgent] = useState(agents[0] ? `${agents[0].id}@${agents[0].version}` : "");
   const [value, setValue] = useState("");
   const [sending, setSending] = useState(false);
   const createMutation = useCreateThreadMutation();
@@ -233,17 +235,18 @@ function NewChatComposer({ agents, onCreated }: { agents: string[]; onCreated: (
     if (!content || sending) return;
     setSending(true);
     try {
-      const thread = await createMutation.mutateAsync({ agent_id: agent });
+      const [agentId, agentVersion] = agent.split("@");
+      const thread = await createMutation.mutateAsync({ agent_id: agentId, agent_version: agentVersion });
       await sendMutation.mutateAsync({ id: thread.id, content });
       onCreated(thread);
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to start the conversation.");
     } finally { setSending(false); }
   };
-  return <div className="flex min-h-0 flex-1 items-center justify-center p-4 md:p-8"><div className="w-full max-w-2xl"><div className="mb-5 text-center"><h1 className="text-2xl font-semibold tracking-tight">What are you working on?</h1><p className="mt-2 text-sm text-muted">Start a conversation with a coding agent. A thread is created when you send.</p></div><div className="rounded-xl border border-border bg-panel p-3 shadow-sm"><Textarea value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder="Message the coding agent..." rows={4} disabled={sending} autoFocus /><div className="mt-3 flex items-center gap-2"><label className="sr-only" htmlFor="new-chat-agent">Model</label><select id="new-chat-agent" value={agent} onChange={(event) => setAgent(event.target.value)} className="h-9 rounded-md border border-input bg-transparent px-3 text-sm" disabled={sending}>{agents.map((item) => <option key={item} value={item}>{item}</option>)}</select><span className="text-xs text-muted">Model</span><Button type="button" className="ml-auto" onClick={() => void send()} disabled={sending || value.trim().length === 0}>{sending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Send aria-hidden />}Send</Button></div></div><p className="mt-2 text-center text-xs text-muted">Enter to send, Shift+Enter for a new line</p></div></div>;
+  return <div className="flex min-h-0 flex-1 items-center justify-center p-4 md:p-8"><div className="w-full max-w-2xl"><div className="mb-5 text-center"><h1 className="text-2xl font-semibold tracking-tight">What are you working on?</h1><p className="mt-2 text-sm text-muted">Start a conversation with a ready installed agent. The selected version is pinned to this thread.</p></div><div className="rounded-xl border border-border bg-panel p-3 shadow-sm"><Textarea value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder="Message the coding agent..." rows={4} disabled={sending || agents.length === 0} autoFocus /><div className="mt-3 flex items-center gap-2"><label className="sr-only" htmlFor="new-chat-agent">Installed agent</label><select id="new-chat-agent" value={agent} onChange={(event) => setAgent(event.target.value)} className="h-9 min-w-0 rounded-md border border-input bg-transparent px-3 text-sm" disabled={sending || agents.length === 0}>{agents.map((item) => <option key={`${item.id}@${item.version}`} value={`${item.id}@${item.version}`}>{item.id}@{item.version} {item.capabilities?.prompt.image ? "(images)" : ""}</option>)}</select><span className="text-xs text-muted">Ready</span><Button type="button" className="ml-auto" onClick={() => void send()} disabled={sending || agents.length === 0 || value.trim().length === 0}>{sending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Send aria-hidden />}Send</Button></div>{agents.length === 0 && <p className="mt-3 text-xs text-muted">Install and probe an agent in Agents before starting a thread.</p>}</div><p className="mt-2 text-center text-xs text-muted">Enter to send, Shift+Enter for a new line</p></div></div>;
 }
 
-function ChatPane({ thread, seeded, live, permissions, attachments, onAttachments, onPermission, loading, loadError, onRetryLoad, onBack, draft, onDraftChange, sending: externalSending, filesOpen, onToggleFiles }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; permissions: PendingPermission[]; attachments: ChatAttachment[]; onAttachments: (items: ChatAttachment[]) => void; onPermission: (requestId: string, action: "approve" | "deny") => Promise<void>; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void; draft: string; onDraftChange: (value: string) => void; sending: boolean; filesOpen: boolean; onToggleFiles: () => void }): JSX.Element {
+function ChatPane({ thread, seeded, live, permissions, attachments, supportsImages, onAttachments, onPermission, loading, loadError, onRetryLoad, onBack, draft, onDraftChange, sending: externalSending, filesOpen, onToggleFiles }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; permissions: PendingPermission[]; attachments: ChatAttachment[]; supportsImages: boolean; onAttachments: (items: ChatAttachment[]) => void; onPermission: (requestId: string, action: "approve" | "deny") => Promise<void>; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void; draft: string; onDraftChange: (value: string) => void; sending: boolean; filesOpen: boolean; onToggleFiles: () => void }): JSX.Element {
   const pushError = useToastStore((state) => state.pushError);
   const applyChatEvent = useChatStore((state) => state.applyChatEvent);
   const [draftSending, setDraftSending] = useState(false);
@@ -325,7 +328,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, onAttachment
     <div className="border-t border-border bg-panel p-3 md:p-4"><div className="mx-auto max-w-3xl">
        {(sendError || thread.status === "error") && <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-error-border bg-error-bg px-3 py-2 text-xs text-error"><span>{sendError ?? "The last turn failed."}</span><Button type="button" size="xs" variant="outline" onClick={() => void send(lastPrompt)} disabled={draftSending || externalSending || !lastPrompt}><RefreshCw aria-hidden />Retry</Button></div>}
         {attachments.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{attachments.map((attachment) => <div key={attachment.id} className="relative"><img src={chatAttachmentUrl(attachment.thread_id, attachment.id)} alt={attachment.filename} className="size-14 rounded border object-cover" /><button type="button" className="absolute -right-1 -top-1 rounded-full bg-panel text-error" onClick={() => onAttachments(attachments.filter((item) => item.id !== attachment.id))} aria-label={`Remove ${attachment.filename}`}><X className="size-3" /></button></div>)}</div>}
-         <div className="flex items-end gap-2"><input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple className="hidden" onChange={(event) => { if (event.target.files) void upload(event.target.files); event.target.value = ""; }} /><Button type="button" size="icon" variant="outline" onClick={() => inputRef.current?.click()} disabled={uploading || draftSending || externalSending} aria-label="Attach image" title="Attach image"><ImagePlus aria-hidden /></Button><Textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void upload(event.dataTransfer.files); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={uploading ? "Uploading image..." : "Message the coding agent..."} disabled={draftSending || externalSending} rows={3} /><Button type="button" onClick={() => void ((draftSending || externalSending) ? cancel() : send())} disabled={!(draftSending || externalSending) && draft.trim().length === 0 && attachments.length === 0} variant={(draftSending || externalSending) ? "destructive" : "default"}>{(draftSending || externalSending) ? <><Square aria-hidden />Stop</> : <><Send aria-hidden />Send</>}</Button></div>
+          <div className="flex items-end gap-2">{supportsImages && <><input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple className="hidden" onChange={(event) => { if (event.target.files) void upload(event.target.files); event.target.value = ""; }} /><Button type="button" size="icon" variant="outline" onClick={() => inputRef.current?.click()} disabled={uploading || draftSending || externalSending} aria-label="Attach image" title="Attach image"><ImagePlus aria-hidden /></Button></>}<Textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void upload(event.dataTransfer.files); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={uploading ? "Uploading image..." : "Message the coding agent..."} disabled={draftSending || externalSending} rows={3} /><Button type="button" onClick={() => void ((draftSending || externalSending) ? cancel() : send())} disabled={!(draftSending || externalSending) && draft.trim().length === 0 && attachments.length === 0} variant={(draftSending || externalSending) ? "destructive" : "default"}>{(draftSending || externalSending) ? <><Square aria-hidden />Stop</> : <><Send aria-hidden />Send</>}</Button></div>
       <p className="mt-1 text-right text-[0.68rem] text-muted">Enter to send, Shift+Enter for a new line</p>
     </div></div>
   </div>;

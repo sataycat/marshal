@@ -7,7 +7,7 @@ function thread(id: string, repoRoot: string): ChatThread {
     id,
     repo_root: repoRoot,
     cwd: repoRoot,
-    agent_id: "builder",
+    agent_id: "builder", agent_version: "1.0.0",
     title: id,
     status: "draft",
     archived: false,

@@ -12,6 +12,7 @@ export interface ChatThread {
   repo_root: string;
   cwd: string;
   agent_id: string;
+  agent_version: string;
   title: string;
   status: ChatThreadStatus;
   archived: boolean;
@@ -34,6 +35,7 @@ export interface ChatMessage {
 
 export interface CreateChatThreadInput {
   agentId: string;
+  agentVersion: string;
   cwd?: string;
   title?: string;
   taskSlug?: string;
@@ -109,8 +111,8 @@ export function createChatThread(input: CreateChatThreadInput, root?: string): C
     throw new Error("Thread cwd must be inside the repository root");
   }
   db.prepare(
-    "INSERT INTO chat_threads (id, repository_id, repo_root, cwd, agent_id, title, task_slug) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  ).run(id, getSelectedRepository()?.id ?? null, repository, cwd, input.agentId, input.title?.trim() || "New thread", input.taskSlug ?? null);
+    "INSERT INTO chat_threads (id, repository_id, repo_root, cwd, agent_id, agent_version, title, task_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, getSelectedRepository()?.id ?? null, repository, cwd, input.agentId, input.agentVersion, input.title?.trim() || "New thread", input.taskSlug ?? null);
   return getChatThread(id, root);
 }
 

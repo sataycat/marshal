@@ -26,6 +26,7 @@ It is written for local-first testing on one machine.
 - Pinned `npx` agent installation: explicit RCE confirmation, durable progress, retry, and removal
 - ACP readiness probing: temporary session validation, authentication-required state, negotiated capabilities, and actionable probe failures
 - Agent-managed ACP authentication: method selection, durable progress, cancellation, restart interruption, and re-probe to ready
+- Installed-agent chat: ready-agent selection, exact version pinning, streamed transcripts, refresh recovery, and capability-gated image attachments
 
 ### Out of scope (not current product behavior)
 
@@ -108,6 +109,19 @@ Expected:
 - A successful operation automatically re-probes the installed version and changes it to **Ready**.
 - A failed or cancelled operation leaves the installation intact and can be retried without reinstalling.
 - Stopping and restarting the daemon does not claim an in-flight operation succeeded; it is marked interrupted when it cannot safely resume.
+
+### 3.8 Installed-agent chat
+
+After an installed agent reaches **Ready**, open **Chat** in the selected repository.
+
+Expected:
+
+- The new-thread selector lists only installed, ready agents and shows each exact `id@version`.
+- Unready, failed, or removed installations cannot create a new thread and show an actionable readiness or installation error.
+- The thread header and switcher retain the selected agent version after browser refresh.
+- Sending a prompt streams ACP events and persists the user and assistant transcript across refresh.
+- Installing another version creates a separate selectable identity; it does not rewrite existing thread provenance.
+- Image attachment controls are available only for an agent whose negotiated capabilities advertise image prompts.
 
 ## 3. Onboarding tests (CLI surface)
 

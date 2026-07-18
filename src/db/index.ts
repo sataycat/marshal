@@ -38,6 +38,9 @@ export function openDb(root?: string): Database.Database {
   if (!threadColumns.some((column) => column.name === "repository_id")) {
     db.exec("ALTER TABLE chat_threads ADD COLUMN repository_id TEXT");
   }
+  if (!threadColumns.some((column) => column.name === "agent_version")) {
+    db.exec("ALTER TABLE chat_threads ADD COLUMN agent_version TEXT NOT NULL DEFAULT 'legacy'");
+  }
 
   return db;
 }

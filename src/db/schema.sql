@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS chat_threads (
   repo_root TEXT NOT NULL,
   cwd TEXT NOT NULL,
   agent_id TEXT NOT NULL,
+  agent_version TEXT NOT NULL DEFAULT 'legacy',
   title TEXT NOT NULL DEFAULT 'New thread',
   status TEXT NOT NULL DEFAULT 'draft',
   archived INTEGER NOT NULL DEFAULT 0,

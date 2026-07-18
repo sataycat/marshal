@@ -135,6 +135,7 @@ export interface ChatThread {
   repo_root: string;
   cwd: string;
   agent_id: string;
+  agent_version: string;
   title: string;
   status: ChatThreadStatus;
   archived: boolean;

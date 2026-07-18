@@ -88,7 +88,7 @@ describe("chat turns", () => {
     initGitRepo(root);
     const agent = new ImageAgent();
     const app = buildApp("0.0.1", { root, bus: new EventBus(), chatAgent: agent });
-    const created = await req(app, "POST", "/api/threads", { agent_id: "fake" });
+    const created = await req(app, "POST", "/api/threads", { agent_id: "fake", agent_version: "test" });
     const id = created.body.thread.id;
     const upload = new FormData();
     upload.append("file", new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "shot.png", { type: "image/png" }));
@@ -107,7 +107,7 @@ describe("chat turns", () => {
     const events: string[] = [];
     bus.subscribe((event) => events.push(event.type));
     const app = buildApp("0.0.1", { root, bus, chatAgent: agent });
-    const created = await req(app, "POST", "/api/threads", { agent_id: "fake" });
+    const created = await req(app, "POST", "/api/threads", { agent_id: "fake", agent_version: "test" });
     const id = created.body.thread.id;
 
     const first = await req(app, "POST", `/api/threads/${id}/send`, { content: "Hello" });
@@ -132,7 +132,7 @@ describe("chat turns", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-chat-permission-"));
     initGitRepo(root);
     const app = buildApp("0.0.1", { root, bus: new EventBus(), chatAgent: new PermissionAgent() });
-    const created = await req(app, "POST", "/api/threads", { agent_id: "fake" });
+    const created = await req(app, "POST", "/api/threads", { agent_id: "fake", agent_version: "test" });
     const id = created.body.thread.id;
     const sending = req(app, "POST", `/api/threads/${id}/send`, { content: "Run it" });
     let pending: any;

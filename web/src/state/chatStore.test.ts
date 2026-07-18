@@ -4,7 +4,7 @@ import type { ChatMessage, ChatThread } from "../types";
 
 function thread(id: string): ChatThread {
   return {
-    id, repo_root: "/repo", cwd: "/repo", agent_id: "builder", title: id,
+    id, repo_root: "/repo", cwd: "/repo", agent_id: "builder", agent_version: "1.0.0", title: id,
     status: "draft", archived: false, pinned: false, task_slug: null,
     created_at: "2026-01-01", updated_at: "2026-01-01", last_message_at: null,
     scratch_markdown: "",
