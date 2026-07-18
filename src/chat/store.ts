@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { relative, resolve } from "node:path";
 import { openDb } from "../db/index.js";
+import { getSelectedRepository, repositoryRoot } from "../repositories/store.js";
 
 export type ChatThreadStatus = "draft" | "active" | "closed" | "error";
 export type ChatMessageRole = "user" | "assistant";
 
 export interface ChatThread {
   id: string;
+  repository_id: string | null;
   repo_root: string;
   cwd: string;
   agent_id: string;
@@ -59,7 +61,9 @@ export function isChatThreadStatus(value: string): value is ChatThreadStatus {
 }
 
 function repoRoot(root?: string): string {
-  return resolve(root ?? process.cwd());
+  const selected = root ?? repositoryRoot();
+  if (!selected) throw new Error("No repository selected");
+  return resolve(selected);
 }
 
 function rowToThread(row: Record<string, unknown>): ChatThread {
@@ -79,10 +83,11 @@ function rowToMessage(row: Record<string, unknown>): ChatMessage {
 
 export function listChatThreads(root?: string, includeArchived = false): ChatThread[] {
   const db = openDb(root);
+  const repositoryId = getSelectedRepository()?.id ?? null;
   const query = includeArchived
     ? "SELECT * FROM chat_threads WHERE repo_root = ? ORDER BY pinned DESC, COALESCE(last_message_at, updated_at) DESC, created_at DESC"
     : "SELECT * FROM chat_threads WHERE repo_root = ? AND archived = 0 ORDER BY pinned DESC, COALESCE(last_message_at, updated_at) DESC, created_at DESC";
-  return (db.prepare(query).all(repoRoot(root)) as Record<string, unknown>[]).map(rowToThread);
+  return (db.prepare(query).all(repoRoot(root)) as Record<string, unknown>[]).map((row) => rowToThread({ ...row, repository_id: row.repository_id ?? repositoryId }));
 }
 
 export function getChatThread(id: string, root?: string): ChatThread {
@@ -91,7 +96,7 @@ export function getChatThread(id: string, root?: string): ChatThread {
     | Record<string, unknown>
     | undefined;
   if (!row) throw new ChatThreadNotFoundError(id);
-  return rowToThread(row);
+  return rowToThread({ ...row, repository_id: row.repository_id ?? getSelectedRepository()?.id ?? null });
 }
 
 export function createChatThread(input: CreateChatThreadInput, root?: string): ChatThread {
@@ -104,8 +109,8 @@ export function createChatThread(input: CreateChatThreadInput, root?: string): C
     throw new Error("Thread cwd must be inside the repository root");
   }
   db.prepare(
-    "INSERT INTO chat_threads (id, repo_root, cwd, agent_id, title, task_slug) VALUES (?, ?, ?, ?, ?, ?)",
-  ).run(id, repository, cwd, input.agentId, input.title?.trim() || "New thread", input.taskSlug ?? null);
+    "INSERT INTO chat_threads (id, repository_id, repo_root, cwd, agent_id, title, task_slug) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, getSelectedRepository()?.id ?? null, repository, cwd, input.agentId, input.title?.trim() || "New thread", input.taskSlug ?? null);
   return getChatThread(id, root);
 }
 

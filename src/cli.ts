@@ -84,7 +84,6 @@ program
       const port = options.port !== undefined ? Number(options.port) : config.daemon?.port;
       const host = options.lan ? "0.0.0.0" : options.host ?? config.daemon?.host;
       const http = await startHttpServer({
-        root: process.cwd(),
         host,
         port,
         uiPassword: options.password,
@@ -93,7 +92,6 @@ program
       });
       try {
         await startDaemon({
-          root: process.cwd(),
           intervalMs: Number(options.interval),
           signal: controller.signal,
           bus: http.bus,

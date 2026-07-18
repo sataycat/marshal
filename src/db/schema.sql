@@ -55,6 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_spec_messages_task_id
 
 CREATE TABLE IF NOT EXISTS chat_threads (
   id TEXT PRIMARY KEY,
+  repository_id TEXT,
   repo_root TEXT NOT NULL,
   cwd TEXT NOT NULL,
   agent_id TEXT NOT NULL,

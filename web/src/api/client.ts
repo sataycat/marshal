@@ -10,7 +10,25 @@ import type {
   TaskDetail,
   TaskStatus,
   PendingPermission,
+  Repository,
 } from "../types";
+
+export async function fetchRepositories(signal?: AbortSignal): Promise<{ repositories: Repository[]; selected_repository_id: string | null }> {
+  const res = await fetch("/api/repositories", { signal });
+  return jsonOrThrow(res);
+}
+export async function registerRepository(path: string): Promise<Repository> {
+  const res = await fetch("/api/repositories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
+  return (await jsonOrThrow<{ repository: Repository }>(res)).repository;
+}
+export async function selectRepository(id: string): Promise<Repository> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(id)}/select`, { method: "POST" });
+  return (await jsonOrThrow<{ repository: Repository }>(res)).repository;
+}
+export async function removeRepository(id: string): Promise<void> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await jsonOrThrow(res);
+}
 
 export interface DiffStats {
   files: number;

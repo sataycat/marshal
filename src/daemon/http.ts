@@ -67,6 +67,7 @@ import { ChatTurnBusyError, ChatTurnRunner } from "./chat-turn.js";
 import { ChatFileTooLargeError, InvalidChatPathError, listChatFiles, readChatFile } from "../chat/files.js";
 import { ChatAttachmentError, createChatAttachment, listChatAttachments, MAX_ATTACHMENT_BYTES, readChatAttachment } from "../chat/attachments.js";
 import { AuthService } from "./auth.js";
+import { getRepository, getSelectedRepository, listRepositories, registerRepository, removeRepository, selectRepository, repositoryRoot, RepositoryError } from "../repositories/store.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -99,7 +100,7 @@ function readVersion(): string {
   return pkg.version as string;
 }
 
-export function portFilePath(root = cwd()): string {
+export function portFilePath(root?: string): string {
   return resolve(getRepoStateDir(root), "daemon.port");
 }
 
@@ -146,6 +147,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
     });
   }
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
+  registerRepositoryRoutes(app);
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
   registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent);
@@ -386,8 +388,33 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof InvalidChatPathError) return new ApiError(422, err.message, "invalid_path");
   if (err instanceof ChatFileTooLargeError) return new ApiError(422, err.message, "file_too_large");
   if (err instanceof ChatAttachmentError) return new ApiError(422, err.message, err.code);
+  if (err instanceof RepositoryError) return new ApiError(err.code === "duplicate_path" ? 409 : 422, err.message, err.code);
   logger.error({ err }, "Unexpected error in task HTTP handler");
   return new ApiError(500, "Internal server error", "internal_error");
+}
+
+function registerRepositoryRoutes(app: Hono): void {
+  app.get("/api/repositories", (c) => c.json({ repositories: listRepositories(), selected_repository_id: getSelectedRepository()?.id ?? null }));
+  app.get("/api/repositories/selected", (c) => c.json({ repository: getSelectedRepository() ?? null }));
+  app.get("/api/repositories/:id", (c) => {
+    const repository = getRepository(c.req.param("id"));
+    if (!repository) throw new ApiError(404, "Repository not found", "repository_not_found");
+    return c.json({ repository });
+  });
+  app.post("/api/repositories", async (c) => {
+    const body = await readJsonObject(c, new Set(["path"]));
+    if (body.path === undefined) throw new ApiError(422, "path is required", "missing_field");
+    try { return c.json({ repository: registerRepository(assertString(body.path, "path")) }, 201); }
+    catch (err) { throw mapDomainError(err); }
+  });
+  app.post("/api/repositories/:id/select", (c) => {
+    try { return c.json({ repository: selectRepository(c.req.param("id")) }); }
+    catch (err) { if (err instanceof Error && /not found/.test(err.message)) throw new ApiError(404, err.message, "repository_not_found"); throw mapDomainError(err); }
+  });
+  app.delete("/api/repositories/:id", (c) => {
+    if (!removeRepository(c.req.param("id"))) throw new ApiError(404, "Repository not found", "repository_not_found");
+    return c.json({ deleted: true });
+  });
 }
 
 function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus | undefined, chatAgent?: Agent): void {
@@ -570,9 +597,13 @@ function registerTaskRoutes(
   bus: EventBus | undefined,
 ): void {
   const makeManager = (): WorktreeManager =>
-    worktreeRoot !== undefined
-      ? new WorktreeManager(root ?? process.cwd(), { worktreeRoot })
-      : new WorktreeManager(root ?? process.cwd());
+    (() => {
+      const selectedRoot = root ?? repositoryRoot();
+      if (!selectedRoot) throw new ApiError(409, "Select a repository before using tasks", "repository_not_selected");
+      return worktreeRoot !== undefined
+        ? new WorktreeManager(selectedRoot, { worktreeRoot })
+        : new WorktreeManager(selectedRoot);
+    })();
   app.get("/api/tasks", (c) => {
     const tasks = listTasks(root).map(taskCard);
     return c.json({ tasks });
@@ -931,8 +962,7 @@ async function waitForListening(server: ServerType): Promise<{ host: string; por
 }
 
 export async function startHttpServer(options: HttpServerOptions = {}): Promise<HttpServerHandle> {
-  const root = options.root ?? cwd();
-  initRepoState(root);
+  const root = options.root;
 
   const { host, port } = resolveDaemonBind(
     { host: options.host, port: options.port },
@@ -968,8 +998,8 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   let wsHandle: WebSocketBridgeHandle | undefined;
   if (attachWs) {
     wsHandle = attachWebSocket(server as HttpServer, bus, () => ({
-      tasks: listTasks(root).map(taskCard),
-      threads: listChatThreads(root),
+       tasks: (root ?? repositoryRoot()) ? listTasks(root ?? repositoryRoot()).map(taskCard) : [],
+       threads: (root ?? repositoryRoot()) ? listChatThreads(root ?? repositoryRoot()) : [],
     }), {
       path: "/ws",
       authenticate: (req) => auth.isAuthenticated(req.headers.cookie),
@@ -977,7 +1007,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     });
   }
 
-  const portFile = portFilePath(root);
+  const portFile = portFilePath();
   writeFileSync(portFile, String(bound.port));
 
   logger.info({ host: bound.host, port: bound.port, portFile }, "HTTP server listening");

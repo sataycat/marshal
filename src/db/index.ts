@@ -3,13 +3,18 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getRepoStateDir, initRepoState } from "../daemon/config.js";
+import { repositoryRoot } from "../repositories/store.js";
 
 export function getDbPath(root?: string): string {
-  return resolve(getRepoStateDir(root), "state.db");
+  const selected = root ?? repositoryRoot();
+  if (!selected) throw new Error("No repository selected");
+  return resolve(getRepoStateDir(selected), "state.db");
 }
 
 export function openDb(root?: string): Database.Database {
-  initRepoState(root);
+  const selected = root ?? repositoryRoot();
+  if (!selected) throw new Error("No repository selected");
+  initRepoState(selected);
   const dbPath = getDbPath(root);
   mkdirSync(dirname(dbPath), { recursive: true });
 
@@ -28,6 +33,10 @@ export function openDb(root?: string): Database.Database {
   const messageColumns = db.prepare("PRAGMA table_info(chat_messages)").all() as { name: string }[];
   if (!messageColumns.some((column) => column.name === "attachment_ids")) {
     db.exec("ALTER TABLE chat_messages ADD COLUMN attachment_ids TEXT NOT NULL DEFAULT '[]'");
+  }
+  const threadColumns = db.prepare("PRAGMA table_info(chat_threads)").all() as { name: string }[];
+  if (!threadColumns.some((column) => column.name === "repository_id")) {
+    db.exec("ALTER TABLE chat_threads ADD COLUMN repository_id TEXT");
   }
 
   return db;

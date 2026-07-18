@@ -13,7 +13,7 @@ export function mergeById<T extends { id: number }>(items: T[], next: T): T[] {
 export function reconcileBusEvent(queryClient: QueryClient, event: BusEvent): void {
   if (event.type === "task.created" || event.type === "task.updated" || event.type === "task.transitioned") {
     const task = event.payload as TaskCard;
-    queryClient.setQueryData<TaskCard[]>(queryKeys.tasks, (tasks) => tasks ? mergeById(tasks, task) : tasks);
+    queryClient.setQueryData<TaskCard[]>(queryKeys.tasks(), (tasks) => tasks ? mergeById(tasks, task) : tasks);
     queryClient.invalidateQueries({ queryKey: queryKeys.task(task.slug), refetchType: "none" });
     if (task.status === "review") queryClient.invalidateQueries({ queryKey: queryKeys.taskDiff(task.slug), refetchType: "none" });
     return;

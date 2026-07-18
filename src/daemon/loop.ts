@@ -1,6 +1,7 @@
 import { logger } from "../logger.js";
 import { runOnce, type RunOnceOptions, type RunOnceResult } from "./orchestrator.js";
 import { publishDaemonCycleComplete, publishDaemonIdle, type EventBus } from "./bus.js";
+import { repositoryRoot } from "../repositories/store.js";
 
 export const DEFAULT_DAEMON_INTERVAL_MS = 5000;
 
@@ -54,7 +55,13 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<voi
     let result: RunOnceResult | null = null;
     let published = false;
     try {
-      result = await runOnce(options);
+      const root = options.root ?? repositoryRoot();
+      if (!root) {
+        if (options.bus) publishDaemonIdle(options.bus);
+        await sleep(intervalMs, signal);
+        continue;
+      }
+      result = await runOnce({ ...options, root });
     } catch (err) {
       logger.error({ err }, "Daemon cycle failed");
       published = true;

@@ -8,6 +8,12 @@ const queryOptions = { retry: 1, refetchOnWindowFocus: false } as const;
 export function useTaskDetailQuery(slug: string) {
   return useQuery({ queryKey: queryKeys.task(slug), queryFn: ({ signal }) => api.fetchTaskDetail(slug, signal), ...queryOptions });
 }
+export function useRepositoriesQuery() {
+  return useQuery({ queryKey: queryKeys.repositories, queryFn: ({ signal }) => api.fetchRepositories(signal), ...queryOptions });
+}
+export const useRegisterRepositoryMutation = () => useMutation({ mutationFn: api.registerRepository });
+export const useSelectRepositoryMutation = () => useMutation({ mutationFn: api.selectRepository });
+export const useRemoveRepositoryMutation = () => useMutation({ mutationFn: api.removeRepository });
 export function useTaskDiffQuery(slug: string, enabled: boolean) {
   return useQuery({ queryKey: queryKeys.taskDiff(slug), queryFn: ({ signal }) => api.fetchTaskDiff(slug, signal), enabled, ...queryOptions });
 }

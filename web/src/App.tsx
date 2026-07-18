@@ -7,6 +7,8 @@ import { WebSocketBridge } from "./state/WebSocketBridge";
 import { ConfirmProvider } from "./components/ConfirmDialog";
 import { AuthGate } from "./auth/AuthGate";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
+import { useRepositoriesQuery } from "./api/queries";
+import { RepositorySetup } from "./repositories/RepositorySetup";
 
 const ChatRoute = lazy(() =>
   import("./routes/ChatRoute").then((m) => ({ default: m.ChatRoute })),
@@ -23,6 +25,10 @@ function RouteFallback(): JSX.Element {
 }
 
 export function App(): JSX.Element {
+  const repositories = useRepositoriesQuery();
+  if (repositories.isPending) return <div className="flex min-h-svh items-center justify-center bg-bg text-muted">Loading repositories...</div>;
+  if (repositories.isError) return <div className="flex min-h-svh items-center justify-center bg-bg text-danger">Unable to load repositories: {repositories.error.message}</div>;
+  if (!repositories.data.selected_repository_id) return <RepositorySetup repositories={repositories.data.repositories} />;
   return (
     <AppErrorBoundary>
       <AuthGate>

@@ -16,7 +16,7 @@ export function WebSocketBridge({ children }: { children: ReactNode }): JSX.Elem
     fetchTasks().then((tasks) => {
       if (!cancelled) {
         applyTaskEvent({ type: "connected", payload: { tasks }, timestamp: new Date().toISOString() });
-        queryClient.setQueryData(queryKeys.tasks, tasks);
+        queryClient.setQueryData(queryKeys.tasks(), tasks);
       }
     }).catch(() => undefined);
     fetchChatThreads().then((threads) => {

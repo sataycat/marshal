@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import { Link, useLocation } from "wouter";
-import { Archive, AlertCircle, ArrowLeft, Check, ChevronLeft, ChevronRight, FileText, Folder, ImagePlus, LoaderCircle, MessageSquare, MoreHorizontal, Pencil, Pin, Plus, RefreshCw, Search, Send, Square, Trash2, X } from "lucide-react";
+import { Archive, AlertCircle, ArrowLeft, Check, ChevronLeft, ChevronRight, FileText, Folder, ImagePlus, LoaderCircle, MoreHorizontal, Pencil, Pin, Plus, RefreshCw, Search, Send, Square, Trash2, X } from "lucide-react";
 import { chatAttachmentUrl } from "../api/client";
 import { useChatAgentsQuery, useChatAttachmentsQuery, useChatFileQuery, useChatFilesQuery, useChatPermissionsQuery, useChatThreadQuery, useChatThreadsQuery, useCreateThreadMutation, useDeleteThreadMutation, usePermissionMutation, useSendChatMutation, useUpdateThreadMutation, useCancelChatMutation, useUploadAttachmentMutation } from "../api/queries";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";

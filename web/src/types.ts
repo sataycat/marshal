@@ -1,5 +1,15 @@
 export type TaskStatus = "backlog" | "ready" | "building" | "validating" | "review" | "done";
 
+export interface Repository {
+  id: string;
+  path: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  preferences: Record<string, unknown>;
+  legacy_state: "preserved" | "none";
+}
+
 export interface TaskCard {
   id: number;
   slug: string;
@@ -45,6 +55,7 @@ export type ChatMessageRole = "user" | "assistant";
 
 export interface ChatThread {
   id: string;
+  repository_id?: string | null;
   repo_root: string;
   cwd: string;
   agent_id: string;

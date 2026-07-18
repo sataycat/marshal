@@ -21,6 +21,7 @@ It is written for local-first testing on one machine.
 - diff review and local merge (`/diff`, `/merge`)
 - SPA static serving and WebSocket live updates
 - Chat-first Phase 1 workbench: threads, drafts, files, permissions, images, reconnects, and mobile navigation
+- Browser-first repository registration: register, select, switch, and remove local git repositories without deleting checkouts
 
 ### Out of scope (not current product behavior)
 
