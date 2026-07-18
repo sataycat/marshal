@@ -1,10 +1,11 @@
 import type { Agent, AgentEvent, AgentPromptPart, AgentSession, AgentPermissionRequest } from "../agent/types.js";
 import { createPrompt, createSession, appendEvent, getSession, interruptActiveSessions, listSessionEvents, listSessions, updatePrompt, updateSession, type AcpSessionRecord, type AcpPromptRecord } from "./supervisor-store.js";
+import { createPermissionRequest, getPermissionRequestByRequestId, getPermissionRequestForThread, listPermissionRequests, reconcilePermissionRequests, resolvePermissionRequest, type PermissionRequestRecord } from "./permission-store.js";
 import { getInstalledAgent } from "../agents/store.js";
 import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
 import type { EventBus } from "../daemon/bus.js";
 
-export interface SupervisorOptions { root?: string; machineDir?: string; bus?: EventBus; agent?: Agent; onEvent?: (session: AcpSessionRecord, event: AgentEvent) => void }
+export interface SupervisorOptions { root?: string; machineDir?: string; bus?: EventBus; agent?: Agent; onEvent?: (session: AcpSessionRecord, event: AgentEvent) => void; onPermission?: (request: PermissionRequestRecord) => void }
 interface Runtime { record: AcpSessionRecord; session: AgentSession; agent: Agent; prompt?: AcpPromptRecord; }
 export class AcpSessionSupervisor {
   private readonly runtimes = new Map<string, Runtime>();
@@ -29,11 +30,38 @@ export class AcpSessionSupervisor {
       return { record: updated, session };
     } catch (err) { updateSession(record.id, { status: "failed", diagnostic: errorMessage(err), ended_at: new Date().toISOString() }, this.options.root); throw err; }
   }
-  async prompt(id: string, content: string | AgentPromptPart[], onPermission?: (request: AgentPermissionRequest) => Promise<string | undefined>, onEvent?: (event: AgentEvent) => void): Promise<void> {
+  permissions(threadId: string): PermissionRequestRecord[] { return listPermissionRequests(threadId, this.options.root); }
+  decidePermission(threadId: string, requestId: string, action: "approve" | "deny"): PermissionRequestRecord {
+    const request = getPermissionRequestForThread(threadId, requestId, this.options.root);
+    if (!request) throw new Error("Permission request is stale or unknown");
+    if (request.status !== "pending") {
+      if (request.decision_action === action) return request;
+      throw new Error("Permission request is stale or unknown");
+    }
+    const kind = action === "approve" ? "allow_once" : "reject_once";
+    const option = request.options.find((candidate) => candidate.kind === kind);
+    if (!option) throw new Error(`Permission request does not offer ${kind}`);
+    return resolvePermissionRequest(request.id, action === "approve" ? "approved" : "denied", option.optionId, action, null, this.options.root);
+  }
+  async prompt(id: string, content: string | AgentPromptPart[], _legacyPermission?: (request: AgentPermissionRequest) => Promise<string | undefined>, onEvent?: (event: AgentEvent) => void): Promise<void> {
     const runtime = this.runtimes.get(id); if (!runtime) throw new Error(`ACP session is not active: ${id}`);
     const text = typeof content === "string" ? content : content.map((part) => part.type === "text" ? part.text : "[image]").join("");
     const prompt = createPrompt(id, text, this.options.root); runtime.prompt = prompt; updateSession(id, { status: "running" }, this.options.root);
     try {
+      const onPermission = async (request: AgentPermissionRequest): Promise<string | undefined> => {
+        const threadId = runtime.record.owner_id;
+        const record = createPermissionRequest(id, threadId, request, this.options.root);
+        this.options.onPermission?.(record);
+        this.options.bus?.publish("thread.event", { threadId, event: { type: "permission-request", request: record } });
+        return await new Promise<string | undefined>((resolve) => {
+          const timer = setInterval(() => {
+            const current = getPermissionRequestByRequestId(id, request.requestId, this.options.root);
+            if (!current || current.status === "pending") return;
+            clearInterval(timer);
+            resolve(current.selected_option_id ?? undefined);
+          }, 50);
+        });
+      };
       for await (const event of runtime.agent.prompt(runtime.session, content, { permissionMode: "interactive", onPermission })) {
         const persisted = appendEvent(id, prompt.id, event.type, event, event, this.options.root);
         this.options.onEvent?.(getSession(id, this.options.root)!, event);
@@ -42,10 +70,10 @@ export class AcpSessionSupervisor {
         if (event.type === "error") throw new Error(event.message);
       }
       updatePrompt(prompt.id, { status: "completed", ended_at: new Date().toISOString() }, this.options.root); updateSession(id, { status: "idle" }, this.options.root);
-    } catch (err) { const cancelled = errorMessage(err).toLowerCase().includes("cancel"); updatePrompt(prompt.id, { status: cancelled ? "cancelled" : "failed", diagnostic: errorMessage(err), ended_at: new Date().toISOString() }, this.options.root); updateSession(id, { status: cancelled ? "cancelled" : "failed", diagnostic: errorMessage(err), ended_at: new Date().toISOString() }, this.options.root); throw err; }
+    } catch (err) { const cancelled = errorMessage(err).toLowerCase().includes("cancel"); reconcilePermissionRequests(id, cancelled ? "cancelled" : "interrupted", errorMessage(err), this.options.root); updatePrompt(prompt.id, { status: cancelled ? "cancelled" : "failed", diagnostic: errorMessage(err), ended_at: new Date().toISOString() }, this.options.root); updateSession(id, { status: cancelled ? "cancelled" : "failed", diagnostic: errorMessage(err), ended_at: new Date().toISOString() }, this.options.root); throw err; }
   }
-  async cancel(id: string): Promise<void> { const runtime = this.runtimes.get(id); if (!runtime) return; if (runtime.prompt) updatePrompt(runtime.prompt.id, { cancellation_requested_at: new Date().toISOString() }, this.options.root); updateSession(id, { status: "cancelling" }, this.options.root); await withTimeout(runtime.agent.cancel(runtime.session), 10_000, "ACP cancellation timed out"); }
-  async close(id: string): Promise<void> { const runtime = this.runtimes.get(id); if (!runtime) return; await withTimeout(runtime.agent.close(runtime.session), 10_000, "ACP shutdown timed out"); updateSession(id, { status: "closed", ended_at: new Date().toISOString() }, this.options.root); this.runtimes.delete(id); }
+  async cancel(id: string): Promise<void> { const runtime = this.runtimes.get(id); if (!runtime) return; if (runtime.prompt) updatePrompt(runtime.prompt.id, { cancellation_requested_at: new Date().toISOString() }, this.options.root); reconcilePermissionRequests(id, "cancelled", "ACP session cancelled", this.options.root); updateSession(id, { status: "cancelling" }, this.options.root); await withTimeout(runtime.agent.cancel(runtime.session), 10_000, "ACP cancellation timed out"); }
+  async close(id: string): Promise<void> { const runtime = this.runtimes.get(id); if (!runtime) return; reconcilePermissionRequests(id, "cancelled", "ACP session closed", this.options.root); await withTimeout(runtime.agent.close(runtime.session), 10_000, "ACP shutdown timed out"); updateSession(id, { status: "closed", ended_at: new Date().toISOString() }, this.options.root); this.runtimes.delete(id); }
   async shutdown(): Promise<void> { await Promise.all([...this.runtimes.keys()].map((id) => this.close(id).catch(() => undefined))); }
 }
 function errorMessage(err: unknown): string { return err instanceof Error ? err.message : String(err); }

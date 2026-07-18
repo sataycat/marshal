@@ -78,6 +78,7 @@ import { probeAgent } from "../acp/probe.js";
 import { authenticateAgent } from "../acp/authenticate.js";
 import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
 import { randomUUID } from "node:crypto";
+import { reconcileThreadPermissions } from "../acp/permission-store.js";
 
 const authenticationControllers = new Map<string, AbortController>();
 
@@ -633,6 +634,7 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
   app.delete("/api/threads/:id", async (c) => {
     try {
       await turns.closeThread(c.req.param("id"));
+      reconcileThreadPermissions(c.req.param("id"), root);
       deleteChatThread(c.req.param("id"), root);
       if (bus) publishThreadDeleted(bus, c.req.param("id"));
       return c.json({ deleted: true });
@@ -670,7 +672,7 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
       const request = turns.decidePermission(c.req.param("id"), c.req.param("requestId"), body.action);
       return c.json({ requestId: request.requestId, action: body.action });
     } catch (err) {
-      if (err instanceof Error && err.name === "PermissionDecisionError") throw new ApiError(409, err.message, "permission_stale");
+      if (err instanceof Error && (err.name === "PermissionDecisionError" || err.message.includes("Permission request"))) throw new ApiError(409, err.message, "permission_stale");
       throw mapDomainError(err);
     }
   });

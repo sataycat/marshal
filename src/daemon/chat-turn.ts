@@ -11,7 +11,8 @@ import {
 } from "../chat/store.js";
 import { ThreadEventType, publishThreadMessage, publishThreadUpdated, type EventBus } from "./bus.js";
 import { expandChatFileMentions } from "../chat/files.js";
-import { PermissionBroker, type PendingPermission } from "./permission-broker.js";
+import type { PermissionRequestRecord } from "../acp/permission-store.js";
+import { reconcileThreadPermissions } from "../acp/permission-store.js";
 import { MAX_ATTACHMENTS_PER_MESSAGE, readChatAttachment } from "../chat/attachments.js";
 import { AcpSessionSupervisor } from "../acp/supervisor.js";
 
@@ -51,14 +52,12 @@ export class ChatTurnRunner {
   private readonly active = new Map<string, ActiveTurn>();
   private readonly starting = new Set<string>();
   private readonly touched = new Map<string, Set<string>>();
-  private readonly permissions: PermissionBroker;
 
   constructor(options: ChatTurnRunnerOptions = {}) {
     this.root = options.root;
     this.machineDir = options.machineDir;
     this.bus = options.bus;
     this.configuredAgent = options.agent;
-    this.permissions = new PermissionBroker(this.bus);
     this.supervisor = new AcpSessionSupervisor({ root: this.root, machineDir: this.machineDir, agent: this.configuredAgent, onEvent: (record, event) => this.publishEvent(record.owner_id, event) });
     if (this.root) this.supervisor.reconcile();
   }
@@ -71,16 +70,16 @@ export class ChatTurnRunner {
     return new Set(this.touched.get(threadId));
   }
 
-  pendingPermissions(threadId: string): PendingPermission[] {
-    return this.permissions.list(threadId);
+  pendingPermissions(threadId: string): PermissionRequestRecord[] {
+    return this.supervisor.permissions(threadId);
   }
 
-  decidePermission(threadId: string, requestId: string, action: "approve" | "deny"): PendingPermission {
-    return this.permissions.decide(threadId, requestId, action);
+  decidePermission(threadId: string, requestId: string, action: "approve" | "deny"): PermissionRequestRecord {
+    return this.supervisor.decidePermission(threadId, requestId, action);
   }
 
   async closeThread(threadId: string): Promise<void> {
-    this.permissions.cancelThread(threadId);
+    reconcileThreadPermissions(threadId, this.root);
     const active = this.active.get(threadId);
     if (active) await this.supervisor.close(active.supervisorSessionId);
   }
@@ -133,7 +132,6 @@ export class ChatTurnRunner {
   }
 
   async cancel(threadId: string): Promise<void> {
-    this.permissions.cancelThread(threadId);
     const turn = this.active.get(threadId);
     if (!turn) return;
     await this.supervisor.cancel(turn.supervisorSessionId);
@@ -143,7 +141,7 @@ export class ChatTurnRunner {
     let assistant: ChatMessage | undefined;
     let text = "";
     try {
-      await this.supervisor.prompt(supervisorSessionId, content, (request) => this.permissions.request(threadId, request), (event) => {
+      await this.supervisor.prompt(supervisorSessionId, content, undefined, (event) => {
         if (event.type === "text") {
           text += event.text;
           if (assistant) {
@@ -163,7 +161,6 @@ export class ChatTurnRunner {
       updateChatThread(threadId, { status: "active" }, this.root);
       this.publishThread(threadId);
     } catch (err) {
-      this.permissions.cancelThread(threadId);
       updateChatThread(threadId, { status: "error" }, this.root);
       this.publishThread(threadId);
       throw err;

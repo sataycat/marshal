@@ -28,6 +28,7 @@ It is written for local-first testing on one machine.
 - Agent-managed ACP authentication: method selection, durable progress, cancellation, restart interruption, and re-probe to ready
 - Installed-agent chat: ready-agent selection, exact version pinning, streamed transcripts, refresh recovery, and capability-gated image attachments
 - Durable interactive ACP supervision: session/prompt/event history hydration, cancellation, interruption after daemon restart, and recoverable diagnostics
+- Durable interactive permissions: refresh-safe pending requests, kind/ID-based approve/deny decisions, conservative cancellation and restart reconciliation
 
 ### Out of scope (not current product behavior)
 
@@ -127,6 +128,18 @@ Expected:
 ### 3.9 Durable ACP session supervision
 
 Send a prompt, then refresh the browser while it is streaming. The transcript and ACP event history must be loaded over HTTP, while subsequent updates continue over WebSocket. Cancel a long-running prompt and verify the thread remains inspectable with a cancelled prompt/session outcome. Stop the daemon during a prompt and restart it; the thread must not replay the prompt or claim success, and the durable session history must show an interrupted state and diagnostic.
+
+### 3.10 Durable ACP permissions
+
+Use an ACP fixture that requests permission with options in a deliberately unusual order. Refresh while the prompt is waiting.
+
+Expected:
+
+- The request and all ACP option kinds/IDs remain visible after refresh.
+- Approve once selects the `allow_once` option by ACP kind, never by position or label; Deny selects `reject_once`.
+- Repeating a decision, using a stale request ID, or using a request from another thread fails closed and cannot approve anything else.
+- Cancelling the turn, deleting the thread, stopping the process, or restarting the daemon resolves an unresolved request as cancelled/interrupted rather than approved.
+- The UI states that permission mediation is not filesystem/process isolation.
 
 ## 3. Onboarding tests (CLI surface)
 

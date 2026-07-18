@@ -259,7 +259,7 @@ start daemon
 
 **Implemented:** Interactive chat now runs through a shared ACP supervisor with durable process/session/prompt/event records, raw and normalized event retention, bounded lifecycle operations, conservative restart interruption/reconciliation, durable HTTP event hydration, and WebSocket live continuation. Permission persistence remains on the existing chat broker for Slice 8.
 
-## [ ] Slice 8: Persist And Recover Permission Requests
+## [x] Slice 8: Persist And Recover Permission Requests
 
 **Depends on:** Slice 7.
 
@@ -287,6 +287,8 @@ start daemon
 **Likely areas:** `src/permissions/`, existing permission broker migration, storage schema, supervisor, permission APIs, chat UI, broker and HTTP tests.
 
 **Out of scope:** Workflow permission policy; Slice 9 introduces it with assignments.
+
+**Implemented:** Interactive ACP permission callbacks are owned by the shared supervisor and persisted in durable `permission_requests` records. Browser decisions resolve ACP option kinds and IDs fail-closed and idempotently; cancellation, deletion, process exit, and restart reconcile unresolved requests without implying approval. The browser renders durable pending choices and explicitly distinguishes permission mediation from process isolation.
 
 ## [ ] Slice 9: Configure Workflow Profiles In The Browser
 

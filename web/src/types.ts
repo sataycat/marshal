@@ -165,6 +165,7 @@ export interface AcpEvent {
   raw_payload: unknown;
   created_at: string;
 }
+export type PermissionRequestStatus = "pending" | "approved" | "denied" | "cancelled" | "stale" | "interrupted";
 
 export interface ChatAttachment {
   id: string;
@@ -216,4 +217,15 @@ export interface PendingPermission {
   kind?: string | null;
   rawInput?: unknown;
   options: PermissionOption[];
+  id?: string;
+  session_id?: string;
+  thread_id?: string;
+  request_id?: string;
+  status?: PermissionRequestStatus;
+  selected_option_id?: string | null;
+  decision_action?: string | null;
+  diagnostic?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  resolved_at?: string | null;
 }

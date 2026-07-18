@@ -163,7 +163,7 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
   const supportsImages = Boolean(thread && agentsQuery.data?.find((agent) => agent.id === thread.agent_id && agent.version === thread.agent_version)?.capabilities?.prompt.image);
   const [filesOpen, setFilesOpen] = useState(false);
 
-  const visiblePermissions = busPermissions.length > 0 ? busPermissions : permissions;
+  const visiblePermissions = (busPermissions.length > 0 ? busPermissions : permissions).filter((request) => request.status === "pending");
 
   const decide = async (requestId: string, action: "approve" | "deny"): Promise<void> => {
     if (!thread) return;
@@ -337,5 +337,5 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
 function PermissionCard({ request, onDecision }: { request: PendingPermission; onDecision: (requestId: string, action: "approve" | "deny") => Promise<void> }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const decide = async (action: "approve" | "deny"): Promise<void> => { setBusy(true); await onDecision(request.requestId, action); };
-  return <article className="mr-auto max-w-[92%] rounded-lg border border-warn/40 bg-warn/5 px-4 py-3"><p className="text-xs font-semibold text-warn">Permission needed</p><p className="mt-1 text-sm">Agent wants to <strong>{request.tool}</strong>{request.kind ? ` (${request.kind})` : ""}.</p>{request.options.length > 0 && <p className="mt-1 text-xs text-muted">The agent supplied {request.options.map((option) => option.name).join(" / ")}.</p>}<div className="mt-3 flex gap-2"><Button type="button" size="xs" onClick={() => void decide("approve")} disabled={busy}>Approve once</Button><Button type="button" size="xs" variant="outline" onClick={() => void decide("deny")} disabled={busy}>Deny</Button></div></article>;
+  return <article className="mr-auto max-w-[92%] rounded-lg border border-warn/40 bg-warn/5 px-4 py-3"><p className="text-xs font-semibold text-warn">Permission needed</p><p className="mt-1 text-sm">Agent wants to <strong>{request.tool}</strong>{request.kind ? ` (${request.kind})` : ""}.</p>{request.options.length > 0 && <p className="mt-1 text-xs text-muted">The agent supplied {request.options.map((option) => `${option.name} [${option.kind}]`).join(" / ")}.</p>}<p className="mt-2 text-[0.68rem] text-muted">Permission approval is not process isolation.</p><div className="mt-3 flex gap-2"><Button type="button" size="xs" onClick={() => void decide("approve")} disabled={busy || !request.options.some((option) => option.kind === "allow_once")}>Approve once</Button><Button type="button" size="xs" variant="outline" onClick={() => void decide("deny")} disabled={busy || !request.options.some((option) => option.kind === "reject_once")}>Deny</Button></div></article>;
 }

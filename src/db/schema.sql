@@ -146,3 +146,24 @@ CREATE TABLE IF NOT EXISTS acp_events (
   FOREIGN KEY (prompt_id) REFERENCES acp_prompts(id) ON DELETE SET NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_acp_events_sequence ON acp_events(session_id, seq);
+
+CREATE TABLE IF NOT EXISTS permission_requests (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  kind TEXT,
+  raw_request TEXT NOT NULL,
+  options TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  selected_option_id TEXT,
+  decision_action TEXT,
+  diagnostic TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  resolved_at DATETIME,
+  FOREIGN KEY (session_id) REFERENCES acp_sessions(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_permission_requests_session_request ON permission_requests(session_id, request_id);
+CREATE INDEX IF NOT EXISTS idx_permission_requests_thread_status ON permission_requests(thread_id, status, created_at);
