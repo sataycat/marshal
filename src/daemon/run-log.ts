@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 import { openDb } from "../db/index.js";
 import type { AgentEvent } from "../agent/types.js";
 import {
@@ -30,6 +31,13 @@ export interface RunRecord {
   startedAt: string;
   endedAt: string | null;
   error: string | null;
+  agentVersion?: string;
+  capabilities?: unknown;
+  assignmentConfig?: unknown;
+  supervisorSessionId?: string | null;
+  operationId?: string | null;
+  verificationStatus?: "pass" | "fail" | null;
+  verificationOutput?: string | null;
 }
 
 export interface RunEventRecord {
@@ -65,6 +73,13 @@ interface RunRow {
   started_at: string;
   ended_at: string | null;
   error: string | null;
+  agent_version: string;
+  capabilities: string;
+  assignment_config: string;
+  supervisor_session_id: string | null;
+  operation_id: string | null;
+  verification_status: string | null;
+  verification_output: string | null;
 }
 
 interface RunEventRow {
@@ -102,6 +117,13 @@ function rowToRun(row: RunRow): RunRecord {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     error: row.error,
+    agentVersion: row.agent_version,
+    capabilities: parseJson(row.capabilities, {}),
+    assignmentConfig: parseJson(row.assignment_config, {}),
+    supervisorSessionId: row.supervisor_session_id,
+    operationId: row.operation_id,
+    verificationStatus: row.verification_status === "pass" || row.verification_status === "fail" ? row.verification_status : null,
+    verificationOutput: row.verification_output,
   };
 }
 
@@ -125,18 +147,28 @@ export class RunLog {
     this.bus = bus;
   }
 
-  startRun(taskId: number, role: RunRole, agentId: string, prompt: string): number {
+  startRun(taskId: number, role: RunRole, agentId: string, prompt: string, provenance: { agentVersion?: string; assignmentConfig?: unknown } = {}): number {
     const info = this.db
       .prepare(
-        "INSERT INTO runs (task_id, role, agent_id, status, prompt) VALUES (?, ?, ?, 'running', ?)",
+        "INSERT INTO runs (task_id, role, agent_id, status, prompt, agent_version, assignment_config, operation_id) VALUES (?, ?, ?, 'running', ?, ?, ?, ?)",
       )
-      .run(taskId, role, agentId, prompt);
+      .run(taskId, role, agentId, prompt, provenance.agentVersion ?? "legacy", JSON.stringify(provenance.assignmentConfig ?? {}), randomUUID());
     const runId = Number(info.lastInsertRowid);
+    const operationId = (this.db.prepare("SELECT operation_id FROM runs WHERE id = ?").get(runId) as { operation_id: string }).operation_id;
+    this.db.prepare("INSERT INTO run_operations (id, run_id, operation, status) VALUES (?, ?, ?, 'running')").run(operationId, runId, role);
     if (this.bus) {
       const run = this.getRun(runId);
       if (run) publishRunStarted(this.bus, toRunPayload(run));
     }
     return runId;
+  }
+
+  setSupervisorEvidence(runId: number, input: { sessionId?: string | null; capabilities?: unknown }): void {
+    this.db.prepare("UPDATE runs SET supervisor_session_id = COALESCE(?, supervisor_session_id), capabilities = COALESCE(?, capabilities) WHERE id = ?").run(input.sessionId ?? null, input.capabilities === undefined ? null : JSON.stringify(input.capabilities), runId);
+  }
+
+  setVerification(runId: number, status: "pass" | "fail", output: string): void {
+    this.db.prepare("UPDATE runs SET verification_status = ?, verification_output = ? WHERE id = ?").run(status, output, runId);
   }
 
   insertEvent(runId: number, seq: number, event: AgentEvent): void {
@@ -162,6 +194,7 @@ export class RunLog {
         .prepare("UPDATE runs SET status = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(status, runId);
     }
+    this.db.prepare("UPDATE run_operations SET status = ?, diagnostic = ?, ended_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status = 'running'").run(status === "done" ? "succeeded" : "failed", opts.error ?? null, runId);
     if (this.bus) {
       const run = this.getRun(runId);
       if (run) publishRunFinished(this.bus, toRunPayload(run));
@@ -212,4 +245,8 @@ function toRunPayload(run: RunRecord): RunPayload {
     endedAt: run.endedAt,
     error: run.error,
   };
+}
+
+function parseJson(value: string | null | undefined, fallback: unknown): unknown {
+  try { return JSON.parse(value ?? ""); } catch { return fallback; }
 }

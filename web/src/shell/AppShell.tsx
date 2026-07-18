@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { Link, useLocation } from "wouter";
-import { Bot, MessagesSquare } from "lucide-react";
+import { Bot, ClipboardList, MessagesSquare } from "lucide-react";
 import { NAV_ITEMS, ROUTES, type StaticPath } from "../routes/routes";
 import { cn } from "@/lib/utils";
 import { useRepositoriesQuery, useRemoveRepositoryMutation, useSelectRepositoryMutation } from "../api/queries";
@@ -47,7 +47,7 @@ interface PrefetchNavLinkProps {
 
 function PrefetchNavLink({ path, label }: PrefetchNavLinkProps): JSX.Element {
   const [location] = useLocation();
-  const isActive = location === path || location.startsWith(`${ROUTES.chat}/`);
+  const isActive = location === path || (path === ROUTES.chat && location.startsWith(`${ROUTES.chat}/`));
   const onEnter = useCallback(() => {
     if (path === ROUTES.chat) {
       void import("../routes/ChatRoute");
@@ -64,7 +64,7 @@ function PrefetchNavLink({ path, label }: PrefetchNavLinkProps): JSX.Element {
         isActive && "bg-secondary text-text border-border",
       )}
     >
-      {path === ROUTES.agents ? <Bot aria-hidden className="size-4" /> : <MessagesSquare aria-hidden className="size-4" />}
+      {path === ROUTES.agents ? <Bot aria-hidden className="size-4" /> : path === ROUTES.board ? <ClipboardList aria-hidden className="size-4" /> : <MessagesSquare aria-hidden className="size-4" />}
       {label}
     </Link>
   );

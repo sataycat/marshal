@@ -46,5 +46,24 @@ export function openDb(root?: string): Database.Database {
   if (!taskColumns.some((column) => column.name === "workflow_profile_id")) db.exec("ALTER TABLE tasks ADD COLUMN workflow_profile_id TEXT");
   db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_workflow_owner ON tasks(repository_id, workflow_profile_id)");
 
+  const runColumns = db.prepare("PRAGMA table_info(runs)").all() as { name: string }[];
+  const runMigrations: Array<[string, string]> = [
+    ["agent_version", "TEXT NOT NULL DEFAULT 'legacy'"],
+    ["capabilities", "TEXT NOT NULL DEFAULT '{}'"],
+    ["assignment_config", "TEXT NOT NULL DEFAULT '{}'"],
+    ["supervisor_session_id", "TEXT"],
+    ["operation_id", "TEXT"],
+    ["verification_status", "TEXT"],
+    ["verification_output", "TEXT"],
+  ];
+  for (const [name, definition] of runMigrations) {
+    if (!runColumns.some((column) => column.name === name)) db.exec(`ALTER TABLE runs ADD COLUMN ${name} ${definition}`);
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS run_operations (
+    id TEXT PRIMARY KEY, run_id INTEGER NOT NULL, operation TEXT NOT NULL,
+    status TEXT NOT NULL, diagnostic TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at DATETIME, FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+  )`);
+
   return db;
 }

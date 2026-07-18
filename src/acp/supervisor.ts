@@ -1,4 +1,4 @@
-import type { Agent, AgentEvent, AgentPromptPart, AgentSession, AgentPermissionRequest } from "../agent/types.js";
+import type { Agent, AgentEvent, AgentPromptPart, AgentSession, AgentPermissionRequest, SpawnOptions } from "../agent/types.js";
 import { createPrompt, createSession, appendEvent, getSession, interruptActiveSessions, listSessionEvents, listSessions, updatePrompt, updateSession, type AcpSessionRecord, type AcpPromptRecord } from "./supervisor-store.js";
 import { createPermissionRequest, getPermissionRequestByRequestId, getPermissionRequestForThread, listPermissionRequests, reconcilePermissionRequests, resolvePermissionRequest, type PermissionRequestRecord } from "./permission-store.js";
 import { getInstalledAgent } from "../agents/store.js";
@@ -6,7 +6,7 @@ import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
 import type { EventBus } from "../daemon/bus.js";
 import type { PermissionPolicy } from "../workflows/types.js";
 
-export interface SupervisorOptions { root?: string; machineDir?: string; bus?: EventBus; agent?: Agent; permissionPolicy?: PermissionPolicy; onEvent?: (session: AcpSessionRecord, event: AgentEvent) => void; onPermission?: (request: PermissionRequestRecord) => void }
+export interface SupervisorOptions { root?: string; machineDir?: string; bus?: EventBus; agent?: Agent; permissionPolicy?: PermissionPolicy; workflow?: boolean; permissionMode?: SpawnOptions["permissionMode"]; onEvent?: (session: AcpSessionRecord, event: AgentEvent) => void; onPermission?: (request: PermissionRequestRecord) => void }
 interface Runtime { record: AcpSessionRecord; session: AgentSession; agent: Agent; prompt?: AcpPromptRecord; }
 export class AcpSessionSupervisor {
   private readonly runtimes = new Map<string, Runtime>();
@@ -19,13 +19,13 @@ export class AcpSessionSupervisor {
     return undefined;
   }
   events(id: string) { return listSessionEvents(id, this.options.root); }
-  async start(ownerType: string, ownerId: string, cwd: string, agentId: string, agentVersion: string): Promise<{ record: AcpSessionRecord; session: AgentSession }> {
+  async start(ownerType: string, ownerId: string, cwd: string, agentId: string, agentVersion: string, config: { model?: string | null; mode?: string | null; sessionName?: string } = {}): Promise<{ record: AcpSessionRecord; session: AgentSession }> {
     const installed = this.options.agent ? null : getInstalledAgent(agentId, agentVersion, this.options.machineDir);
     if (!this.options.agent && (!installed || installed.status !== "installed")) throw new Error(`Installed agent ${agentId}@${agentVersion} is not available`);
     const agent = this.options.agent ?? new SdkAcpAgentAdapter({ commands: [{ id: installed!.id, command: installed!.launch.command, args: installed!.launch.args }] });
     const record = createSession({ ownerType, ownerId, agentId, agentVersion, recoveryMetadata: { resumable: false } }, this.options.root);
     try {
-      const session = await withTimeout(agent.spawn(cwd, agentId, { permissionMode: "interactive", sessionName: `marshal-${ownerId}` }), 30_000, "ACP session startup timed out");
+      const session = await withTimeout(agent.spawn(cwd, agentId, { permissionMode: this.options.permissionMode ?? (this.options.workflow ? "deny-all" : "interactive"), model: config.model ?? undefined, sessionName: config.sessionName ?? `marshal-${ownerId}` }), 30_000, "ACP session startup timed out");
       const updated = updateSession(record.id, { acp_session_id: session.recordId ?? null, status: "idle", started_at: new Date().toISOString(), capabilities: { image: session.supportsImages === true }, recovery_metadata: { resumable: false, session_name: session.name } }, this.options.root);
       this.runtimes.set(record.id, { record: updated, session, agent });
       return { record: updated, session };
@@ -51,9 +51,9 @@ export class AcpSessionSupervisor {
     try {
        const onPermission = async (request: AgentPermissionRequest): Promise<string | undefined> => {
          const policy = this.options.permissionPolicy;
-         const automatic = policy === "reject_all" ? request.options.find((option) => option.kind === "reject_once") : policy === "allow_workspace" || policy === "unattended_allow_all" ? request.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always") : undefined;
+          const automatic = policy === "reject_all" || (this.options.workflow && policy === "allow_reads_ask_writes") ? request.options.find((option) => option.kind === "reject_once" || option.kind === "reject_always") : policy === "allow_workspace" || policy === "unattended_allow_all" ? request.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always") : undefined;
          if (automatic) return automatic.optionId;
-         if (policy === "reject_all") return undefined;
+          if (policy === "reject_all" || this.options.workflow) return undefined;
         const threadId = runtime.record.owner_id;
         const record = createPermissionRequest(id, threadId, request, this.options.root);
         this.options.onPermission?.(record);
@@ -67,7 +67,7 @@ export class AcpSessionSupervisor {
           }, 50);
         });
       };
-      for await (const event of runtime.agent.prompt(runtime.session, content, { permissionMode: "interactive", onPermission })) {
+       for await (const event of runtime.agent.prompt(runtime.session, content, { permissionMode: this.options.permissionMode ?? (this.options.workflow ? "deny-all" : "interactive"), onPermission })) {
         const persisted = appendEvent(id, prompt.id, event.type, event, event, this.options.root);
         this.options.onEvent?.(getSession(id, this.options.root)!, event);
         onEvent?.(event);

@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { cwd } from "node:process";
-import { createConfiguredAgent } from "../agent/configured-agent.js";
 import type { Agent, AgentEvent, AgentSession, SpawnOptions } from "../agent/types.js";
 import { logger } from "../logger.js";
 import { openDb } from "../db/index.js";
@@ -17,10 +16,13 @@ import {
 import { specRelPathFor } from "../tasks/freeze.js";
 import type { TaskStatus } from "../tasks/state-machine.js";
 import { WorktreeManager } from "../worktree/manager.js";
-import { resolveAgentId, resolveMaxRetries } from "../worktree/config.js";
+import { resolveMaxRetries, resolveAgentId } from "../worktree/config.js";
 import { RunLog } from "./run-log.js";
 import type { EventBus } from "./bus.js";
 import { publishTaskTransitioned } from "./bus.js";
+import { getWorkflowProfile } from "../workflows/store.js";
+import { getSelectedRepository } from "../repositories/store.js";
+import { AcpSessionSupervisor } from "../acp/supervisor.js";
 
 export interface RunOnceResult {
   slug: string;
@@ -154,8 +156,20 @@ export interface BuildTaskOptions {
   root?: string;
   agent?: Agent;
   manager?: WorktreeManager;
-  builderAgentId?: ReturnType<typeof resolveAgentId>;
+  builderAgentId?: string;
   bus?: EventBus;
+  machineDir?: string;
+}
+
+function workflowAssignment(task: Task, role: "builder" | "validator", machineDir?: string) {
+  const repository = getSelectedRepository(machineDir);
+  const profile = task.repository_id && task.workflow_profile_id && repository?.id === task.repository_id
+    ? getWorkflowProfile(repository.id, task.workflow_profile_id, machineDir)
+    : undefined;
+  const assignment = profile?.assignments.find((item) => item.role === role);
+  if (!assignment && !task.workflow_profile_id) return { profile: undefined, assignment: undefined };
+  if (!profile || !assignment) throw new Error(`Task workflow profile has no ${role} assignment`);
+  return { profile, assignment };
 }
 
 export async function buildTask(
@@ -166,13 +180,14 @@ export async function buildTask(
   const task = getTask(slug, root);
 
   const manager = options.manager ?? new WorktreeManager(root ?? cwd());
-  const agent = options.agent ?? createConfiguredAgent("builder");
-  const builderAgentId = options.builderAgentId ?? resolveAgentId("builder");
+   const resolved = workflowAssignment(task, "builder", options.machineDir);
+   const builderAgentId = options.builderAgentId ?? resolved.assignment?.agent_id ?? (options.agent ? resolveAgentId("builder") : "test-builder");
+   const builderVersion = resolved.assignment?.agent_version ?? "legacy";
   const runLog = new RunLog(root, options.bus);
 
   const worktree = manager.create(slug);
   const prompt = renderBuilderPrompt(task);
-  const runId = runLog.startRun(task.id, "builder", builderAgentId, prompt);
+   const runId = runLog.startRun(task.id, "builder", builderAgentId, prompt, { agentVersion: builderVersion, assignmentConfig: resolved.assignment ? { model: resolved.assignment.model, mode: resolved.assignment.mode, permission_policy: resolved.profile?.permission_policy } : {} });
 
   const spawnOpts: SpawnOptions = {
     sessionName: `marshal-${slug}-builder`,
@@ -180,10 +195,15 @@ export async function buildTask(
     timeoutSeconds: BUILDER_TIMEOUT_SECONDS,
   };
 
-  let session: AgentSession | undefined;
+   let session: AgentSession | undefined;
+   let supervisorSessionId: string | undefined;
+   const supervisor = new AcpSessionSupervisor({ root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: resolved.profile?.permission_policy, workflow: true, permissionMode: options.agent && !resolved.profile ? "approve-all" : undefined, bus: options.bus });
   try {
     try {
-      session = await agent.spawn(worktree.path, builderAgentId, spawnOpts);
+       const started = await supervisor.start("workflow-run", String(runId), worktree.path, builderAgentId, builderVersion, { ...(resolved.assignment ? { model: resolved.assignment.model, mode: resolved.assignment.mode } : {}), sessionName: `marshal-${slug}-builder` });
+       session = started.session;
+       supervisorSessionId = started.record.id;
+       runLog.setSupervisorEvidence(runId, { sessionId: started.record.id, capabilities: started.record.capabilities });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error({ err, slug, runId }, "Builder spawn failed");
@@ -195,14 +215,7 @@ export async function buildTask(
     let seq = 0;
 
     try {
-      for await (const event of agent.prompt(session, prompt, spawnOpts)) {
-        runLog.insertEvent(runId, seq, event);
-        seq += 1;
-        if (event.type === "error") {
-          errorMessage = event.message;
-          break;
-        }
-      }
+       await supervisor.prompt(supervisorSessionId, prompt, undefined, (event) => { runLog.insertEvent(runId, seq, event); seq += 1; if (event.type === "error") errorMessage = event.message; });
     } catch (err) {
       errorMessage = err instanceof Error ? err.message : String(err);
       logger.error({ err, slug, runId }, "Builder prompt stream failed");
@@ -231,7 +244,7 @@ export async function buildTask(
   } finally {
     if (session) {
       try {
-        await agent.close(session);
+         if (supervisorSessionId) await supervisor.close(supervisorSessionId);
       } catch (err) {
         logger.warn({ err, slug }, "Failed to close builder session");
       }
@@ -243,19 +256,21 @@ export interface RunOnceOptions {
   root?: string;
   agent?: Agent;
   manager?: WorktreeManager;
-  builderAgentId?: ReturnType<typeof resolveAgentId>;
-  validatorAgentId?: ReturnType<typeof resolveAgentId>;
+  builderAgentId?: string;
+  validatorAgentId?: string;
   maxRetries?: number;
   bus?: EventBus;
+  machineDir?: string;
 }
 
 export interface ValidateTaskOptions {
   root?: string;
   agent?: Agent;
   manager?: WorktreeManager;
-  validatorAgentId?: ReturnType<typeof resolveAgentId>;
+  validatorAgentId?: string;
   trunkRef?: string;
   bus?: EventBus;
+  machineDir?: string;
 }
 
 export interface RenderValidatorPromptOptions {
@@ -339,8 +354,9 @@ export async function validateTask(
   const task = getTask(slug, root);
 
   const manager = options.manager ?? new WorktreeManager(root ?? cwd());
-  const agent = options.agent ?? createConfiguredAgent("validator");
-  const validatorAgentId = options.validatorAgentId ?? resolveAgentId("validator");
+   const resolved = workflowAssignment(task, "validator", options.machineDir);
+   const validatorAgentId = options.validatorAgentId ?? resolved.assignment?.agent_id ?? (options.agent ? resolveAgentId("validator") : "test-validator");
+   const validatorVersion = resolved.assignment?.agent_version ?? "legacy";
   const runLog = new RunLog(root, options.bus);
 
   const worktree = manager.create(slug);
@@ -376,7 +392,7 @@ export async function validateTask(
   }
 
   const prompt = renderValidatorPrompt(task, diffText, trunkRef, totalDiffLines);
-  const runId = runLog.startRun(task.id, "validator", validatorAgentId, prompt);
+   const runId = runLog.startRun(task.id, "validator", validatorAgentId, prompt, { agentVersion: validatorVersion, assignmentConfig: resolved.assignment ? { model: resolved.assignment.model, mode: resolved.assignment.mode, permission_policy: resolved.profile?.permission_policy } : {} });
 
   const spawnOpts: SpawnOptions = {
     sessionName: `marshal-${slug}-validator`,
@@ -384,11 +400,22 @@ export async function validateTask(
     timeoutSeconds: VALIDATOR_TIMEOUT_SECONDS,
   };
 
-  let session: AgentSession | undefined;
-  const seenEvents: AgentEvent[] = [];
+   let session: AgentSession | undefined;
+   let supervisorSessionId: string | undefined;
+   const seenEvents: AgentEvent[] = [];
+   const supervisor = new AcpSessionSupervisor({ root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: resolved.profile?.permission_policy, workflow: true, permissionMode: options.agent && !resolved.profile ? "approve-all" : undefined, bus: options.bus });
+   const verification = runDeterministicVerification(resolved.profile?.verification_commands ?? [], worktree.path);
+   runLog.setVerification(runId, verification.pass ? "pass" : "fail", verification.output);
+   if (!verification.pass) {
+     runLog.finishRun(runId, "error", { error: verification.output });
+     return { slug, runId, commitSha: buildCommit, status: "validation_failed", reason: verification.output };
+   }
   try {
     try {
-      session = await agent.spawn(worktree.path, validatorAgentId, spawnOpts);
+       const started = await supervisor.start("workflow-run", String(runId), worktree.path, validatorAgentId, validatorVersion, { ...(resolved.assignment ? { model: resolved.assignment.model, mode: resolved.assignment.mode } : {}), sessionName: `marshal-${slug}-validator` });
+        session = started.session;
+        supervisorSessionId = started.record.id;
+       runLog.setSupervisorEvidence(runId, { sessionId: started.record.id, capabilities: started.record.capabilities });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error({ err, slug, runId }, "Validator spawn failed");
@@ -405,15 +432,7 @@ export async function validateTask(
     let errorMessage: string | undefined;
     let seq = 0;
     try {
-      for await (const event of agent.prompt(session, prompt, spawnOpts)) {
-        runLog.insertEvent(runId, seq, event);
-        seq += 1;
-        seenEvents.push(event);
-        if (event.type === "error") {
-          errorMessage = event.message;
-          break;
-        }
-      }
+       await supervisor.prompt(supervisorSessionId, prompt, undefined, (event) => { runLog.insertEvent(runId, seq, event); seq += 1; seenEvents.push(event); if (event.type === "error") errorMessage = event.message; });
     } catch (err) {
       errorMessage = err instanceof Error ? err.message : String(err);
       logger.error({ err, slug, runId }, "Validator prompt stream failed");
@@ -450,12 +469,22 @@ export async function validateTask(
   } finally {
     if (session) {
       try {
-        await agent.close(session);
+          if (supervisorSessionId) await supervisor.close(supervisorSessionId);
       } catch (err) {
         logger.warn({ err, slug }, "Failed to close validator session");
       }
     }
   }
+}
+
+function runDeterministicVerification(commands: string[], cwdPath: string): { pass: boolean; output: string } {
+  if (commands.length === 0) return { pass: true, output: "no deterministic verification commands configured" };
+  const outputs: string[] = [];
+  for (const command of commands) {
+    try { outputs.push(`$ ${command}\n${execFileSync("sh", ["-lc", command], { cwd: cwdPath, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] })}`); }
+    catch (err) { const detail = err instanceof Error ? err.message : String(err); return { pass: false, output: `$ ${command}\n${detail}` }; }
+  }
+  return { pass: true, output: outputs.join("\n") };
 }
 
 export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResult | null> {
@@ -514,6 +543,7 @@ export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResu
       manager,
       builderAgentId: options.builderAgentId,
       bus: options.bus,
+      machineDir: options.machineDir,
     });
 
     if (result.status === "built") {
@@ -528,8 +558,9 @@ export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResu
     root,
     agent: options.agent,
     manager,
-    validatorAgentId: options.validatorAgentId,
-    bus: options.bus,
+      validatorAgentId: options.validatorAgentId,
+      bus: options.bus,
+      machineDir: options.machineDir,
   });
 
   if (result.status === "validated") {

@@ -31,6 +31,7 @@ It is written for local-first testing on one machine.
 - Durable interactive permissions: refresh-safe pending requests, kind/ID-based approve/deny decisions, conservative cancellation and restart reconciliation
 - Repository-scoped workflow profiles: ready-agent assignments, capability-aware optional configuration, explicit permissions and unattended authorization, deterministic checks, retries, timeouts, and decorrelation
 - Profile-backed spec authoring: browser-created tasks require a repository workflow profile, author sessions resolve the pinned spec-author assignment through the shared ACP supervisor, and author identity/session/operation evidence is durable.
+- Profile-backed build, validation, review, and merge: frozen tasks resolve independent builder and validator assignments, create fresh worktree sessions per attempt, retain run/session/operation evidence, enforce deterministic verification, and expose the browser Tasks board at `/board`.
 
 ### Out of scope (not current product behavior)
 
@@ -154,6 +155,10 @@ Set optional model/mode values only when the readiness capability snapshot adver
 From the Board, create a task and select a workflow profile. The task is owned by the selected repository and profile; no executable command is shown or editable. Send a message in **Spec Authoring Chat** and refresh while it runs. The response should be durable, and the evidence panel should show the exact spec-author ID/version, supervisor session, and operation outcome. Permission requests follow the profile policy; an unsupported or unsafe policy choice must not be approved.
 
 Review the proposed markdown, explicitly update the task spec, then click **Freeze to Ready**. Confirm the task worktree contains the committed spec before any unattended build transition is attempted. Updating or reinstalling the assigned agent later must not change the recorded author evidence.
+
+### 3.13 Build, validate, review, and merge
+
+Open **Tasks** (`/board`) and freeze a profile-backed task. Start the daemon and observe the task move through **Building**, **Validating**, and **Review**. Each attempt must show the independently resolved builder/validator identity, exact version, supervisor session, operation, capabilities, streamed events, commit, and deterministic verification result in the run APIs. A validator narrative cannot pass a task when a configured verification command fails. Failed validation preserves the worktree and retry evidence; after review, inspect the diff and merge from the browser. A successful merge cleans up the task worktree only after the merge completes, while merge conflicts and cleanup failures leave the task inspectable for recovery.
 
 ## 3. Onboarding tests (CLI surface)
 

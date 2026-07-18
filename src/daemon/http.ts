@@ -51,7 +51,7 @@ import { runSpecAuthorTurn, SpecChatClosedError } from "./spec-chat.js";
 import { listSpecMessages, type SpecMessage } from "../tasks/spec-store.js";
 import { publishSpecMessage } from "./bus.js";
 import type { Agent } from "../agent/types.js";
-import { resolveAgentId, MissingAgentIdError } from "../worktree/config.js";
+import { MissingAgentIdError } from "../worktree/config.js";
 import {
   appendChatMessage,
   ChatThreadNotFoundError,
@@ -169,8 +169,8 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerRegistryRoutes(app, options.machineDir);
   registerAgentRoutes(app, options.machineDir);
   registerWorkflowProfileRoutes(app, options.machineDir);
-  registerTaskRoutes(app, root, options.worktreeRoot, bus, options.machineDir);
-  registerRunRoutes(app, root);
+   registerTaskRoutes(app, root, options.worktreeRoot, bus, options.machineDir);
+   registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent, options.machineDir);
   registerChatRoutes(app, root, bus, options.chatAgent, options.machineDir);
   registerStaticRoutes(app, webDir);
@@ -958,6 +958,13 @@ interface RunCardFields {
   ended_at: string | null;
   commit_sha: string | null;
   error: string | null;
+  agent_version: string | undefined;
+  capabilities: unknown;
+  assignment_config: unknown;
+  supervisor_session_id: string | null | undefined;
+  operation_id: string | null | undefined;
+  verification_status: "pass" | "fail" | null | undefined;
+  verification_output: string | null | undefined;
 }
 
 interface RunDetailFields extends RunCardFields {
@@ -982,6 +989,13 @@ function runCard(run: RunRecord): RunCardFields {
     ended_at: run.endedAt,
     commit_sha: run.commitSha,
     error: run.error,
+    agent_version: run.agentVersion,
+    capabilities: run.capabilities,
+    assignment_config: run.assignmentConfig,
+    supervisor_session_id: run.supervisorSessionId,
+    operation_id: run.operationId,
+    verification_status: run.verificationStatus,
+    verification_output: run.verificationOutput,
   };
 }
 

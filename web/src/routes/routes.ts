@@ -5,10 +5,11 @@ export const ROUTES = {
   chat: "/chat",
   agents: "/agents",
   workflows: "/workflows",
+  board: "/board",
   chatThread: (threadId: string): `/chat/${string}` => `/chat/${threadId}`,
 } as const;
 
-export type StaticPath = (typeof ROUTES)["home" | "chat" | "agents" | "workflows"];
+export type StaticPath = (typeof ROUTES)["home" | "chat" | "agents" | "workflows" | "board"];
 export type ChatPath = `/chat/${string}`;
 export type RoutePath = StaticPath | ChatPath;
 

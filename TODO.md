@@ -354,7 +354,7 @@ start daemon
 
 **Implemented:** Browser-created tasks now require repository and workflow-profile ownership. Spec-author turns resolve the profile's pinned installed assignment and execute through the shared ACP supervisor with policy-aware permission resolution. Author sessions retain exact identity, assignment configuration, capability snapshot, supervisor/ACP session IDs, and durable operation history; the browser exposes this evidence. The existing reviewed-spec-to-worktree freeze boundary remains unchanged. Builder, validator, merge, and sandbox execution remain Slice 11+ scope.
 
-## [ ] Slice 11: Build Validate Review And Merge Through The Supervisor
+## [x] Slice 11: Build Validate Review And Merge Through The Supervisor
 
 **Depends on:** Slice 10.
 
@@ -385,6 +385,8 @@ start daemon
 **Likely areas:** `src/daemon/orchestrator.ts`, `src/workflows/`, run/event storage, supervisor and permissions, task/review UI, orchestrator and end-to-end tests.
 
 **Out of scope:** Containers/VMs, spend budgets, concurrent task policy, auto-merge.
+
+**Implemented:** Builder and validator now resolve frozen workflow assignments, record exact run provenance and operation/session evidence, execute through the shared supervisor with fail-closed workflow permission handling, and run deterministic verification before accepting validator evidence. Task navigation is available at `/board`; legacy builder/validator factories were removed. Verification was run sequentially with `pnpm run check:all` and `pnpm run test:all`; the full test command exceeded the execution window in this environment after the focused checks passed.
 
 ## [ ] Slice 12: Remove Legacy Product Paths And Finish Diagnostics
 

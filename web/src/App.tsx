@@ -9,6 +9,7 @@ import { AuthGate } from "./auth/AuthGate";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { useRepositoriesQuery } from "./api/queries";
 import { RepositorySetup } from "./repositories/RepositorySetup";
+import { BoardRoute } from "./routes/BoardRoute";
 
 const ChatRoute = lazy(() =>
   import("./routes/ChatRoute").then((m) => ({ default: m.ChatRoute })),
@@ -49,6 +50,7 @@ export function App(): JSX.Element {
                 <AgentsRoute />
               </Route>
               <Route path={ROUTES.workflows}><WorkflowsRoute /></Route>
+              <Route path={ROUTES.board}><BoardRoute /></Route>
               <Route path="/chat/:threadId">
                 {(params) => <ChatThreadRoute threadId={params.threadId ?? ""} />}
               </Route>

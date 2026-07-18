@@ -24,7 +24,25 @@ CREATE TABLE IF NOT EXISTS runs (
   started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ended_at DATETIME,
   error TEXT,
+  agent_version TEXT NOT NULL DEFAULT 'legacy',
+  capabilities TEXT NOT NULL DEFAULT '{}',
+  assignment_config TEXT NOT NULL DEFAULT '{}',
+  supervisor_session_id TEXT,
+  operation_id TEXT,
+  verification_status TEXT,
+  verification_output TEXT,
   FOREIGN KEY (task_id) REFERENCES tasks(id)
+);
+
+CREATE TABLE IF NOT EXISTS run_operations (
+  id TEXT PRIMARY KEY,
+  run_id INTEGER NOT NULL,
+  operation TEXT NOT NULL,
+  status TEXT NOT NULL,
+  diagnostic TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ended_at DATETIME,
+  FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
