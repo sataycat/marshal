@@ -72,9 +72,13 @@ import { getRepository, getSelectedRepository, listRepositories, registerReposit
 import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
 import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
-import { getInstalledAgent, listInstalledAgents, removeInstalledAgent, setAgentReadiness } from "../agents/store.js";
+import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, removeInstalledAgent, setAgentReadiness } from "../agents/store.js";
 import { installationOperation, startInstallation } from "../installations/installer.js";
 import { probeAgent } from "../acp/probe.js";
+import { authenticateAgent } from "../acp/authenticate.js";
+import { randomUUID } from "node:crypto";
+
+const authenticationControllers = new Map<string, AbortController>();
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -134,6 +138,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   const bus = options.bus;
   const webDir = options.webDir ?? defaultWebDistDir();
   const app = new Hono();
+  interruptActiveAgentAuthentications(options.machineDir);
   const auth = options.auth;
   if (auth) {
     app.use("/api/*", auth.middleware);
@@ -484,6 +489,58 @@ function registerAgentRoutes(app: Hono, machineDir?: string): void {
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
+  });
+  app.get("/api/agents/:id/auth", (c) => {
+    const version = c.req.query("version");
+    if (!version) throw new ApiError(422, "version is required", "missing_query");
+    const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
+    if (!installed) throw new ApiError(404, "Installed agent not found", "agent_not_found");
+    return c.json({ agent: installed, authentication: getLatestAgentAuthenticationOperation(installed.id, installed.version, machineDir) ?? null });
+  });
+  app.post("/api/agents/:id/auth", async (c) => {
+    const version = c.req.query("version");
+    if (!version) throw new ApiError(422, "version is required", "missing_query");
+    const body = await readJsonObject(c, new Set(["method_id"]));
+    const methodId = assertString(body.method_id, "method_id");
+    const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
+    if (!installed || installed.status !== "installed") throw new ApiError(409, "Only an installed agent can authenticate", "agent_not_installed");
+    const method = installed.auth_methods.find((entry) => entry.id === methodId);
+    if (!method || method.type !== "agent") throw new ApiError(422, "Only an advertised agent-managed authentication method can be selected", "auth_method_invalid");
+    const current = getLatestAgentAuthenticationOperation(installed.id, installed.version, machineDir);
+    if (current?.status === "authenticating") return c.json({ authentication: current }, 202);
+    const operation = beginAgentAuthentication({ id: randomUUID(), agent_id: installed.id, version: installed.version, method_id: method.id, method_name: method.name }, machineDir);
+    const controller = new AbortController();
+    authenticationControllers.set(operation.id, controller);
+    void (async () => {
+      const workspace = mkdtempSync(resolve(tmpdir(), "marshal-auth-"));
+      try {
+        await authenticateAgent(workspace, installed.launch, method.id, controller.signal);
+        finishAgentAuthentication(operation.id, "succeeded", null, machineDir);
+        const refreshed = getInstalledAgent(installed.id, installed.version, machineDir);
+        if (refreshed) {
+          const result = await probeAgent(workspace, refreshed.launch);
+          setAgentReadiness(refreshed.id, refreshed.version, { readiness_status: result.status, readiness_error: result.error, protocol_version: result.protocol_version, capabilities: result.capabilities, auth_methods: result.auth_methods, raw_initialize: result.raw_initialize, probed_at: new Date().toISOString() }, machineDir);
+        }
+      } catch (error) {
+        const cancelled = controller.signal.aborted;
+        finishAgentAuthentication(operation.id, cancelled ? "cancelled" : "failed", cancelled ? "Authentication was cancelled" : error instanceof Error ? error.message : String(error), machineDir);
+      } finally {
+        authenticationControllers.delete(operation.id);
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    })();
+    return c.json({ authentication: operation }, 202);
+  });
+  app.get("/api/agents/auth/operations/:id", (c) => {
+    const operation = getAgentAuthenticationOperation(c.req.param("id"), machineDir);
+    if (!operation) throw new ApiError(404, "Authentication operation not found", "operation_not_found");
+    return c.json({ authentication: operation });
+  });
+  app.post("/api/agents/auth/operations/:id/cancel", (c) => {
+    const operation = getAgentAuthenticationOperation(c.req.param("id"), machineDir);
+    if (!operation) throw new ApiError(404, "Authentication operation not found", "operation_not_found");
+    if (operation.status === "authenticating") authenticationControllers.get(operation.id)?.abort();
+    return c.json({ authentication: getAgentAuthenticationOperation(operation.id, machineDir) });
   });
   app.post("/api/agents/install", async (c) => {
     const body = await readJsonObject(c, new Set(["agent_id", "version"]));

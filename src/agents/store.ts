@@ -1,5 +1,5 @@
 import { openMachineDb } from "../storage/machine.js";
-import type { InstalledAgent, InstallationOperation } from "./types.js";
+import type { AgentAuthenticationOperation, InstalledAgent, InstallationOperation } from "./types.js";
 
 function tables(machineDir?: string) {
   const db = openMachineDb(machineDir);
@@ -30,6 +30,17 @@ function tables(machineDir?: string) {
       finished_at TEXT,
       error TEXT
     );
+    CREATE TABLE IF NOT EXISTS agent_authentication_operations (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      version TEXT NOT NULL,
+      method_id TEXT NOT NULL,
+      method_name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
+      error TEXT
+    );
   `);
   for (const statement of [
     "ALTER TABLE installed_agents ADD COLUMN readiness_status TEXT NOT NULL DEFAULT 'unknown'",
@@ -41,6 +52,11 @@ function tables(machineDir?: string) {
     "ALTER TABLE installed_agents ADD COLUMN probed_at TEXT",
   ]) { try { db.exec(statement); } catch (error) { if (!(error instanceof Error) || !error.message.includes("duplicate column name")) throw error; } }
   return db;
+}
+
+export function interruptActiveAgentAuthentications(machineDir?: string): void {
+  const db = tables(machineDir);
+  db.prepare("UPDATE agent_authentication_operations SET status = 'interrupted', finished_at = ?, error = COALESCE(error, 'Authentication was interrupted by a daemon restart') WHERE status = 'authenticating'").run(new Date().toISOString());
 }
 
 function agent(row: Record<string, unknown>): InstalledAgent {
@@ -58,6 +74,10 @@ function agent(row: Record<string, unknown>): InstalledAgent {
 
 function operation(row: Record<string, unknown>): InstallationOperation {
   return { id: String(row.id), agent_id: String(row.agent_id), version: String(row.version), package_specifier: String(row.package_specifier), status: String(row.status) as InstallationOperation["status"], started_at: String(row.started_at), finished_at: row.finished_at ? String(row.finished_at) : null, error: row.error ? String(row.error) : null };
+}
+
+function authenticationOperation(row: Record<string, unknown>): AgentAuthenticationOperation {
+  return { id: String(row.id), agent_id: String(row.agent_id), version: String(row.version), method_id: String(row.method_id), method_name: String(row.method_name), status: String(row.status) as AgentAuthenticationOperation["status"], started_at: String(row.started_at), finished_at: row.finished_at ? String(row.finished_at) : null, error: row.error ? String(row.error) : null };
 }
 
 export function listInstalledAgents(machineDir?: string): InstalledAgent[] {
@@ -102,6 +122,31 @@ export function getInstallationOperation(id: string, machineDir?: string): Insta
   const db = tables(machineDir);
   const row = db.prepare("SELECT * FROM installation_operations WHERE id = ?").get(id) as Record<string, unknown> | undefined;
   return row ? operation(row) : undefined;
+}
+
+export function getLatestAgentAuthenticationOperation(id: string, version: string, machineDir?: string): AgentAuthenticationOperation | undefined {
+  const db = tables(machineDir);
+  const row = db.prepare("SELECT * FROM agent_authentication_operations WHERE agent_id = ? AND version = ? ORDER BY started_at DESC LIMIT 1").get(id, version) as Record<string, unknown> | undefined;
+  return row ? authenticationOperation(row) : undefined;
+}
+
+export function getAgentAuthenticationOperation(id: string, machineDir?: string): AgentAuthenticationOperation | undefined {
+  const db = tables(machineDir);
+  const row = db.prepare("SELECT * FROM agent_authentication_operations WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  return row ? authenticationOperation(row) : undefined;
+}
+
+export function beginAgentAuthentication(input: Pick<AgentAuthenticationOperation, "id" | "agent_id" | "version" | "method_id" | "method_name">, machineDir?: string): AgentAuthenticationOperation {
+  const db = tables(machineDir);
+  const startedAt = new Date().toISOString();
+  db.prepare("INSERT INTO agent_authentication_operations (id, agent_id, version, method_id, method_name, status, started_at) VALUES (?, ?, ?, ?, ?, 'authenticating', ?)").run(input.id, input.agent_id, input.version, input.method_id, input.method_name, startedAt);
+  return getAgentAuthenticationOperation(input.id, machineDir)!;
+}
+
+export function finishAgentAuthentication(id: string, status: Exclude<AgentAuthenticationOperation["status"], "authenticating">, error: string | null, machineDir?: string): AgentAuthenticationOperation {
+  const db = tables(machineDir);
+  db.prepare("UPDATE agent_authentication_operations SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status = 'authenticating'").run(status, new Date().toISOString(), error, id);
+  return getAgentAuthenticationOperation(id, machineDir)!;
 }
 
 export function removeInstalledAgent(id: string, version: string, machineDir?: string): boolean {

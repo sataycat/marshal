@@ -163,7 +163,7 @@ start daemon
 
 **Implemented:** Installed agents now have durable readiness and capability state. The daemon probes only the persisted launch specification, performs ACP initialize plus a temporary session, classifies ready/authentication-required/failure outcomes, persists normalized capabilities and raw initialization metadata, and exposes `/api/agents/:id/probe`. The Agents UI presents probe status, protocol version, image capability, authentication-required state, and actionable failures.
 
-## [ ] Slice 5: Complete Agent-Managed Authentication
+## [x] Slice 5: Complete Agent-Managed Authentication
 
 **Depends on:** Slice 4.
 
@@ -191,6 +191,8 @@ start daemon
 **Likely areas:** `src/acp/`, `src/agents/`, auth-state storage, durable operations, agent APIs and UI, authentication lifecycle tests.
 
 **Out of scope:** Daemon PTY terminal auth and environment-variable secret references. Track those as ADR-0006 follow-up work after the minimal browser-first path.
+
+**Implemented:** Agent-managed ACP authentication now has durable operation history, explicit method validation, cancellation, daemon-restart interruption handling, automatic readiness re-probing, and browser controls for progress, retry, and failure recovery. Terminal and environment-variable methods remain explicitly unsupported in this slice.
 
 ## [ ] Slice 6: Create A Thread With An Installed Agent
 

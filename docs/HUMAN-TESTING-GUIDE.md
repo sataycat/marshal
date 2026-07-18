@@ -25,6 +25,7 @@ It is written for local-first testing on one machine.
 - Browser-first ACP Registry catalog: cached public metadata, search, refresh, and stale-cache recovery
 - Pinned `npx` agent installation: explicit RCE confirmation, durable progress, retry, and removal
 - ACP readiness probing: temporary session validation, authentication-required state, negotiated capabilities, and actionable probe failures
+- Agent-managed ACP authentication: method selection, durable progress, cancellation, restart interruption, and re-probe to ready
 
 ### Out of scope (not current product behavior)
 
@@ -94,6 +95,19 @@ Expected:
 - The temporary probe session and process are closed or terminated before the request completes.
 
 Refresh the browser after probing and reopen **Agents**. The readiness state, failure message, protocol version, and capability snapshot must remain available.
+
+### 3.7 Agent-managed authentication
+
+Use a registry agent or ACP fixture that advertises an `agent` authentication method. On its card, click **Authenticate** and follow the agent-owned browser/OAuth flow if one opens.
+
+Expected:
+
+- Marshal shows the advertised method name and starts a durable authentication operation.
+- Refreshing the browser preserves the latest authenticating, succeeded, failed, cancelled, or interrupted state.
+- Authentication never persists tokens, passwords, callback URLs, or other secret values in Marshal state or logs.
+- A successful operation automatically re-probes the installed version and changes it to **Ready**.
+- A failed or cancelled operation leaves the installation intact and can be retried without reinstalling.
+- Stopping and restarting the daemon does not claim an in-flight operation succeeded; it is marked interrupted when it cannot safely resume.
 
 ## 3. Onboarding tests (CLI surface)
 

@@ -16,6 +16,7 @@ import type {
   RegistrySnapshot,
   InstalledAgent,
   InstallationOperation,
+  AgentAuthenticationOperation,
 } from "../types";
 
 export async function fetchRepositories(signal?: AbortSignal): Promise<{ repositories: Repository[]; selected_repository_id: string | null }> {
@@ -75,6 +76,18 @@ export async function removeInstalledAgent(agentId: string, version: string): Pr
 export async function probeInstalledAgent(agentId: string, version: string): Promise<InstalledAgent> {
   const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/probe?version=${encodeURIComponent(version)}`, { method: "POST" });
   return (await jsonOrThrow<{ agent: InstalledAgent }>(res)).agent;
+}
+export async function authenticateInstalledAgent(agentId: string, version: string, methodId: string): Promise<AgentAuthenticationOperation> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/auth?version=${encodeURIComponent(version)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ method_id: methodId }) });
+  return (await jsonOrThrow<{ authentication: AgentAuthenticationOperation }>(res)).authentication;
+}
+export async function fetchAgentAuthentication(agentId: string, version: string, signal?: AbortSignal): Promise<{ authentication: AgentAuthenticationOperation | null }> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/auth?version=${encodeURIComponent(version)}`, { signal });
+  return jsonOrThrow<{ authentication: AgentAuthenticationOperation | null }>(res);
+}
+export async function cancelAgentAuthentication(operationId: string): Promise<AgentAuthenticationOperation> {
+  const res = await fetch(`/api/agents/auth/operations/${encodeURIComponent(operationId)}/cancel`, { method: "POST" });
+  return (await jsonOrThrow<{ authentication: AgentAuthenticationOperation }>(res)).authentication;
 }
 
 export interface DiffStats {

@@ -1,5 +1,6 @@
 export type InstalledAgentStatus = "installing" | "installed" | "failed";
 export type AgentReadinessStatus = "unknown" | "probing" | "ready" | "authentication_required" | "failed";
+export type AgentAuthenticationStatus = "authenticating" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
 export interface AgentCapabilities {
   prompt: { text: boolean; image: boolean; audio: boolean; embedded_context: boolean };
@@ -49,6 +50,18 @@ export interface InstallationOperation {
   version: string;
   package_specifier: string;
   status: InstalledAgentStatus;
+  started_at: string;
+  finished_at: string | null;
+  error: string | null;
+}
+
+export interface AgentAuthenticationOperation {
+  id: string;
+  agent_id: string;
+  version: string;
+  method_id: string;
+  method_name: string;
+  status: AgentAuthenticationStatus;
   started_at: string;
   finished_at: string | null;
   error: string | null;
