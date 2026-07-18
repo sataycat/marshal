@@ -14,6 +14,8 @@ import type {
   RegistryAgent,
   RegistryRefresh,
   RegistrySnapshot,
+  InstalledAgent,
+  InstallationOperation,
 } from "../types";
 
 export async function fetchRepositories(signal?: AbortSignal): Promise<{ repositories: Repository[]; selected_repository_id: string | null }> {
@@ -48,6 +50,26 @@ export async function fetchRegistryCatalog(signal?: AbortSignal): Promise<Regist
 export async function refreshRegistry(): Promise<RegistryRefresh> {
   const res = await fetch("/api/registry/refresh", { method: "POST" });
   return (await jsonOrThrow<{ refresh: RegistryRefresh }>(res)).refresh;
+}
+
+export async function fetchInstalledAgents(signal?: AbortSignal): Promise<InstalledAgent[]> {
+  const res = await fetch("/api/agents", { signal });
+  return (await jsonOrThrow<{ agents: InstalledAgent[] }>(res)).agents;
+}
+
+export async function installRegistryAgent(agentId: string, version: string): Promise<InstallationOperation> {
+  const res = await fetch("/api/agents/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent_id: agentId, version }) });
+  return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation;
+}
+
+export async function fetchInstallationOperation(id: string, signal?: AbortSignal): Promise<InstallationOperation> {
+  const res = await fetch(`/api/agents/operations/${encodeURIComponent(id)}`, { signal });
+  return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation;
+}
+
+export async function removeInstalledAgent(agentId: string, version: string): Promise<void> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}?version=${encodeURIComponent(version)}`, { method: "DELETE" });
+  await jsonOrThrow(res);
 }
 
 export interface DiffStats {

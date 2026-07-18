@@ -71,6 +71,8 @@ import { getRepository, getSelectedRepository, listRepositories, registerReposit
 import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
 import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
+import { getInstalledAgent, listInstalledAgents, removeInstalledAgent } from "../agents/store.js";
+import { installationOperation, startInstallation } from "../installations/installer.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -154,6 +156,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
   registerRepositoryRoutes(app);
   registerRegistryRoutes(app, options.machineDir);
+  registerAgentRoutes(app, options.machineDir);
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
   registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent);
@@ -452,6 +455,40 @@ function registerRegistryRoutes(app: Hono, machineDir?: string): void {
       failRegistryRefresh(refresh.id, error instanceof Error ? error.message : "Registry refresh failed", machineDir);
     });
     return c.json({ refresh }, 202);
+  });
+}
+
+function registerAgentRoutes(app: Hono, machineDir?: string): void {
+  app.get("/api/agents", (c) => c.json({ agents: listInstalledAgents(machineDir) }));
+  app.get("/api/agents/:id", (c) => {
+    const version = c.req.query("version");
+    if (!version) throw new ApiError(422, "version is required", "missing_query");
+    const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
+    if (!installed) throw new ApiError(404, "Installed agent not found", "agent_not_found");
+    return c.json({ agent: installed });
+  });
+  app.post("/api/agents/install", async (c) => {
+    const body = await readJsonObject(c, new Set(["agent_id", "version"]));
+    const agentId = assertString(body.agent_id, "agent_id");
+    const version = assertString(body.version, "version");
+    const catalog = getRegistryCatalog(machineDir);
+    const registryAgent = catalog.snapshot?.agents.find((agent) => agent.id === agentId && agent.version === version);
+    if (!registryAgent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
+    try {
+      return c.json({ operation: await startInstallation(registryAgent, machineDir) }, 202);
+    } catch (error) {
+      throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid");
+    }
+  });
+  app.get("/api/agents/operations/:id", (c) => {
+    try { return c.json({ operation: installationOperation(c.req.param("id"), machineDir) }); }
+    catch { throw new ApiError(404, "Installation operation not found", "operation_not_found"); }
+  });
+  app.delete("/api/agents/:id", (c) => {
+    const version = c.req.query("version");
+    if (!version) throw new ApiError(422, "version is required", "missing_query");
+    if (!removeInstalledAgent(c.req.param("id"), version, machineDir)) throw new ApiError(404, "Installed agent not found", "agent_not_found");
+    return c.json({ deleted: true });
   });
 }
 

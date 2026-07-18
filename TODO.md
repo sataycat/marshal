@@ -96,7 +96,7 @@ start daemon
 
 **Out of scope:** Private registries, custom agents, installation, updates.
 
-## [ ] Slice 3: Install One Pinned Agent Distribution
+## [x] Slice 3: Install One Pinned Agent Distribution
 
 **Depends on:** Slice 2.
 
@@ -128,6 +128,8 @@ start daemon
 **Likely areas:** `src/installations/`, `src/agents/`, storage schema, daemon operation supervision, `web/src/agents/`, installation and API tests.
 
 **Out of scope:** Binary archives, `uvx`, updates, custom agents, checksumless-binary policy.
+
+**Implemented:** Machine-scoped installed-agent and installation-operation records are persisted in `machine.db`. The first distribution path is an exact semver-pinned `npx` package, launched without a shell in a durable operation. Registry cards support explicit confirmation, progress, retry, removal, and idempotent duplicate requests; failed installations remain inspectable and are never selectable as installed.
 
 ## [ ] Slice 4: Probe Readiness And Show Capabilities
 

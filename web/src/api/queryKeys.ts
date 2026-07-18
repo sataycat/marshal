@@ -1,6 +1,8 @@
 export const queryKeys = {
   repositories: ["repositories"] as const,
   registry: ["registry"] as const,
+  installedAgents: ["installed-agents"] as const,
+  installation: (id: string) => ["installation", id] as const,
   tasks: (repositoryId: string | null = null) => ["tasks", repositoryId] as const,
   task: (slug: string, repositoryId: string | null = null) => repositoryId ? ["task", repositoryId, slug] as const : ["task", slug] as const,
   taskDiff: (slug: string) => ["task", slug, "diff"] as const,

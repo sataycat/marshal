@@ -23,6 +23,7 @@ It is written for local-first testing on one machine.
 - Chat-first Phase 1 workbench: threads, drafts, files, permissions, images, reconnects, and mobile navigation
 - Browser-first repository registration: register, select, switch, and remove local git repositories without deleting checkouts
 - Browser-first ACP Registry catalog: cached public metadata, search, refresh, and stale-cache recovery
+- Pinned `npx` agent installation: explicit RCE confirmation, durable progress, retry, and removal
 
 ### Out of scope (not current product behavior)
 

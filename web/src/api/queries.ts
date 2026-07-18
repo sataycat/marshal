@@ -14,7 +14,15 @@ export function useRepositoriesQuery() {
 export function useRegistryQuery() {
   return useQuery({ queryKey: queryKeys.registry, queryFn: ({ signal }) => api.fetchRegistryCatalog(signal), ...queryOptions, refetchInterval: (query) => query.state.data?.refresh?.status === "running" ? 1000 : false });
 }
+export function useInstalledAgentsQuery() {
+  return useQuery({ queryKey: queryKeys.installedAgents, queryFn: ({ signal }) => api.fetchInstalledAgents(signal), ...queryOptions, refetchInterval: (query) => query.state.data?.some((agent) => agent.status === "installing") ? 1000 : false });
+}
+export function useInstallationQuery(id: string | null) {
+  return useQuery({ queryKey: queryKeys.installation(id ?? ""), queryFn: ({ signal }) => api.fetchInstallationOperation(id ?? "", signal), enabled: Boolean(id), ...queryOptions });
+}
 export const useRefreshRegistryMutation = () => useMutation({ mutationFn: api.refreshRegistry });
+export const useInstallRegistryAgentMutation = () => useMutation({ mutationFn: ({ agentId, version }: { agentId: string; version: string }) => api.installRegistryAgent(agentId, version) });
+export const useRemoveInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version }: { agentId: string; version: string }) => api.removeInstalledAgent(agentId, version) });
 export const useRegisterRepositoryMutation = () => useMutation({ mutationFn: api.registerRepository });
 export const useSelectRepositoryMutation = () => useMutation({ mutationFn: api.selectRepository });
 export const useRemoveRepositoryMutation = () => useMutation({ mutationFn: api.removeRepository });

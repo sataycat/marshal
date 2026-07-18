@@ -1,0 +1,62 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+import { GLOBAL_DIR } from "../daemon/config.js";
+import { getRegistryCatalog } from "../registry/store.js";
+import type { RegistryAgent } from "../registry/types.js";
+import { createInstallation, finishInstallation, getInstalledAgent, getInstallationOperation, getLatestInstallationOperation } from "../agents/store.js";
+import type { AgentLaunchSpec, InstallationOperation } from "../agents/types.js";
+
+export const INSTALL_TIMEOUT_MS = 120_000;
+
+export function exactNpxPackage(value: string): string {
+  const packageSpec = value.trim();
+  if (!packageSpec || packageSpec === "latest" || /\s/.test(packageSpec) || !/^(@[a-z0-9._-]+\/)?[a-z0-9._-]+@[^@\s]+$/i.test(packageSpec)) throw new Error("npx distribution must use an exact package version");
+  const version = packageSpec.slice(packageSpec.lastIndexOf("@") + 1);
+  if (/^(latest|next|beta|alpha|canary|dev)$/i.test(version) || !/^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) throw new Error("npx distribution must use an exact semver version");
+  return packageSpec;
+}
+
+export interface NpxRunner { (packageSpecifier: string, cwd: string): Promise<void>; }
+
+export function runNpx(packageSpecifier: string, cwd: string): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn("npx", ["--yes", "--package", packageSpecifier, "node", "-e", ""], { cwd, stdio: ["ignore", "ignore", "pipe"], shell: false });
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error("npx installation timed out")); }, INSTALL_TIMEOUT_MS);
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.once("exit", (code) => { clearTimeout(timer); if (code === 0) resolvePromise(); else reject(new Error(stderr.trim() || `npx exited with code ${code ?? "unknown"}`)); });
+  });
+}
+
+export async function startInstallation(agent: RegistryAgent, machineDir = GLOBAL_DIR, runner: NpxRunner = runNpx): Promise<InstallationOperation> {
+  const distribution = agent.distributions.find((entry) => entry.kind === "npx");
+  if (!distribution?.package) throw new Error("agent does not provide an npx distribution");
+  const packageSpecifier = exactNpxPackage(distribution.package);
+  const existing = getInstalledAgent(agent.id, agent.version, machineDir);
+  if (existing?.status === "installed") return getLatestInstallationOperation(agent.id, agent.version, machineDir)!;
+  const running = getLatestInstallationOperation(agent.id, agent.version, machineDir);
+  if (running?.status === "installing") return running;
+  const operationId = randomUUID();
+  const operation = createInstallation({ id: agent.id, version: agent.version, source: "registry", license: agent.license, distribution: "npx", package_specifier: packageSpecifier, launch: { command: "npx", args: ["--yes", packageSpecifier] } satisfies AgentLaunchSpec, registry_snapshot_fetched_at: getRegistryCatalog(machineDir).snapshot?.fetched_at ?? "unknown", integrity_status: "not_applicable", status: "installing" }, operationId, machineDir);
+  void (async () => {
+    const installRoot = resolve(machineDir, "agents", agent.id, agent.version);
+    try {
+      mkdirSync(installRoot, { recursive: true });
+      await runner(packageSpecifier, installRoot);
+      writeFileSync(resolve(installRoot, "manifest.json"), JSON.stringify({ agent_id: agent.id, version: agent.version, package_specifier: packageSpecifier, installed_at: new Date().toISOString() }) + "\n", { encoding: "utf8" });
+      finishInstallation(operationId, "installed", null, machineDir);
+    } catch (error) {
+      finishInstallation(operationId, "failed", error instanceof Error ? error.message : String(error), machineDir);
+    }
+  })();
+  return operation;
+}
+
+export function installationOperation(id: string, machineDir = GLOBAL_DIR): InstallationOperation {
+  const operation = getInstallationOperation(id, machineDir);
+  if (!operation) throw new Error("installation operation not found");
+  return operation;
+}
