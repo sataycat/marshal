@@ -1,11 +1,12 @@
 import { execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Agent, AgentEvent, AgentSession } from "../agent/types.js";
 import { EventBus } from "./bus.js";
 import { buildApp } from "./http.js";
+import { createInstallation, finishInstallation, setAgentReadiness } from "../agents/store.js";
 
 class FakeAgent implements Agent {
   spawnCount = 0;
@@ -73,6 +74,31 @@ function initGitRepo(root: string): void {
   execSync("git add README.md && git commit -m init", { cwd: root, stdio: "ignore" });
 }
 
+function installReadyUvxAgent(machineDir: string): void {
+  const operation = createInstallation({ id: "uv-agent", version: "1.2.3", source: "registry", license: "MIT", distribution: "uvx", package_specifier: "uv-agent==1.2.3", launch: { command: "uvx", args: ["--from", "uv-agent==1.2.3", "uv-agent", "acp"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "uv-install", machineDir);
+  finishInstallation(operation.id, "installed", null, machineDir);
+  setAgentReadiness("uv-agent", "1.2.3", { readiness_status: "ready", readiness_error: null, protocol_version: 1, capabilities: { prompt: { text: true, image: false, audio: false, embedded_context: false }, session: { close: true, list: false, load: false, fork: false, resume: false }, load_session: false, auth: { logout: false } }, auth_methods: [], raw_initialize: {}, probed_at: new Date().toISOString() }, machineDir);
+}
+
+function writeUvxShim(binDir: string): void {
+  const shim = `#!/usr/bin/env node
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin });
+let sessionId = "uvx-session";
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: message.params.protocolVersion, agentCapabilities: { sessionCapabilities: { close: {} } } } });
+  else if (message.method === "session/new") send({ jsonrpc: "2.0", id: message.id, result: { sessionId } });
+  else if (message.method === "session/prompt") { send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } }); }
+  else if (message.method === "session/close") send({ jsonrpc: "2.0", id: message.id, result: {} });
+});
+`;
+  const path = join(binDir, "uvx");
+  writeFileSync(path, shim, { mode: 0o755 });
+  chmodSync(path, 0o755);
+}
+
 async function req(app: ReturnType<typeof buildApp>, method: string, path: string, body?: unknown) {
   const res = await app.request(path, {
     method,
@@ -126,6 +152,29 @@ describe("chat turns", () => {
       ["assistant", "hello from ACP"],
     ]);
     expect(detail.body.thread.status).toBe("active");
+  });
+
+  it("uses a ready uvx installation for a repository thread", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-chat-uvx-"));
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-chat-uvx-machine-"));
+    const binDir = mkdtempSync(join(tmpdir(), "marshal-chat-uvx-bin-"));
+    writeUvxShim(binDir);
+    installReadyUvxAgent(machineDir);
+    initGitRepo(root);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    try {
+      const app = buildApp("0.0.1", { root, machineDir, bus: new EventBus() });
+      const created = await req(app, "POST", "/api/threads", { agent_id: "uv-agent", agent_version: "1.2.3" });
+      expect(created.status).toBe(201);
+      const result = await req(app, "POST", `/api/threads/${created.body.thread.id}/send`, { content: "Use uvx" });
+      expect(result.status).toBe(201);
+      expect(result.body.assistantMessage).toBeDefined();
+      const detail = await req(app, "GET", `/api/threads/${created.body.thread.id}`);
+      expect(detail.body.thread).toMatchObject({ agent_id: "uv-agent", agent_version: "1.2.3", status: "active" });
+    } finally {
+      process.env.PATH = previousPath;
+    }
   });
 
   it("pauses an interactive turn until the browser decides and fails denied turns", async () => {
