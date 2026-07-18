@@ -3,7 +3,14 @@ export const PUBLIC_REGISTRY_URL = "https://cdn.agentclientprotocol.com/registry
 export interface RegistryDistribution {
   kind: "npx" | "uvx" | "binary";
   package?: string;
+  args?: string[];
   platforms?: string[];
+  platform?: string;
+  archive_url?: string;
+  archive_format?: "tar.gz" | "tgz" | "zip";
+  checksum?: string;
+  executable?: string;
+  env?: Record<string, string>;
 }
 
 export interface RegistryAgent {

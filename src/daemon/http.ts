@@ -73,7 +73,7 @@ import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
 import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
 import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, removeInstalledAgent, setAgentReadiness } from "../agents/store.js";
-import { installationOperation, startInstallation } from "../installations/installer.js";
+import { installationOperation, installCandidate, startInstallation } from "../installations/installer.js";
 import { probeAgent } from "../acp/probe.js";
 import { authenticateAgent } from "../acp/authenticate.js";
 import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
@@ -626,6 +626,15 @@ function registerAgentRoutes(app: Hono, machineDir?: string): void {
     } catch (error) {
       throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid");
     }
+  });
+  app.get("/api/agents/install-candidate", (c) => {
+    const agentId = c.req.query("agent_id");
+    const version = c.req.query("version");
+    if (!agentId || !version) throw new ApiError(422, "agent_id and version are required", "missing_query");
+    const agent = getRegistryCatalog(machineDir).snapshot?.agents.find((entry) => entry.id === agentId && entry.version === version);
+    if (!agent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
+    try { return c.json({ candidate: installCandidate(agent) }); }
+    catch (error) { throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid"); }
   });
   app.get("/api/agents/operations/:id", (c) => {
     try { return c.json({ operation: installationOperation(c.req.param("id"), machineDir) }); }

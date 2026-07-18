@@ -5,10 +5,33 @@ import { resolve } from "node:path";
 import { GLOBAL_DIR } from "../daemon/config.js";
 import { getRegistryCatalog } from "../registry/store.js";
 import type { RegistryAgent } from "../registry/types.js";
+import type { RegistryDistribution } from "../registry/types.js";
 import { createInstallation, finishInstallation, getInstalledAgent, getInstallationOperation, getLatestInstallationOperation } from "../agents/store.js";
 import type { AgentLaunchSpec, InstallationOperation } from "../agents/types.js";
 
 export const INSTALL_TIMEOUT_MS = 120_000;
+
+export interface InstallCandidate {
+  agent_id: string;
+  version: string;
+  source: "registry";
+  license: string;
+  distribution: RegistryDistribution;
+  checksum: string | null;
+  integrity_policy: "verified_if_declared" | "unverified_binary_allowed" | "not_applicable";
+  installation_risk: "low" | "medium" | "high";
+}
+
+export function selectDistribution(agent: RegistryAgent, platform = `${process.platform}-${process.arch}`): RegistryDistribution {
+  const binary = agent.distributions.find((entry) => entry.kind === "binary" && entry.platforms?.includes(platform));
+  return binary ?? agent.distributions.find((entry) => entry.kind === "npx") ?? agent.distributions.find((entry) => entry.kind === "uvx") ?? (() => { throw new Error(`agent does not provide a supported distribution for ${platform}`); })();
+}
+
+export function installCandidate(agent: RegistryAgent, platform = `${process.platform}-${process.arch}`): InstallCandidate {
+  const distribution = selectDistribution(agent, platform);
+  const binary = distribution.kind === "binary";
+  return { agent_id: agent.id, version: agent.version, source: "registry", license: agent.license, distribution, checksum: distribution.checksum ?? null, integrity_policy: binary ? (distribution.checksum ? "verified_if_declared" : "unverified_binary_allowed") : "not_applicable", installation_risk: binary ? (distribution.checksum ? "medium" : "high") : "medium" };
+}
 
 export function exactNpxPackage(value: string): string {
   const packageSpec = value.trim();
@@ -32,7 +55,8 @@ export function runNpx(packageSpecifier: string, cwd: string): Promise<void> {
 }
 
 export async function startInstallation(agent: RegistryAgent, machineDir = GLOBAL_DIR, runner: NpxRunner = runNpx): Promise<InstallationOperation> {
-  const distribution = agent.distributions.find((entry) => entry.kind === "npx");
+  const distribution = selectDistribution(agent);
+  if (distribution.kind !== "npx") throw new Error("only npx installation is implemented in this slice");
   if (!distribution?.package) throw new Error("agent does not provide an npx distribution");
   const packageSpecifier = exactNpxPackage(distribution.package);
   const existing = getInstalledAgent(agent.id, agent.version, machineDir);

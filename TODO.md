@@ -15,12 +15,12 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 
 ### 2. Validate complete distribution metadata
 
-- [ ] Preserve and validate binary distribution records instead of reducing them to platform names.
-- [ ] Validate platform, archive URL and format, checksum, executable path, arguments, and optional environment metadata at the registry boundary.
-- [ ] Reject unsafe executable paths, malformed checksums, unsupported platforms, and invalid URLs before installation.
-- [ ] Add a daemon install-candidate response that reports the exact version, source, license, selected distribution, checksum, integrity policy, and installation risk.
-- [ ] Keep package arguments, archive URLs, executable paths, and local paths out of ordinary thread and workflow configuration.
-- [ ] Add registry fixtures and parser tests for `npx`, `uvx`, checksummed binaries, checksumless binaries, malformed metadata, and safe unknown fields.
+- [x] Preserve and validate binary distribution records instead of reducing them to platform names.
+- [x] Validate platform, archive URL and format, checksum, executable path, arguments, and optional environment metadata at the registry boundary.
+- [x] Reject unsafe executable paths, malformed checksums, unsupported platforms, and invalid URLs before installation.
+- [x] Add a daemon install-candidate response that reports the exact version, source, license, selected distribution, checksum, integrity policy, and installation risk.
+- [x] Keep package arguments, archive URLs, executable paths, and local paths out of ordinary thread and workflow configuration.
+- [x] Add registry fixtures and parser tests for `npx`, `uvx`, checksummed binaries, checksumless binaries, malformed metadata, and safe unknown fields.
 
 ### 3. Materialize exact `uvx` installations
 
