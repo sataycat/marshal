@@ -1,19 +1,18 @@
-import { cwd } from "node:process";
-import type { Agent, AgentEvent, AgentSession, SpawnOptions } from "../agent/types.js";
-import { createConfiguredAgent } from "../agent/configured-agent.js";
+import type { Agent, AgentEvent, AgentId } from "../agent/types.js";
 import { logger } from "../logger.js";
 import { getTask } from "../tasks/store.js";
-import { resolveAgentId } from "../worktree/config.js";
 import {
   appendSpecMessage,
   listSpecMessages,
   type SpecMessage,
   type SpecMessageRole,
 } from "../tasks/spec-store.js";
-import type { AgentId } from "../agent/types.js";
+import { AcpSessionSupervisor } from "../acp/supervisor.js";
+import { createSpecAuthorSession, updateSpecAuthorSession, appendSpecAuthorOperation } from "../tasks/author-store.js";
+import { getWorkflowProfile } from "../workflows/store.js";
+import { getSelectedRepository } from "../repositories/store.js";
 
 const SPEC_AUTHOR_TIMEOUT_SECONDS = 600;
-const SPEC_AUTHOR_PERMISSION_MODE = "approve-reads" as const;
 export const DEFAULT_SPEC_CHAT_BUDGET_CHARS = 24_000;
 
 export const MARSHAL_SPEC_FENCE = "marshal-spec";
@@ -149,6 +148,7 @@ export interface RunSpecAuthorTurnOptions {
   agent?: Agent;
   agentId?: AgentId;
   chatBudgetChars?: number;
+  machineDir?: string;
 }
 
 export interface SpecAuthorTurnResult {
@@ -169,52 +169,49 @@ export async function runSpecAuthorTurn(
 
   const userMessage = appendSpecMessage(slug, "user", userContent, root);
 
-  const agent = options.agent ?? createConfiguredAgent("specAuthor");
-  const agentId: AgentId = options.agentId ?? resolveAgentId("specAuthor");
+  const selectedRepository = getSelectedRepository(options.machineDir);
+  const profile = task.workflow_profile_id && selectedRepository
+    ? getWorkflowProfile(selectedRepository.id, task.workflow_profile_id, options.machineDir)
+    : undefined;
+  const assignment = profile?.assignments.find((item) => item.role === "specAuthor");
+  if (!options.agent && (!profile || !assignment || task.repository_id !== selectedRepository?.id)) {
+    throw new Error("Task has no valid workflow profile spec-author assignment");
+  }
+  const agentId: AgentId = options.agentId ?? assignment?.agent_id ?? "test-spec-author";
 
   const specMessages = listSpecMessages(slug, root);
   const prompt = renderSpecAuthoringPrompt(task, specMessages, {
     chatBudgetChars: options.chatBudgetChars,
   });
 
-  const spawnOpts: SpawnOptions = {
-    sessionName: `marshal-${slug}-spec`,
-    permissionMode: SPEC_AUTHOR_PERMISSION_MODE,
-    timeoutSeconds: SPEC_AUTHOR_TIMEOUT_SECONDS,
-  };
-
-  const agentCwd = root ?? cwd();
   let assistantText = "";
-  let session: AgentSession | undefined;
+  const authorRecord = profile && assignment && selectedRepository
+    ? createSpecAuthorSession({ taskId: task.id, repositoryId: selectedRepository.id, workflowProfileId: profile.id, assignmentId: assignment.id, agentId: assignment.agent_id, agentVersion: assignment.agent_version, assignmentConfig: { model: assignment.model, mode: assignment.mode, permission_policy: profile.permission_policy } }, root)
+    : undefined;
   try {
-    session = await agent.spawn(agentCwd, agentId, spawnOpts);
-    try {
+    if (!authorRecord) {
+      // Injected agents remain a test seam; production always uses the profile path.
       const events: AgentEvent[] = [];
-      let errored: string | undefined;
-      for await (const event of agent.prompt(session, prompt, spawnOpts)) {
-        events.push(event);
-        if (event.type === "error") {
-          errored = event.message;
-          break;
-        }
-      }
-      if (errored !== undefined) {
-        throw new Error(errored);
-      }
+      const session = await options.agent!.spawn(root ?? process.cwd(), agentId, { sessionName: `marshal-${slug}-spec`, permissionMode: "approve-reads", timeoutSeconds: SPEC_AUTHOR_TIMEOUT_SECONDS });
+      for await (const event of options.agent!.prompt(session, prompt, { permissionMode: "approve-reads" })) { events.push(event); if (event.type === "error") throw new Error(event.message); }
       assistantText = collectAgentText(events);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error({ err, slug }, "Spec authoring prompt stream failed");
-      throw new Error(`spec author agent failed: ${msg}`);
+      await options.agent!.close(session);
+    } else {
+      appendSpecAuthorOperation(authorRecord.id, "author", "running", null, root);
+      const supervisor = new AcpSessionSupervisor({ root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: profile!.permission_policy });
+      const started = await supervisor.start("spec-author", authorRecord.id, root ?? process.cwd(), assignment!.agent_id, assignment!.agent_version);
+      updateSpecAuthorSession(authorRecord.id, { supervisorSessionId: started.record.id, acpSessionId: started.record.acp_session_id, capabilities: started.record.capabilities }, root);
+      const events: AgentEvent[] = [];
+      await supervisor.prompt(started.record.id, prompt, undefined, (event) => events.push(event));
+      assistantText = collectAgentText(events);
+      await supervisor.close(started.record.id);
+      appendSpecAuthorOperation(authorRecord.id, "author", "succeeded", null, root);
+      updateSpecAuthorSession(authorRecord.id, { status: "completed" }, root);
     }
-  } finally {
-    if (session) {
-      try {
-        await agent.close(session);
-      } catch (err) {
-        logger.warn({ err, slug }, "Failed to close spec authoring session");
-      }
-    }
+  } catch (err) {
+    if (authorRecord) { appendSpecAuthorOperation(authorRecord.id, "author", "failed", err instanceof Error ? err.message : String(err), root); updateSpecAuthorSession(authorRecord.id, { status: "failed" }, root); }
+    logger.error({ err, slug }, "Spec authoring prompt stream failed");
+    throw new Error(`spec author agent failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const assistantMessage = appendSpecMessage(

@@ -4,8 +4,9 @@ import { createPermissionRequest, getPermissionRequestByRequestId, getPermission
 import { getInstalledAgent } from "../agents/store.js";
 import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
 import type { EventBus } from "../daemon/bus.js";
+import type { PermissionPolicy } from "../workflows/types.js";
 
-export interface SupervisorOptions { root?: string; machineDir?: string; bus?: EventBus; agent?: Agent; onEvent?: (session: AcpSessionRecord, event: AgentEvent) => void; onPermission?: (request: PermissionRequestRecord) => void }
+export interface SupervisorOptions { root?: string; machineDir?: string; bus?: EventBus; agent?: Agent; permissionPolicy?: PermissionPolicy; onEvent?: (session: AcpSessionRecord, event: AgentEvent) => void; onPermission?: (request: PermissionRequestRecord) => void }
 interface Runtime { record: AcpSessionRecord; session: AgentSession; agent: Agent; prompt?: AcpPromptRecord; }
 export class AcpSessionSupervisor {
   private readonly runtimes = new Map<string, Runtime>();
@@ -48,7 +49,11 @@ export class AcpSessionSupervisor {
     const text = typeof content === "string" ? content : content.map((part) => part.type === "text" ? part.text : "[image]").join("");
     const prompt = createPrompt(id, text, this.options.root); runtime.prompt = prompt; updateSession(id, { status: "running" }, this.options.root);
     try {
-      const onPermission = async (request: AgentPermissionRequest): Promise<string | undefined> => {
+       const onPermission = async (request: AgentPermissionRequest): Promise<string | undefined> => {
+         const policy = this.options.permissionPolicy;
+         const automatic = policy === "reject_all" ? request.options.find((option) => option.kind === "reject_once") : policy === "allow_workspace" || policy === "unattended_allow_all" ? request.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always") : undefined;
+         if (automatic) return automatic.optionId;
+         if (policy === "reject_all") return undefined;
         const threadId = runtime.record.owner_id;
         const record = createPermissionRequest(id, threadId, request, this.options.root);
         this.options.onPermission?.(record);

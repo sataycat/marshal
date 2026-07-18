@@ -42,6 +42,7 @@ export function useTaskDiffQuery(slug: string, enabled: boolean) {
 export function useSpecMessagesQuery(slug: string) {
   return useQuery({ queryKey: queryKeys.specMessages(slug), queryFn: ({ signal }) => api.fetchSpecMessages(slug, signal), ...queryOptions });
 }
+export function useSpecAuthorSessionsQuery(slug: string) { return useQuery({ queryKey: [...queryKeys.specMessages(slug), "sessions"], queryFn: ({ signal }) => api.fetchSpecAuthorSessions(slug, signal), ...queryOptions }); }
 export function useChatAgentsQuery() {
   return useInstalledAgentsQuery();
 }

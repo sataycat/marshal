@@ -30,6 +30,7 @@ It is written for local-first testing on one machine.
 - Durable interactive ACP supervision: session/prompt/event history hydration, cancellation, interruption after daemon restart, and recoverable diagnostics
 - Durable interactive permissions: refresh-safe pending requests, kind/ID-based approve/deny decisions, conservative cancellation and restart reconciliation
 - Repository-scoped workflow profiles: ready-agent assignments, capability-aware optional configuration, explicit permissions and unattended authorization, deterministic checks, retries, timeouts, and decorrelation
+- Profile-backed spec authoring: browser-created tasks require a repository workflow profile, author sessions resolve the pinned spec-author assignment through the shared ACP supervisor, and author identity/session/operation evidence is durable.
 
 ### Out of scope (not current product behavior)
 
@@ -147,6 +148,12 @@ Expected:
 Open **Workflows** for the selected repository and create a profile. Select only agents that are installed and **Ready** for the spec-author, builder, and validator assignments. The same installation may fill multiple roles unless decorrelation is enabled; with decorrelation enabled, identical builder and validator identity/configuration is rejected.
 
 Set optional model/mode values only when the readiness capability snapshot advertises them, then configure permission policy, timeout, retry count, and one deterministic verification command per line. Assignment and unattended authorization are separate trust decisions: checking unattended authorization is explicit and requires the unattended policy. Saving a profile must not spawn an agent or create a task. Switch repositories and confirm profiles remain isolated; remove or make an agent unready and confirm the next save reports a clear validation error.
+
+### 3.12 Profile-backed task authoring and freeze
+
+From the Board, create a task and select a workflow profile. The task is owned by the selected repository and profile; no executable command is shown or editable. Send a message in **Spec Authoring Chat** and refresh while it runs. The response should be durable, and the evidence panel should show the exact spec-author ID/version, supervisor session, and operation outcome. Permission requests follow the profile policy; an unsupported or unsafe policy choice must not be approved.
+
+Review the proposed markdown, explicitly update the task spec, then click **Freeze to Ready**. Confirm the task worktree contains the committed spec before any unattended build transition is attempted. Updating or reinstalling the assigned agent later must not change the recorded author evidence.
 
 ## 3. Onboarding tests (CLI surface)
 

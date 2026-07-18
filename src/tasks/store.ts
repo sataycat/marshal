@@ -11,12 +11,16 @@ export interface Task {
   last_failure: string | null;
   created_at: string;
   updated_at: string;
+  repository_id?: string | null;
+  workflow_profile_id?: string | null;
 }
 
 export interface CreateTaskInput {
   slug: string;
   title: string;
   specMarkdown?: string;
+  repositoryId?: string;
+  workflowProfileId?: string;
 }
 
 export class TaskNotFoundError extends Error {
@@ -43,6 +47,8 @@ interface TaskRow {
   last_failure: string | null;
   created_at: string;
   updated_at: string;
+  repository_id: string | null;
+  workflow_profile_id: string | null;
 }
 
 function rowToTask(row: TaskRow): Task {
@@ -74,8 +80,8 @@ export function createTask(input: CreateTaskInput, root?: string): Task {
   }
 
   const info = db
-    .prepare("INSERT INTO tasks (slug, title, spec_markdown) VALUES (?, ?, ?)")
-    .run(input.slug, input.title, input.specMarkdown ?? "");
+    .prepare("INSERT INTO tasks (slug, title, spec_markdown, repository_id, workflow_profile_id) VALUES (?, ?, ?, ?, ?)")
+    .run(input.slug, input.title, input.specMarkdown ?? "", input.repositoryId ?? null, input.workflowProfileId ?? null);
 
   return {
     id: Number(info.lastInsertRowid),
@@ -87,6 +93,8 @@ export function createTask(input: CreateTaskInput, root?: string): Task {
     last_failure: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    repository_id: input.repositoryId ?? null,
+    workflow_profile_id: input.workflowProfileId ?? null,
   };
 }
 

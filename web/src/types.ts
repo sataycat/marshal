@@ -104,6 +104,8 @@ export interface TaskCard {
 export interface TaskDetail extends TaskCard {
   spec_markdown: string;
   last_failure: string | null;
+  repository_id?: string | null;
+  workflow_profile_id?: string | null;
 }
 
 export interface BusEvent<P = unknown> {

@@ -186,6 +186,8 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
 export async function createTask(input: {
   title: string;
   spec_markdown?: string;
+  repository_id?: string;
+  workflow_profile_id?: string;
 }): Promise<TaskDetail> {
   const res = await fetch("/api/tasks", {
     method: "POST",
@@ -195,6 +197,9 @@ export async function createTask(input: {
   const body = await jsonOrThrow<{ task: TaskDetail }>(res);
   return body.task;
 }
+
+export interface SpecAuthorSessionEvidence { id: string; agent_id: string; agent_version: string; capabilities: unknown; assignment_config: unknown; acp_session_id: string | null; supervisor_session_id: string | null; status: string; operations: Array<{ id: number; operation: string; status: string; diagnostic: string | null; created_at: string }> }
+export async function fetchSpecAuthorSessions(slug: string, signal?: AbortSignal): Promise<SpecAuthorSessionEvidence[]> { const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-author-sessions`, { signal }); return (await jsonOrThrow<{ sessions: SpecAuthorSessionEvidence[] }>(res)).sessions; }
 
 export async function freezeTask(slug: string, specMarkdown?: string): Promise<TaskDetail> {
   const body: Record<string, string> = {};

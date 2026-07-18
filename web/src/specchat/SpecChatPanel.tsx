@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Send, Snowflake } from "lucide-react";
-import { useFreezeTaskMutation, useSendSpecMessageMutation, useSpecMessagesQuery, useUpdateTaskSpecMutation } from "../api/queries";
+import { useFreezeTaskMutation, useSendSpecMessageMutation, useSpecAuthorSessionsQuery, useSpecMessagesQuery, useUpdateTaskSpecMutation } from "../api/queries";
 import { extractMarshalSpec, MARSHAL_SPEC_FENCE } from "./marshalSpec";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
 import { useTaskStore, selectSpecMessages } from "../state/taskStore";
@@ -27,6 +27,7 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
   const pushError = useToastStore((state) => state.pushError);
   const pushInfo = useToastStore((state) => state.pushInfo);
   const messagesQuery = useSpecMessagesQuery(slug);
+  const evidenceQuery = useSpecAuthorSessionsQuery(slug);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -105,6 +106,7 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
   return (
     <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
       <h3 className="text-sm font-semibold">Spec Authoring Chat</h3>
+      {evidenceQuery.data?.map((session) => <div key={session.id} className="rounded-md border border-border bg-secondary/30 p-2 text-xs text-muted"><strong className="text-text">Author evidence:</strong> {session.agent_id}@{session.agent_version} · {session.status} · supervisor session {session.supervisor_session_id ?? "not recorded"}</div>)}
       {messagesQuery.isPending && <p className="text-sm text-muted">Loading chat…</p>}
       {messagesQuery.error && <p className="text-sm text-[var(--color-error)]">{messagesQuery.error.message}</p>}
       <ScrollArea className="h-72 rounded-md border border-border bg-bg/30 p-2">

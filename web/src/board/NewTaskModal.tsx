@@ -14,6 +14,7 @@ import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
 import { useTaskStore } from "../state/taskStore";
 import { useToastStore } from "../state/toastStore";
 import { useCreateTaskMutation } from "../api/queries";
+import { useRepositoriesQuery, useWorkflowProfilesQuery } from "../api/queries";
 
 interface Props {
   onClose: () => void;
@@ -26,6 +27,10 @@ export function NewTaskModal({ onClose }: Props) {
   const [title, setTitle] = useState("");
   const [spec, setSpec] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const repositories = useRepositoriesQuery();
+  const repositoryId = repositories.data?.selected_repository_id ?? null;
+  const profiles = useWorkflowProfilesQuery(repositoryId);
+  const [profileId, setProfileId] = useState("");
 
   const submit = async (): Promise<void> => {
     const trimmed = title.trim();
@@ -33,10 +38,13 @@ export function NewTaskModal({ onClose }: Props) {
       pushError("Title is required.");
       return;
     }
+    if (!profileId) { pushError("Select a workflow profile."); return; }
     setSubmitting(true);
     const task = await createTask.mutateAsync({
       title: trimmed,
       spec_markdown: spec.trim().length > 0 ? spec : undefined,
+      repository_id: repositoryId ?? undefined,
+      workflow_profile_id: profileId || undefined,
     });
     const { spec_markdown: _spec, last_failure: _failure, ...card } = task;
     applyTaskEvent({ type: "task.created", payload: card, timestamp: new Date().toISOString() });
@@ -54,6 +62,14 @@ export function NewTaskModal({ onClose }: Props) {
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4">
+          <Field>
+            <FieldLabel htmlFor="new-task-profile">Workflow profile</FieldLabel>
+            <select id="new-task-profile" className="h-10 w-full rounded-md border border-input bg-transparent px-2" value={profileId} onChange={(e) => setProfileId(e.target.value)} required>
+              <option value="">Select a profile</option>
+              {(profiles.data ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+            </select>
+            <FieldDescription>Authoring uses this profile's spec-author assignment. The task remains backlog until you review and freeze it.</FieldDescription>
+          </Field>
           <Field>
             <FieldLabel htmlFor="new-task-title">Title</FieldLabel>
             <Input

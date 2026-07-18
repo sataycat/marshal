@@ -80,6 +80,7 @@ import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store
 import { randomUUID } from "node:crypto";
 import { reconcileThreadPermissions } from "../acp/permission-store.js";
 import { deleteWorkflowProfile, getWorkflowProfile, listWorkflowProfiles, saveWorkflowProfile, WorkflowValidationError, type WorkflowProfileInput } from "../workflows/store.js";
+import { listSpecAuthorSessions, listSpecAuthorOperations } from "../tasks/author-store.js";
 
 const authenticationControllers = new Map<string, AbortController>();
 
@@ -168,9 +169,9 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerRegistryRoutes(app, options.machineDir);
   registerAgentRoutes(app, options.machineDir);
   registerWorkflowProfileRoutes(app, options.machineDir);
-  registerTaskRoutes(app, root, options.worktreeRoot, bus);
+  registerTaskRoutes(app, root, options.worktreeRoot, bus, options.machineDir);
   registerRunRoutes(app, root);
-  registerSpecRoutes(app, root, bus, options.specAgent);
+  registerSpecRoutes(app, root, bus, options.specAgent, options.machineDir);
   registerChatRoutes(app, root, bus, options.chatAgent, options.machineDir);
   registerStaticRoutes(app, webDir);
   app.notFound((c) => spaNotFound(c, webDir));
@@ -303,6 +304,8 @@ interface TaskCardFields {
 interface TaskDetailFields extends TaskCardFields {
   spec_markdown: string;
   last_failure: string | null;
+  repository_id?: string | null;
+  workflow_profile_id?: string | null;
 }
 
 function taskCard(task: Task): TaskCardFields {
@@ -326,6 +329,8 @@ function taskDetail(task: Task): TaskDetailFields {
     ...taskCard(task),
     spec_markdown: task.spec_markdown,
     last_failure: task.last_failure,
+    repository_id: task.repository_id,
+    workflow_profile_id: task.workflow_profile_id,
   };
 }
 
@@ -803,6 +808,7 @@ function registerTaskRoutes(
   root: string | undefined,
   worktreeRoot: string | undefined,
   bus: EventBus | undefined,
+  machineDir?: string,
 ): void {
   const makeManager = (): WorktreeManager =>
     (() => {
@@ -828,7 +834,7 @@ function registerTaskRoutes(
   });
 
   app.post("/api/tasks", async (c) => {
-    const body = await readJsonObject(c, new Set(["title", "spec_markdown"]));
+    const body = await readJsonObject(c, new Set(["title", "spec_markdown", "workflow_profile_id", "repository_id"]));
     const title = body.title;
     if (title === undefined) {
       throw new ApiError(422, "title is required", "missing_field");
@@ -843,7 +849,11 @@ function registerTaskRoutes(
     }
     try {
       const slug = generateUniqueSlug(titleStr, root);
-      const task = createTask({ slug, title: titleStr, specMarkdown }, root);
+      const repository = getSelectedRepository(machineDir);
+      const repositoryId = typeof body.repository_id === "string" ? body.repository_id : repository?.id;
+      const profileId = typeof body.workflow_profile_id === "string" ? body.workflow_profile_id : undefined;
+      if (profileId && (!repositoryId || !getWorkflowProfile(repositoryId, profileId, machineDir))) throw new ApiError(422, "workflow profile is not owned by the selected repository", "workflow_profile_invalid");
+      const task = createTask({ slug, title: titleStr, specMarkdown, repositoryId, workflowProfileId: profileId }, root);
       if (bus) publishTaskCreated(bus, taskPayload(task));
       return c.json({ task: taskDetail(task) }, 201);
     } catch (err) {
@@ -1071,6 +1081,7 @@ function registerSpecRoutes(
   root: string | undefined,
   bus: EventBus | undefined,
   specAgent: Agent | undefined,
+  machineDir?: string,
 ): void {
   const ensureBus = (bus: EventBus | undefined): EventBus => {
     if (!bus) throw new ApiError(500, "event bus not configured", "internal_error");
@@ -1108,7 +1119,7 @@ function registerSpecRoutes(
       const promptEvents = await runSpecAuthorTurn(slug, contentStr, {
         root,
         agent: specAgent,
-        agentId: resolveAgentId("specAuthor"),
+        machineDir,
       });
       publishSpecMessage(busLocal, slug, promptEvents.userMessage);
       publishSpecMessage(busLocal, slug, promptEvents.assistantMessage);
@@ -1122,6 +1133,11 @@ function registerSpecRoutes(
     } catch (err) {
       throw mapDomainError(err);
     }
+  });
+
+  app.get("/api/tasks/:slug/spec-author-sessions", (c) => {
+    try { const task = getTask(c.req.param("slug"), root); return c.json({ sessions: listSpecAuthorSessions(task.id, root).map((session) => ({ ...session, operations: listSpecAuthorOperations(session.id, root) })) }); }
+    catch (err) { throw mapDomainError(err); }
   });
 
   app.post("/api/tasks/:slug/spec", async (c) => {

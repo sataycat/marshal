@@ -167,3 +167,33 @@ CREATE TABLE IF NOT EXISTS permission_requests (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_permission_requests_session_request ON permission_requests(session_id, request_id);
 CREATE INDEX IF NOT EXISTS idx_permission_requests_thread_status ON permission_requests(thread_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS spec_author_sessions (
+  id TEXT PRIMARY KEY,
+  task_id INTEGER NOT NULL,
+  repository_id TEXT NOT NULL,
+  workflow_profile_id TEXT NOT NULL,
+  assignment_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  agent_version TEXT NOT NULL,
+  capabilities TEXT NOT NULL DEFAULT '{}',
+  assignment_config TEXT NOT NULL DEFAULT '{}',
+  acp_session_id TEXT,
+  supervisor_session_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (task_id) REFERENCES tasks(id)
+);
+CREATE INDEX IF NOT EXISTS idx_spec_author_sessions_task ON spec_author_sessions(task_id, created_at);
+
+CREATE TABLE IF NOT EXISTS spec_author_operations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  author_session_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  status TEXT NOT NULL,
+  diagnostic TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (author_session_id) REFERENCES spec_author_sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_spec_author_operations_session ON spec_author_operations(author_session_id, id);

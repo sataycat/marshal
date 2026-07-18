@@ -41,6 +41,10 @@ export function openDb(root?: string): Database.Database {
   if (!threadColumns.some((column) => column.name === "agent_version")) {
     db.exec("ALTER TABLE chat_threads ADD COLUMN agent_version TEXT NOT NULL DEFAULT 'legacy'");
   }
+  const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+  if (!taskColumns.some((column) => column.name === "repository_id")) db.exec("ALTER TABLE tasks ADD COLUMN repository_id TEXT");
+  if (!taskColumns.some((column) => column.name === "workflow_profile_id")) db.exec("ALTER TABLE tasks ADD COLUMN workflow_profile_id TEXT");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_workflow_owner ON tasks(repository_id, workflow_profile_id)");
 
   return db;
 }

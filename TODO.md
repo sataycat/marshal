@@ -322,7 +322,7 @@ start daemon
 
 **Implemented:** Repository-scoped workflow profiles and agent assignments now persist in the machine database with CRUD daemon APIs and a browser editor/list. Save-time validation requires installed ready agents, checks negotiated optional model/mode values, enforces permission and unattended trust rules, and supports deterministic commands, timeout/retry settings, and builder/validator decorrelation. The execution-facing validation primitive is reusable by future factory consumers; Slice 10/11 execution remains unchanged and the new UI never writes legacy command roles.
 
-## [ ] Slice 10: Author And Freeze A Profile-Backed Task
+## [x] Slice 10: Author And Freeze A Profile-Backed Task
 
 **Depends on:** Slices 7, 8, and 9.
 
@@ -351,6 +351,8 @@ start daemon
 **Likely areas:** `src/daemon/spec-chat.ts`, `src/workflows/`, task/spec storage, supervisor and permissions, spec-author and task UI, freeze and end-to-end tests.
 
 **Out of scope:** Builder and validator migration, merge, containers/VMs, spend budgets.
+
+**Implemented:** Browser-created tasks now require repository and workflow-profile ownership. Spec-author turns resolve the profile's pinned installed assignment and execute through the shared ACP supervisor with policy-aware permission resolution. Author sessions retain exact identity, assignment configuration, capability snapshot, supervisor/ACP session IDs, and durable operation history; the browser exposes this evidence. The existing reviewed-spec-to-worktree freeze boundary remains unchanged. Builder, validator, merge, and sandbox execution remain Slice 11+ scope.
 
 ## [ ] Slice 11: Build Validate Review And Merge Through The Supervisor
 
