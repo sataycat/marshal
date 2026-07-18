@@ -1,5 +1,5 @@
 import { openMachineDb } from "../storage/machine.js";
-import type { AgentAuthenticationOperation, InstalledAgent, InstallationOperation } from "./types.js";
+import { validateAgentLaunchSpec, type AgentAuthenticationOperation, type InstalledAgent, type InstallationOperation } from "./types.js";
 
 function tables(machineDir?: string) {
   const db = openMachineDb(machineDir);
@@ -14,6 +14,9 @@ function tables(machineDir?: string) {
       launch TEXT NOT NULL,
       registry_snapshot_fetched_at TEXT NOT NULL,
       integrity_status TEXT NOT NULL,
+      installation_id TEXT,
+      provenance TEXT,
+      installation_root TEXT,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -43,6 +46,9 @@ function tables(machineDir?: string) {
     );
   `);
   for (const statement of [
+    "ALTER TABLE installed_agents ADD COLUMN installation_id TEXT",
+    "ALTER TABLE installed_agents ADD COLUMN provenance TEXT",
+    "ALTER TABLE installed_agents ADD COLUMN installation_root TEXT",
     "ALTER TABLE installed_agents ADD COLUMN readiness_status TEXT NOT NULL DEFAULT 'unknown'",
     "ALTER TABLE installed_agents ADD COLUMN readiness_error TEXT",
     "ALTER TABLE installed_agents ADD COLUMN protocol_version INTEGER",
@@ -60,10 +66,18 @@ export function interruptActiveAgentAuthentications(machineDir?: string): void {
 }
 
 function agent(row: Record<string, unknown>): InstalledAgent {
+  const launch = validateAgentLaunchSpec(JSON.parse(String(row.launch)));
+  const distribution = String(row.distribution) as InstalledAgent["distribution"];
+  const installationRoot = String(row.installation_root ?? "");
+  const provenance = row.provenance ? JSON.parse(String(row.provenance)) : {
+    exact_version: String(row.version), distribution, source: "registry", package_specifier: row.package_specifier == null ? null : String(row.package_specifier), archive_identity: null,
+    registry_snapshot_fetched_at: row.registry_snapshot_fetched_at == null ? null : String(row.registry_snapshot_fetched_at), installation_root: installationRoot, integrity_status: String(row.integrity_status),
+  };
   return {
-    id: String(row.id), version: String(row.version), source: "registry", license: String(row.license),
-    distribution: "npx", package_specifier: String(row.package_specifier), launch: JSON.parse(String(row.launch)),
-    registry_snapshot_fetched_at: String(row.registry_snapshot_fetched_at), integrity_status: "not_applicable",
+    id: String(row.id), version: String(row.version), source: provenance.source, license: String(row.license),
+    distribution, package_specifier: row.package_specifier == null ? null : String(row.package_specifier), launch, provenance,
+    installation_id: String(row.installation_id ?? `${row.id}@${row.version}`), installation_root: installationRoot,
+    registry_snapshot_fetched_at: row.registry_snapshot_fetched_at == null ? null : String(row.registry_snapshot_fetched_at), integrity_status: String(row.integrity_status) as InstalledAgent["integrity_status"],
     status: String(row.status) as InstalledAgent["status"], created_at: String(row.created_at), updated_at: String(row.updated_at),
     failure: row.failure === null || row.failure === undefined ? null : String(row.failure),
     readiness_status: String(row.readiness_status ?? "unknown") as InstalledAgent["readiness_status"], readiness_error: row.readiness_error ? String(row.readiness_error) : null,
@@ -97,15 +111,24 @@ export function getLatestInstallationOperation(id: string, version: string, mach
   return row ? operation(row) : undefined;
 }
 
-export function createInstallation(input: Omit<InstalledAgent, "created_at" | "updated_at" | "failure">, operationId: string, machineDir?: string): InstallationOperation {
+export function createInstallation(input: Omit<InstalledAgent, "created_at" | "updated_at" | "failure" | "provenance" | "installation_id" | "installation_root"> & Partial<Pick<InstalledAgent, "provenance" | "installation_id" | "installation_root">>, operationId: string, machineDir?: string): InstallationOperation {
   const db = tables(machineDir);
   const now = new Date().toISOString();
+  const installationRoot = input.installation_root ?? "";
+  const installationId = input.installation_id ?? `${input.id}@${input.version}`;
+  const provenance = input.provenance ?? { exact_version: input.version, distribution: input.distribution, source: input.source, package_specifier: input.package_specifier, archive_identity: null, registry_snapshot_fetched_at: input.registry_snapshot_fetched_at, installation_root: installationRoot, integrity_status: input.integrity_status };
   const op: InstallationOperation = { id: operationId, agent_id: input.id, version: input.version, package_specifier: input.package_specifier, status: "installing", started_at: now, finished_at: null, error: null };
   db.transaction(() => {
-    db.prepare("INSERT INTO installed_agents (id, version, source, license, distribution, package_specifier, launch, registry_snapshot_fetched_at, integrity_status, status, created_at, updated_at, failure) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(id, version) DO UPDATE SET package_specifier = excluded.package_specifier, launch = excluded.launch, registry_snapshot_fetched_at = excluded.registry_snapshot_fetched_at, license = excluded.license, status = 'installing', updated_at = excluded.updated_at, failure = NULL").run(input.id, input.version, input.source, input.license, input.distribution, input.package_specifier, JSON.stringify(input.launch), input.registry_snapshot_fetched_at, input.integrity_status, "installing", now, now);
+     db.prepare("INSERT INTO installed_agents (id, version, source, license, distribution, package_specifier, launch, registry_snapshot_fetched_at, integrity_status, installation_id, provenance, installation_root, status, created_at, updated_at, failure) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(id, version) DO UPDATE SET package_specifier = excluded.package_specifier, launch = excluded.launch, registry_snapshot_fetched_at = excluded.registry_snapshot_fetched_at, integrity_status = excluded.integrity_status, provenance = excluded.provenance, installation_root = excluded.installation_root, license = excluded.license, status = 'installing', updated_at = excluded.updated_at, failure = NULL").run(input.id, input.version, input.source, input.license, input.distribution, input.package_specifier, JSON.stringify(input.launch), input.registry_snapshot_fetched_at ?? "unknown", input.integrity_status, installationId, JSON.stringify(provenance), installationRoot, "installing", now, now);
     db.prepare("INSERT INTO installation_operations (id, agent_id, version, package_specifier, status, started_at) VALUES (?, ?, ?, ?, 'installing', ?)").run(op.id, op.agent_id, op.version, op.package_specifier, op.started_at);
   })();
   return op;
+}
+
+export function resolveInstalledAgentLaunch(id: string, version: string, machineDir?: string): InstalledAgent["launch"] {
+  const installed = getInstalledAgent(id, version, machineDir);
+  if (!installed || installed.status !== "installed") throw new Error(`Installed agent ${id}@${version} is not available`);
+  return validateAgentLaunchSpec(installed.launch);
 }
 
 export function finishInstallation(operationId: string, status: "installed" | "failed", error: string | null, machineDir?: string): InstallationOperation {

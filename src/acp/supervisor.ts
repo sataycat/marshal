@@ -1,7 +1,7 @@
 import type { Agent, AgentEvent, AgentPromptPart, AgentSession, AgentPermissionRequest, SpawnOptions } from "../agent/types.js";
 import { createPrompt, createSession, appendEvent, getSession, interruptActiveSessions, listSessionEvents, listSessions, updatePrompt, updateSession, type AcpSessionRecord, type AcpPromptRecord } from "./supervisor-store.js";
 import { createPermissionRequest, getPermissionRequestByRequestId, getPermissionRequestForThread, listPermissionRequests, reconcilePermissionRequests, resolvePermissionRequest, type PermissionRequestRecord } from "./permission-store.js";
-import { getInstalledAgent } from "../agents/store.js";
+import { resolveInstalledAgentLaunch } from "../agents/store.js";
 import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
 import type { EventBus } from "../daemon/bus.js";
 import type { PermissionPolicy } from "../workflows/types.js";
@@ -20,9 +20,8 @@ export class AcpSessionSupervisor {
   }
   events(id: string) { return listSessionEvents(id, this.options.root); }
   async start(ownerType: string, ownerId: string, cwd: string, agentId: string, agentVersion: string, config: { model?: string | null; mode?: string | null; sessionName?: string } = {}): Promise<{ record: AcpSessionRecord; session: AgentSession }> {
-    const installed = this.options.agent ? null : getInstalledAgent(agentId, agentVersion, this.options.machineDir);
-    if (!this.options.agent && (!installed || installed.status !== "installed")) throw new Error(`Installed agent ${agentId}@${agentVersion} is not available`);
-    const agent = this.options.agent ?? new SdkAcpAgentAdapter({ commands: [{ id: installed!.id, command: installed!.launch.command, args: installed!.launch.args }] });
+    const launch = this.options.agent ? null : resolveInstalledAgentLaunch(agentId, agentVersion, this.options.machineDir);
+    const agent = this.options.agent ?? new SdkAcpAgentAdapter({ commands: [{ id: agentId, command: launch!.command, args: launch!.args }] });
     const record = createSession({ ownerType, ownerId, agentId, agentVersion, recoveryMetadata: { resumable: false } }, this.options.root);
     try {
       const session = await withTimeout(agent.spawn(cwd, agentId, { permissionMode: this.options.permissionMode ?? (this.options.workflow ? "deny-all" : "interactive"), model: config.model ?? undefined, sessionName: config.sessionName ?? `marshal-${ownerId}` }), 30_000, "ACP session startup timed out");

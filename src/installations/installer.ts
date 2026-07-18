@@ -40,9 +40,12 @@ export async function startInstallation(agent: RegistryAgent, machineDir = GLOBA
   const running = getLatestInstallationOperation(agent.id, agent.version, machineDir);
   if (running?.status === "installing") return running;
   const operationId = randomUUID();
-  const operation = createInstallation({ id: agent.id, version: agent.version, source: "registry", license: agent.license, distribution: "npx", package_specifier: packageSpecifier, launch: { command: "npx", args: ["--yes", packageSpecifier] } satisfies AgentLaunchSpec, registry_snapshot_fetched_at: getRegistryCatalog(machineDir).snapshot?.fetched_at ?? "unknown", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, operationId, machineDir);
+  const installationRoot = resolve(machineDir, "agents", agent.id, agent.version);
+  const installationId = `${agent.id}@${agent.version}`;
+  const provenance = { exact_version: agent.version, distribution: "npx" as const, source: "registry" as const, package_specifier: packageSpecifier, archive_identity: null, registry_snapshot_fetched_at: getRegistryCatalog(machineDir).snapshot?.fetched_at ?? "unknown", installation_root: installationRoot, integrity_status: "not_applicable" as const };
+  const operation = createInstallation({ id: agent.id, version: agent.version, source: "registry", license: agent.license, distribution: "npx", package_specifier: packageSpecifier, launch: { command: "npx", args: ["--yes", packageSpecifier] } satisfies AgentLaunchSpec, provenance, installation_id: installationId, installation_root: installationRoot, registry_snapshot_fetched_at: provenance.registry_snapshot_fetched_at, integrity_status: provenance.integrity_status, status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, operationId, machineDir);
   void (async () => {
-    const installRoot = resolve(machineDir, "agents", agent.id, agent.version);
+    const installRoot = installationRoot;
     try {
       mkdirSync(installRoot, { recursive: true });
       await runner(packageSpecifier, installRoot);

@@ -17,20 +17,44 @@ export interface AgentAuthMethod {
 }
 
 export interface AgentLaunchSpec {
-  command: "npx";
+  command: string;
   args: string[];
+  env?: Record<string, string>;
+}
+
+export type AgentDistribution = "binary" | "npx" | "uvx";
+export type AgentIntegrityStatus = "verified" | "unverified" | "mismatch" | "not_applicable" | "unknown";
+export interface AgentProvenance {
+  exact_version: string;
+  distribution: AgentDistribution;
+  source: "registry" | "custom";
+  package_specifier: string | null;
+  archive_identity: string | null;
+  registry_snapshot_fetched_at: string | null;
+  installation_root: string;
+  integrity_status: AgentIntegrityStatus;
+}
+export function validateAgentLaunchSpec(value: unknown): AgentLaunchSpec {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("Installed agent launch specification is invalid");
+  const launch = value as Record<string, unknown>;
+  if (typeof launch.command !== "string" || launch.command.trim() === "" || launch.command.includes("\0")) throw new Error("Installed agent launch command is invalid");
+  if (!Array.isArray(launch.args) || launch.args.some((arg) => typeof arg !== "string" || arg.includes("\0"))) throw new Error("Installed agent launch arguments are invalid");
+  return { command: launch.command, args: [...launch.args] as string[], ...(launch.env ? { env: { ...(launch.env as Record<string, string>) } } : {}) };
 }
 
 export interface InstalledAgent {
   id: string;
   version: string;
-  source: "registry";
+  source: "registry" | "custom";
   license: string;
-  distribution: "npx";
-  package_specifier: string;
+  distribution: AgentDistribution;
+  package_specifier: string | null;
   launch: AgentLaunchSpec;
-  registry_snapshot_fetched_at: string;
-  integrity_status: "not_applicable";
+  provenance: AgentProvenance;
+  installation_id: string;
+  installation_root: string;
+  registry_snapshot_fetched_at: string | null;
+  integrity_status: AgentIntegrityStatus;
   status: InstalledAgentStatus;
   created_at: string;
   updated_at: string;
@@ -48,7 +72,7 @@ export interface InstallationOperation {
   id: string;
   agent_id: string;
   version: string;
-  package_specifier: string;
+  package_specifier: string | null;
   status: InstalledAgentStatus;
   started_at: string;
   finished_at: string | null;
