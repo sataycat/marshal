@@ -76,6 +76,7 @@ import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthentica
 import { installationOperation, startInstallation } from "../installations/installer.js";
 import { probeAgent } from "../acp/probe.js";
 import { authenticateAgent } from "../acp/authenticate.js";
+import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
 import { randomUUID } from "node:crypto";
 
 const authenticationControllers = new Map<string, AbortController>();
@@ -594,10 +595,17 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
   app.get("/api/threads/:id", (c) => {
     try {
       const thread = getChatThread(c.req.param("id"), root);
-      return c.json({ thread, messages: listChatMessages(thread.id, root), attachments: listChatAttachments(thread.id, root) });
+      return c.json({ thread, messages: listChatMessages(thread.id, root), attachments: listChatAttachments(thread.id, root), events: listSessionEventsForThread(thread.id, root) });
     } catch (err) {
       throw mapDomainError(err);
     }
+  });
+  app.get("/api/threads/:id/events", (c) => {
+    try {
+      getChatThread(c.req.param("id"), root);
+      const sessions = listSessionEventsForThread(c.req.param("id"), root);
+      return c.json({ events: sessions });
+    } catch (err) { throw mapDomainError(err); }
   });
   app.patch("/api/threads/:id", async (c) => {
     const body = await readJsonObject(c, new Set(["title", "status", "archived", "pinned", "scratch_markdown"]));
@@ -738,6 +746,10 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
       throw mapDomainError(err);
     }
   });
+}
+
+function listSessionEventsForThread(threadId: string, root?: string) {
+  return listSessionsForOwner("thread", threadId, root).flatMap((session) => listSessionEvents(session.id, root));
 }
 
 function registerTaskRoutes(

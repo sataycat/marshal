@@ -1,0 +1,36 @@
+import { randomUUID } from "node:crypto";
+import { openDb } from "../db/index.js";
+
+export type AcpSessionStatus = "starting" | "running" | "idle" | "cancelling" | "cancelled" | "failed" | "interrupted" | "recoverable" | "closed";
+export type AcpPromptStatus = "running" | "completed" | "cancelled" | "failed" | "interrupted";
+export interface AcpSessionRecord { id: string; owner_type: string; owner_id: string; agent_id: string; agent_version: string; acp_session_id: string | null; capabilities: unknown; status: AcpSessionStatus; recovery_metadata: unknown; diagnostic: string | null; created_at: string; updated_at: string; started_at: string | null; ended_at: string | null }
+export interface AcpPromptRecord { id: string; session_id: string; prompt: string; status: AcpPromptStatus; cancellation_requested_at: string | null; diagnostic: string | null; started_at: string; ended_at: string | null }
+export interface AcpEventRecord { id: number; session_id: string; prompt_id: string | null; seq: number; type: string; normalized: unknown; raw_payload: unknown; created_at: string }
+
+function json(value: unknown): string { return JSON.stringify(value ?? {}); }
+function parse(value: unknown): unknown { try { return JSON.parse(String(value)); } catch { return value; } }
+function session(row: Record<string, unknown>): AcpSessionRecord { return { ...(row as unknown as AcpSessionRecord), capabilities: parse(row.capabilities), recovery_metadata: parse(row.recovery_metadata) }; }
+function prompt(row: Record<string, unknown>): AcpPromptRecord { return row as unknown as AcpPromptRecord; }
+function event(row: Record<string, unknown>): AcpEventRecord { return { ...(row as unknown as AcpEventRecord), normalized: parse(row.normalized), raw_payload: parse(row.raw_payload) }; }
+
+export function createSession(input: { ownerType: string; ownerId: string; agentId: string; agentVersion: string; capabilities?: unknown; recoveryMetadata?: unknown }, root?: string): AcpSessionRecord {
+  const db = openDb(root); const id = randomUUID();
+  db.prepare("INSERT INTO acp_sessions (id, owner_type, owner_id, agent_id, agent_version, capabilities, recovery_metadata) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, input.ownerType, input.ownerId, input.agentId, input.agentVersion, json(input.capabilities), json(input.recoveryMetadata));
+  return getSession(id, root)!;
+}
+export function getSession(id: string, root?: string): AcpSessionRecord | undefined { const row = openDb(root).prepare("SELECT * FROM acp_sessions WHERE id = ?").get(id) as Record<string, unknown> | undefined; return row ? session(row) : undefined; }
+export function listSessions(root?: string): AcpSessionRecord[] { return (openDb(root).prepare("SELECT * FROM acp_sessions ORDER BY created_at DESC").all() as Record<string, unknown>[]).map(session); }
+export function listSessionsForOwner(ownerType: string, ownerId: string, root?: string): AcpSessionRecord[] { return (openDb(root).prepare("SELECT * FROM acp_sessions WHERE owner_type = ? AND owner_id = ? ORDER BY created_at").all(ownerType, ownerId) as Record<string, unknown>[]).map(session); }
+export function updateSession(id: string, input: Partial<Pick<AcpSessionRecord, "acp_session_id" | "status" | "diagnostic" | "started_at" | "ended_at">> & { capabilities?: unknown; recovery_metadata?: unknown }, root?: string): AcpSessionRecord {
+  const current = getSession(id, root); if (!current) throw new Error(`ACP session not found: ${id}`);
+  openDb(root).prepare("UPDATE acp_sessions SET acp_session_id = ?, status = ?, diagnostic = ?, capabilities = ?, recovery_metadata = ?, started_at = ?, ended_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(input.acp_session_id ?? current.acp_session_id, input.status ?? current.status, input.diagnostic === undefined ? current.diagnostic : input.diagnostic, json(input.capabilities ?? current.capabilities), json(input.recovery_metadata ?? current.recovery_metadata), input.started_at ?? current.started_at, input.ended_at ?? current.ended_at, id);
+  return getSession(id, root)!;
+}
+export function createPrompt(sessionId: string, text: string, root?: string): AcpPromptRecord { const id = randomUUID(); openDb(root).prepare("INSERT INTO acp_prompts (id, session_id, prompt) VALUES (?, ?, ?)").run(id, sessionId, text); return getPrompt(id, root)!; }
+export function getPrompt(id: string, root?: string): AcpPromptRecord | undefined { const row = openDb(root).prepare("SELECT * FROM acp_prompts WHERE id = ?").get(id) as Record<string, unknown> | undefined; return row ? prompt(row) : undefined; }
+export function updatePrompt(id: string, input: Partial<Pick<AcpPromptRecord, "status" | "diagnostic" | "ended_at" | "cancellation_requested_at">>, root?: string): AcpPromptRecord { const current = getPrompt(id, root); if (!current) throw new Error(`ACP prompt not found: ${id}`); openDb(root).prepare("UPDATE acp_prompts SET status = ?, diagnostic = ?, ended_at = ?, cancellation_requested_at = ? WHERE id = ?").run(input.status ?? current.status, input.diagnostic === undefined ? current.diagnostic : input.diagnostic, input.ended_at ?? current.ended_at, input.cancellation_requested_at ?? current.cancellation_requested_at, id); return getPrompt(id, root)!; }
+export function listSessionPrompts(sessionId: string, root?: string): AcpPromptRecord[] { return (openDb(root).prepare("SELECT * FROM acp_prompts WHERE session_id = ? ORDER BY started_at").all(sessionId) as Record<string, unknown>[]).map(prompt); }
+export function appendEvent(sessionId: string, promptId: string | null, type: string, normalized: unknown, rawPayload: unknown, root?: string): AcpEventRecord { const db = openDb(root); const seq = (db.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM acp_events WHERE session_id = ?").get(sessionId) as { next: number }).next; const info = db.prepare("INSERT INTO acp_events (session_id, prompt_id, seq, type, normalized, raw_payload) VALUES (?, ?, ?, ?, ?, ?)").run(sessionId, promptId, seq, type, json(normalized), json(rawPayload)); return getEvent(Number(info.lastInsertRowid), root)!; }
+export function getEvent(id: number, root?: string): AcpEventRecord | undefined { const row = openDb(root).prepare("SELECT * FROM acp_events WHERE id = ?").get(id) as Record<string, unknown> | undefined; return row ? event(row) : undefined; }
+export function listSessionEvents(sessionId: string, root?: string): AcpEventRecord[] { return (openDb(root).prepare("SELECT * FROM acp_events WHERE session_id = ? ORDER BY seq").all(sessionId) as Record<string, unknown>[]).map(event); }
+export function interruptActiveSessions(root?: string): void { openDb(root).prepare("UPDATE acp_sessions SET status = 'interrupted', diagnostic = 'Daemon stopped before the ACP session completed', ended_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE status IN ('starting', 'running', 'cancelling')").run(); openDb(root).prepare("UPDATE acp_prompts SET status = 'interrupted', diagnostic = 'Daemon stopped before the ACP prompt completed', ended_at = CURRENT_TIMESTAMP WHERE status = 'running'").run(); }

@@ -1,6 +1,5 @@
 import type { Agent, AgentEvent, AgentPromptPart, AgentSession } from "../agent/types.js";
 import { resolve } from "node:path";
-import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
 import { getInstalledAgent } from "../agents/store.js";
 import {
   appendChatMessage,
@@ -14,6 +13,7 @@ import { ThreadEventType, publishThreadMessage, publishThreadUpdated, type Event
 import { expandChatFileMentions } from "../chat/files.js";
 import { PermissionBroker, type PendingPermission } from "./permission-broker.js";
 import { MAX_ATTACHMENTS_PER_MESSAGE, readChatAttachment } from "../chat/attachments.js";
+import { AcpSessionSupervisor } from "../acp/supervisor.js";
 
 export class ChatTurnBusyError extends Error {
   constructor(threadId: string) {
@@ -30,6 +30,7 @@ export class ChatAgentUnavailableError extends Error {
 }
 
 interface ActiveTurn {
+  supervisorSessionId: string;
   session: AgentSession;
   prompt: Promise<void>;
 }
@@ -46,8 +47,7 @@ export class ChatTurnRunner {
   private readonly machineDir?: string;
   private readonly bus?: EventBus;
   private configuredAgent?: Agent;
-  private readonly sessions = new Map<string, AgentSession>();
-  private readonly agents = new Map<string, Agent>();
+  private readonly supervisor: AcpSessionSupervisor;
   private readonly active = new Map<string, ActiveTurn>();
   private readonly starting = new Set<string>();
   private readonly touched = new Map<string, Set<string>>();
@@ -59,6 +59,8 @@ export class ChatTurnRunner {
     this.bus = options.bus;
     this.configuredAgent = options.agent;
     this.permissions = new PermissionBroker(this.bus);
+    this.supervisor = new AcpSessionSupervisor({ root: this.root, machineDir: this.machineDir, agent: this.configuredAgent, onEvent: (record, event) => this.publishEvent(record.owner_id, event) });
+    if (this.root) this.supervisor.reconcile();
   }
 
   isActive(threadId: string): boolean {
@@ -79,11 +81,8 @@ export class ChatTurnRunner {
 
   async closeThread(threadId: string): Promise<void> {
     this.permissions.cancelThread(threadId);
-    const session = this.sessions.get(threadId);
-    if (session) {
-      await this.getAgent(threadId).close(session);
-      this.sessions.delete(threadId);
-    }
+    const active = this.active.get(threadId);
+    if (active) await this.supervisor.close(active.supervisorSessionId);
   }
 
   async send(threadId: string, content: string, attachmentIds: string[] = []): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage }> {
@@ -96,18 +95,20 @@ export class ChatTurnRunner {
     const expandedContent = expandChatFileMentions(content, thread.cwd);
     let userMessage: ChatMessage | undefined;
 
-    const agent = this.getAgent(threadId);
-    let session = this.sessions.get(threadId);
+    this.getAgent(threadId);
     this.starting.add(threadId);
     try {
-      if (!session) {
+      const existing = this.supervisor.sessionForOwner("thread", threadId);
+      let session: AgentSession;
+      let supervisorSessionId: string;
+      if (existing) {
+        session = existing.session;
+        supervisorSessionId = existing.record.id;
+      } else {
         try {
-          session = await agent.spawn(thread.cwd, thread.agent_id, {
-            permissionMode: "interactive",
-            sessionName: `marshal-${thread.id}`,
-            onPermission: (request) => this.permissions.request(threadId, request),
-          });
-          this.sessions.set(threadId, session);
+          const started = await this.supervisor.start("thread", threadId, thread.cwd, thread.agent_id, thread.agent_version);
+          session = started.session;
+          supervisorSessionId = started.record.id;
         } catch (err) {
           updateChatThread(threadId, { status: "error" }, this.root);
           this.publishThread(threadId);
@@ -120,8 +121,8 @@ export class ChatTurnRunner {
       userMessage = appendChatMessage(threadId, "user", expandedContent, this.root, attachmentIds);
       this.publishMessage(threadId, userMessage);
       this.publishThread(threadId);
-      const prompt = this.runPrompt(threadId, session, attachments.length === 0 ? expandedContent : promptParts, agent);
-      this.active.set(threadId, { session, prompt });
+      const prompt = this.runPrompt(threadId, supervisorSessionId!, attachments.length === 0 ? expandedContent : promptParts);
+      this.active.set(threadId, { supervisorSessionId: supervisorSessionId!, session, prompt });
       await prompt;
     } finally {
       this.starting.delete(threadId);
@@ -135,18 +136,14 @@ export class ChatTurnRunner {
     this.permissions.cancelThread(threadId);
     const turn = this.active.get(threadId);
     if (!turn) return;
-    await this.getAgent(threadId).cancel(turn.session);
+    await this.supervisor.cancel(turn.supervisorSessionId);
   }
 
-  private async runPrompt(threadId: string, session: AgentSession, content: string | AgentPromptPart[], agent: Agent): Promise<void> {
+  private async runPrompt(threadId: string, supervisorSessionId: string, content: string | AgentPromptPart[]): Promise<void> {
     let assistant: ChatMessage | undefined;
     let text = "";
     try {
-      for await (const event of agent.prompt(session, content, {
-        permissionMode: "interactive",
-        onPermission: (request) => this.permissions.request(threadId, request),
-      })) {
-        this.publishEvent(threadId, event);
+      await this.supervisor.prompt(supervisorSessionId, content, (request) => this.permissions.request(threadId, request), (event) => {
         if (event.type === "text") {
           text += event.text;
           if (assistant) {
@@ -158,7 +155,7 @@ export class ChatTurnRunner {
           this.publishThread(threadId);
         }
         if (event.type === "error") throw new Error(event.message);
-      }
+      });
       if (!assistant) {
         assistant = appendChatMessage(threadId, "assistant", "", this.root);
         this.publishMessage(threadId, assistant);
@@ -184,11 +181,8 @@ export class ChatTurnRunner {
       throw new ChatAgentUnavailableError("agent_not_ready", `Agent ${thread.agent_id}@${thread.agent_version} is not ready (${installed.readiness_status})`);
     }
     const key = `${installed.id}@${installed.version}`;
-    const existing = this.agents.get(key);
-    if (existing) return existing;
-    const agent = new SdkAcpAgentAdapter({ commands: [{ id: installed.id, command: installed.launch.command, args: installed.launch.args }] });
-    this.agents.set(key, agent);
-    return agent;
+    void key;
+    return this.configuredAgent!;
   }
 
   private publishMessage(threadId: string, message: ChatMessage): void {

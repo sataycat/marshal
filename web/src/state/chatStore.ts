@@ -10,20 +10,23 @@ import {
   type ChatPermissionsState,
   type ChatThreadsState,
 } from "../board/reducer";
-import type { BusEvent, ChatMessage, ChatThread, PendingPermission } from "../types";
+import type { AcpEvent, BusEvent, ChatMessage, ChatThread, PendingPermission } from "../types";
 
 interface ChatStore {
   threadsById: ChatThreadsState;
   liveMessagesByThread: ChatMessagesState;
   permissionsByThread: ChatPermissionsState;
+  eventsByThread: Record<string, AcpEvent[]>;
   applyChatEvent: (event: BusEvent) => void;
   replaceThreads: (threads: ChatThread[]) => void;
+  replaceEvents: (threadId: string, events: AcpEvent[]) => void;
 }
 
 export const useChatStore = create<ChatStore>((set) => ({
   threadsById: {},
   liveMessagesByThread: {},
   permissionsByThread: {},
+  eventsByThread: {},
   applyChatEvent: (event) => set((state) => ({
     threadsById: chatThreadsReducer(state.threadsById, event),
     liveMessagesByThread: chatMessagesReducer(state.liveMessagesByThread, event),
@@ -36,6 +39,7 @@ export const useChatStore = create<ChatStore>((set) => ({
       timestamp: new Date().toISOString(),
     }),
   })),
+  replaceEvents: (threadId, events) => set((state) => ({ ...state, eventsByThread: { ...state.eventsByThread, [threadId]: events } })),
 }));
 
 export const selectThreads = (state: ChatStore): ChatThread[] => chatThreadsToList(state.threadsById);

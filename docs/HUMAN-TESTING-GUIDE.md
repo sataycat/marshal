@@ -27,6 +27,7 @@ It is written for local-first testing on one machine.
 - ACP readiness probing: temporary session validation, authentication-required state, negotiated capabilities, and actionable probe failures
 - Agent-managed ACP authentication: method selection, durable progress, cancellation, restart interruption, and re-probe to ready
 - Installed-agent chat: ready-agent selection, exact version pinning, streamed transcripts, refresh recovery, and capability-gated image attachments
+- Durable interactive ACP supervision: session/prompt/event history hydration, cancellation, interruption after daemon restart, and recoverable diagnostics
 
 ### Out of scope (not current product behavior)
 
@@ -122,6 +123,10 @@ Expected:
 - Sending a prompt streams ACP events and persists the user and assistant transcript across refresh.
 - Installing another version creates a separate selectable identity; it does not rewrite existing thread provenance.
 - Image attachment controls are available only for an agent whose negotiated capabilities advertise image prompts.
+
+### 3.9 Durable ACP session supervision
+
+Send a prompt, then refresh the browser while it is streaming. The transcript and ACP event history must be loaded over HTTP, while subsequent updates continue over WebSocket. Cancel a long-running prompt and verify the thread remains inspectable with a cancelled prompt/session outcome. Stop the daemon during a prompt and restart it; the thread must not replay the prompt or claim success, and the durable session history must show an interrupted state and diagnostic.
 
 ## 3. Onboarding tests (CLI surface)
 

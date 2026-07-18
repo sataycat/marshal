@@ -226,7 +226,7 @@ start daemon
 
 **Implemented:** Chat threads persist repository ownership plus exact installed agent ID/version. Production thread creation and turns resolve only the machine-scoped installed launch specification and require `installed` plus `ready`; the legacy `/api/chat-agents` role-command path and interactive `createConfiguredAgent("builder")` fallback are removed. The browser selector uses the installed-agent inventory, shows version/readiness context, gates new threads to ready agents, and preserves capability-aware image behavior. Injected agents remain a test-only seam for chat protocol coverage.
 
-## [ ] Slice 7: Supervise Interactive ACP Sessions Durably
+## [x] Slice 7: Supervise Interactive ACP Sessions Durably
 
 **Depends on:** Slice 6.
 
@@ -256,6 +256,8 @@ start daemon
 **Likely areas:** new `src/acp/` supervisor modules, session/event storage, `src/daemon/chat-turn.ts`, HTTP/WebSocket hydration, thread status UI, supervisor lifecycle tests.
 
 **Out of scope:** Migrating factory runs; Slice 10 owns remaining consumers.
+
+**Implemented:** Interactive chat now runs through a shared ACP supervisor with durable process/session/prompt/event records, raw and normalized event retention, bounded lifecycle operations, conservative restart interruption/reconciliation, durable HTTP event hydration, and WebSocket live continuation. Permission persistence remains on the existing chat broker for Slice 8.
 
 ## [ ] Slice 8: Persist And Recover Permission Requests
 

@@ -155,6 +155,16 @@ export interface ChatMessage {
   created_at: string;
   attachment_ids: string[];
 }
+export interface AcpEvent {
+  id: number;
+  session_id: string;
+  prompt_id: string | null;
+  seq: number;
+  type: string;
+  normalized: unknown;
+  raw_payload: unknown;
+  created_at: string;
+}
 
 export interface ChatAttachment {
   id: string;

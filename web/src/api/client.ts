@@ -17,6 +17,7 @@ import type {
   InstalledAgent,
   InstallationOperation,
   AgentAuthenticationOperation,
+  AcpEvent,
 } from "../types";
 
 export async function fetchRepositories(signal?: AbortSignal): Promise<{ repositories: Repository[]; selected_repository_id: string | null }> {
@@ -281,9 +282,13 @@ export async function deleteChatThread(id: string): Promise<void> {
   await jsonOrThrow<{ deleted: boolean }>(res);
 }
 
-export async function fetchChatThread(id: string, signal?: AbortSignal): Promise<{ thread: ChatThread; messages: ChatMessage[] }> {
+export async function fetchChatThread(id: string, signal?: AbortSignal): Promise<{ thread: ChatThread; messages: ChatMessage[]; events?: AcpEvent[] }> {
   const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, { signal });
   return jsonOrThrow<{ thread: ChatThread; messages: ChatMessage[] }>(res);
+}
+export async function fetchChatEvents(id: string, signal?: AbortSignal): Promise<AcpEvent[]> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/events`, { signal });
+  return (await jsonOrThrow<{ events: AcpEvent[] }>(res)).events;
 }
 
 export async function uploadChatAttachment(id: string, file: File): Promise<ChatAttachment> {

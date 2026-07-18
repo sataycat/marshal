@@ -101,3 +101,48 @@ CREATE TABLE IF NOT EXISTS chat_attachments (
 
 CREATE INDEX IF NOT EXISTS idx_chat_attachments_thread_id
   ON chat_attachments(thread_id, created_at, id);
+
+CREATE TABLE IF NOT EXISTS acp_sessions (
+  id TEXT PRIMARY KEY,
+  owner_type TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  agent_version TEXT NOT NULL,
+  acp_session_id TEXT,
+  capabilities TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'starting',
+  recovery_metadata TEXT NOT NULL DEFAULT '{}',
+  diagnostic TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at DATETIME,
+  ended_at DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_acp_sessions_owner ON acp_sessions(owner_type, owner_id);
+
+CREATE TABLE IF NOT EXISTS acp_prompts (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  cancellation_requested_at DATETIME,
+  diagnostic TEXT,
+  started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ended_at DATETIME,
+  FOREIGN KEY (session_id) REFERENCES acp_sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_acp_prompts_session ON acp_prompts(session_id, started_at);
+
+CREATE TABLE IF NOT EXISTS acp_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  prompt_id TEXT,
+  seq INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  normalized TEXT NOT NULL,
+  raw_payload TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (session_id) REFERENCES acp_sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (prompt_id) REFERENCES acp_prompts(id) ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_acp_events_sequence ON acp_events(session_id, seq);

@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { connectBus, fetchChatThreads, fetchTasks, type WebSocketHandle } from "../api/client";
+import { connectBus, fetchChatEvents, fetchChatThreads, fetchTasks, type WebSocketHandle } from "../api/client";
 import { queryClient } from "../api/queryClient";
 import { queryKeys } from "../api/queryKeys";
 import { reconcileBusEvent } from "./queryReconciliation";
@@ -24,6 +24,9 @@ export function WebSocketBridge({ children }: { children: ReactNode }): JSX.Elem
         useChatStore.getState().replaceThreads(threads);
         queryClient.setQueryData(queryKeys.threads(false), threads);
       }
+    }).catch(() => undefined);
+    fetchChatThreads().then((threads) => Promise.all(threads.map(async (thread) => [thread.id, await fetchChatEvents(thread.id)] as const))).then((entries) => {
+      if (!cancelled) for (const [threadId, events] of entries) useChatStore.getState().replaceEvents(threadId, events);
     }).catch(() => undefined);
     handle = connectBus((event) => {
       applyTaskEvent(event);
