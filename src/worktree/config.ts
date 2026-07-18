@@ -41,6 +41,7 @@ export interface GlobalConfig {
     port?: number;
     uiPassword?: string;
     trustedOrigins?: string[];
+    trustedProxy?: boolean;
   };
 }
 

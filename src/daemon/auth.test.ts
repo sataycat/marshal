@@ -17,6 +17,18 @@ describe("AuthService", () => {
     expect(auth.login("secret", "direct").token).toBeUndefined();
   });
 
+  it("keeps failed-login lockouts separate by client key", () => {
+    const auth = new AuthService({ password: "secret" });
+    for (let i = 0; i < 5; i += 1) auth.login("wrong", "client-a");
+    expect(auth.login("secret", "client-a").token).toBeUndefined();
+    expect(auth.login("secret", "client-b").token).toBeTypeOf("string");
+  });
+
+  it("preserves the secure attribute when clearing a cookie", () => {
+    const auth = new AuthService({ password: "secret", secureCookies: true });
+    expect(auth.clearCookie()).toContain("Secure");
+  });
+
   it("removes sessions on logout", () => {
     const auth = new AuthService({ password: "secret" });
     const token = auth.login("secret", "direct").token;

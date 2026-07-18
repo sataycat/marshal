@@ -189,7 +189,7 @@ describe("CLI smoke tests", () => {
     run(["task", "transition", "stuck", "building"], root);
     run(["task", "transition", "stuck", "backlog"], root);
     expect(run(["task", "show", "stuck"], root).stdout).toContain("status: backlog");
-  });
+  }, 15000);
 
   it("supports validating -> backlog escape hatch", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-"));

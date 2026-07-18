@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import type { Server as HttpServer } from "node:http";
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import type { IncomingMessage } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
@@ -80,6 +81,7 @@ export interface HttpServerOptions {
   webDir?: string;
   uiPassword?: string;
   trustedOrigins?: string[];
+  trustedProxy?: boolean;
 }
 
 export interface HttpServerHandle {
@@ -109,6 +111,7 @@ export interface BuildAppOptions {
   specAgent?: Agent;
   chatAgent?: Agent;
   auth?: AuthService;
+  trustedProxy?: boolean;
 }
 
 export function defaultWebDistDir(): string {
@@ -128,18 +131,18 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
     app.post("/api/auth/login", async (c) => {
       const body = await readJsonObject(c, new Set(["password"]));
       if (typeof body.password !== "string") throw new ApiError(422, "password is required", "missing_field");
-      const result = auth.login(body.password, "direct");
+      const result = auth.login(body.password, authClientKey(c, options.trustedProxy));
       if (result.retryAfter !== undefined) {
         return new Response(JSON.stringify({ error: "Too many failed login attempts", code: "rate_limited" }), { status: 429, headers: { "Content-Type": "application/json", "Retry-After": String(result.retryAfter) } });
       }
       if (!result.token) return c.json({ authenticated: true });
       return c.json({ authenticated: true }, 200, {
-        "Set-Cookie": auth.cookie(result.token, undefined, c.req.header("x-forwarded-proto") === "https"),
+        "Set-Cookie": auth.cookie(result.token, undefined, isSecureRequest(c, options.trustedProxy)),
       });
     });
     app.post("/api/auth/logout", (c) => {
       auth.logout(c.req.header("Cookie"));
-      return c.json({ authenticated: false }, 200, { "Set-Cookie": auth.clearCookie() });
+      return c.json({ authenticated: false }, 200, { "Set-Cookie": auth.clearCookie(isSecureRequest(c, options.trustedProxy)) });
     });
   }
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
@@ -239,6 +242,19 @@ function spaNotFound(c: Context, webDir: string): Response {
     return c.json({ error: "Not found" }, 404);
   }
   return serveSpaIndex(c, webDir);
+}
+
+function authClientKey(c: Context, trustedProxy = false): string {
+  if (trustedProxy) {
+    const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
+    if (forwarded) return forwarded;
+  }
+  const incoming = (c.env as { incoming?: IncomingMessage } | undefined)?.incoming;
+  return incoming?.socket.remoteAddress ?? "unknown";
+}
+
+function isSecureRequest(c: Context, trustedProxy = false): boolean {
+  return trustedProxy && c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() === "https";
 }
 
 class ApiError extends Error {
@@ -933,7 +949,8 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const bus = options.bus ?? new EventBus();
   const attachWs = options.attachWebSockets ?? true;
 
-  const app = buildApp(version, { root, bus, webDir: options.webDir, auth });
+  const trustedProxy = options.trustedProxy ?? options.config?.daemon?.trustedProxy ?? false;
+  const app = buildApp(version, { root, bus, webDir: options.webDir, auth, trustedProxy });
   const server = serve({ fetch: app.fetch, hostname: host, port });
 
   let bound: { host: string; port: number };

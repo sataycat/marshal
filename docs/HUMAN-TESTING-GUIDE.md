@@ -255,6 +255,24 @@ Negative checks:
 - task not in review => `409 not_review`
 - merge conflict => `409 merge_conflict`, task remains `review`
 
+### 5.6 Remote password access
+
+Start a deliberately exposed daemon with a password supplied outside the process arguments:
+
+```sh
+MARSHAL_UI_PASSWORD='use-a-long-random-password' marshal start --lan --port 7433
+```
+
+Expected:
+
+- startup fails if `--lan` or a non-loopback `--host` is used without a password
+- `/` serves the SPA shell, but `/api/tasks` returns `401` before login
+- the browser login creates an `HttpOnly`, `SameSite=Strict` session cookie
+- failed passwords eventually return `429` with `Retry-After`
+- logout invalidates the session and the cookie-clearing response preserves `Secure` when the request is forwarded as HTTPS
+
+For a VPS, put Marshal behind an HTTPS reverse proxy or use a private VPN such as Tailscale or WireGuard. The proxy must forward `/ws` as a WebSocket upgrade and set `X-Forwarded-Proto: https`; set `daemon.trustedProxy` only when the daemon is reachable exclusively through that proxy. Do not publish the plain-HTTP listener directly to the public internet. Authentication does not sandbox ACP agents, so test the daemon's OS account and explicit agent isolation policy separately.
+
 ## 6. Web board tests (daily-driving UX)
 
 ### 6.1 Startup and rendering

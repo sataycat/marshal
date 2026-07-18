@@ -58,8 +58,8 @@ function collectMessages(ws: WebSocket): MessageCollector {
   };
 }
 
-async function openSocket(url: string): Promise<{ ws: WebSocket; collector: MessageCollector }> {
-  const ws = new WebSocket(url);
+async function openSocket(url: string, options?: { headers?: Record<string, string> }): Promise<{ ws: WebSocket; collector: MessageCollector }> {
+  const ws = new WebSocket(url, options);
   const collector = collectMessages(ws);
   await new Promise<void>((resolve, reject) => {
     ws.once("open", () => resolve());
@@ -298,4 +298,54 @@ describe("WebSocket event bus", () => {
       await handle.close();
     }
   });
+
+  it("rejects unauthenticated upgrades and accepts a logged-in session", async () => {
+    const handle = await startHttpServer({ root: repoRoot, host: "127.0.0.1", port: 0, version: "0.0.1", uiPassword: "secret" });
+    try {
+      await expectRejectedSocket(`ws://127.0.0.1:${handle.port}/ws`);
+      const login = await fetch(`http://127.0.0.1:${handle.port}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: "secret" }),
+      });
+      const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+      const { ws, collector } = await openSocket(`ws://127.0.0.1:${handle.port}/ws`, { headers: { Cookie: cookie } });
+      try {
+        expect((await collector.next()).type).toBe("connected");
+      } finally {
+        collector.close();
+        ws.close();
+      }
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("rejects a browser origin that is neither its own nor trusted", async () => {
+    const handle = await startHttpServer({ root: repoRoot, host: "127.0.0.1", port: 0, version: "0.0.1", uiPassword: "secret" });
+    try {
+      await expectRejectedSocket(`ws://127.0.0.1:${handle.port}/ws`, { Origin: "https://evil.example" });
+    } finally {
+      await handle.close();
+    }
+  });
 });
+
+function expectRejectedSocket(url: string, headers?: Record<string, string>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url, { headers });
+    const timer = setTimeout(() => {
+      ws.terminate();
+      reject(new Error("unauthenticated WebSocket connection was not rejected"));
+    }, 2000);
+    ws.once("unexpected-response", (_request, response) => {
+      clearTimeout(timer);
+      response.resume();
+      resolve();
+    });
+    ws.once("error", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}

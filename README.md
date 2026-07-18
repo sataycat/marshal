@@ -86,6 +86,18 @@ marshal start [--interval <ms>] [--port <port>] [--host <addr>] [--lan] [--passw
 
 `marshal start` exposes the HTTP + WebSocket API on the daemon port. Use `marshal start --help` for the full flag list. LAN access requires a UI password, for example `marshal start --lan --password <password>`.
 
+### Remote deployment
+
+For a VPS or LAN deployment, prefer an environment variable or secret manager over a password command argument:
+
+```sh
+MARSHAL_UI_PASSWORD='use-a-long-random-password' marshal start --lan --port 7433
+```
+
+Marshal serves HTTP and requires the browser password session for API and WebSocket access. Do not publish the plain-HTTP listener directly to the public internet. Put it behind HTTPS or expose it only through a private VPN such as Tailscale or WireGuard. A reverse proxy must forward `/ws` as a WebSocket upgrade and set `X-Forwarded-Proto: https`; configure `daemon.trustedProxy: true` only when the daemon is reachable exclusively through that trusted proxy. Configure any additional browser origins with `daemon.trustedOrigins`.
+
+Authentication protects the control plane but does not sandbox ACP agents. Run the daemon with an appropriately restricted OS account and use an explicit process/container/VM isolation policy for untrusted or unattended agent work.
+
 ## Configuration
 
 ### Global (`~/.marshal/config.json`)

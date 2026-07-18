@@ -79,8 +79,8 @@ export class AuthService {
     return `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${Math.max(0, Math.floor(maxAge))}${secure ? "; Secure" : ""}`;
   }
 
-  clearCookie(): string {
-    return this.cookie("", 0);
+  clearCookie(secure = this.secureCookies): string {
+    return this.cookie("", 0, secure);
   }
 
   middleware = async (c: Context, next: Next): Promise<Response | void> => {

@@ -42,6 +42,49 @@ describe("authenticated HTTP server", () => {
       const cookie = login.headers.get("set-cookie");
       expect(cookie).toContain("HttpOnly");
       expect((await fetch(`${base}/api/tasks`, { headers: { Cookie: cookie?.split(";")[0] ?? "" } })).status).toBe(200);
+      const logout = await fetch(`${base}/api/auth/logout`, {
+        method: "POST",
+        headers: { Cookie: cookie?.split(";")[0] ?? "" },
+      });
+      expect(logout.status).toBe(200);
+      expect((await fetch(`${base}/api/tasks`, { headers: { Cookie: cookie?.split(";")[0] ?? "" } })).status).toBe(401);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("rate-limits failed passwords per direct client and honors secure proxy cookies", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-auth-rate-"));
+    const handle = await startHttpServer({ root, host: "127.0.0.1", port: 0, version: "0.0.1", uiPassword: "secret", trustedProxy: true });
+    try {
+      const base = `http://127.0.0.1:${handle.port}`;
+      for (let i = 0; i < 5; i += 1) {
+        await fetch(`${base}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Forwarded-For": "192.0.2.10" },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+      }
+      const locked = await fetch(`${base}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Forwarded-For": "192.0.2.10" },
+        body: JSON.stringify({ password: "secret" }),
+      });
+      expect(locked.status).toBe(429);
+
+      const login = await fetch(`${base}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Forwarded-For": "192.0.2.11", "X-Forwarded-Proto": "https" },
+        body: JSON.stringify({ password: "secret" }),
+      });
+      expect(login.status).toBe(200);
+      expect(login.headers.get("set-cookie")).toContain("Secure");
+      const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+      const logout = await fetch(`${base}/api/auth/logout`, {
+        method: "POST",
+        headers: { Cookie: cookie, "X-Forwarded-Proto": "https" },
+      });
+      expect(logout.headers.get("set-cookie")).toContain("Secure");
     } finally {
       await handle.close();
     }
