@@ -72,6 +72,11 @@ export async function removeInstalledAgent(agentId: string, version: string): Pr
   await jsonOrThrow(res);
 }
 
+export async function probeInstalledAgent(agentId: string, version: string): Promise<InstalledAgent> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/probe?version=${encodeURIComponent(version)}`, { method: "POST" });
+  return (await jsonOrThrow<{ agent: InstalledAgent }>(res)).agent;
+}
+
 export interface DiffStats {
   files: number;
   insertions: number;

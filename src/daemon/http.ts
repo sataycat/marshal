@@ -1,9 +1,10 @@
 import { Hono, type Context } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import type { Server as HttpServer } from "node:http";
-import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, unlinkSync, writeFileSync, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { extname, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { logger } from "../logger.js";
@@ -71,8 +72,9 @@ import { getRepository, getSelectedRepository, listRepositories, registerReposit
 import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
 import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
-import { getInstalledAgent, listInstalledAgents, removeInstalledAgent } from "../agents/store.js";
+import { getInstalledAgent, listInstalledAgents, removeInstalledAgent, setAgentReadiness } from "../agents/store.js";
 import { installationOperation, startInstallation } from "../installations/installer.js";
+import { probeAgent } from "../acp/probe.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -466,6 +468,22 @@ function registerAgentRoutes(app: Hono, machineDir?: string): void {
     const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
     if (!installed) throw new ApiError(404, "Installed agent not found", "agent_not_found");
     return c.json({ agent: installed });
+  });
+  app.post("/api/agents/:id/probe", async (c) => {
+    const version = c.req.query("version");
+    if (!version) throw new ApiError(422, "version is required", "missing_query");
+    const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
+    if (!installed || installed.status !== "installed") throw new ApiError(409, "Only an installed agent can be probed", "agent_not_installed");
+    const workspace = mkdtempSync(resolve(tmpdir(), "marshal-probe-"));
+    const started = new Date().toISOString();
+    setAgentReadiness(installed.id, installed.version, { readiness_status: "probing", readiness_error: null, protocol_version: installed.protocol_version, capabilities: installed.capabilities, auth_methods: installed.auth_methods, raw_initialize: installed.raw_initialize, probed_at: started }, machineDir);
+    try {
+      const result = await probeAgent(workspace, installed.launch);
+      const agent = setAgentReadiness(installed.id, installed.version, { readiness_status: result.status, readiness_error: result.error, protocol_version: result.protocol_version, capabilities: result.capabilities, auth_methods: result.auth_methods, raw_initialize: result.raw_initialize, probed_at: new Date().toISOString() }, machineDir);
+      return c.json({ agent });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
   app.post("/api/agents/install", async (c) => {
     const body = await readJsonObject(c, new Set(["agent_id", "version"]));

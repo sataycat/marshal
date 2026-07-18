@@ -24,6 +24,7 @@ It is written for local-first testing on one machine.
 - Browser-first repository registration: register, select, switch, and remove local git repositories without deleting checkouts
 - Browser-first ACP Registry catalog: cached public metadata, search, refresh, and stale-cache recovery
 - Pinned `npx` agent installation: explicit RCE confirmation, durable progress, retry, and removal
+- ACP readiness probing: temporary session validation, authentication-required state, negotiated capabilities, and actionable probe failures
 
 ### Out of scope (not current product behavior)
 
@@ -79,6 +80,20 @@ echo "# Manual Marshal Repo" > README.md
 git add README.md
 git commit -m "init"
 ```
+
+### 3.6 Agent readiness
+
+After installing an agent from **Agents**, select **Probe readiness**.
+
+Expected:
+
+- Marshal starts only the persisted, version-pinned installation launch specification.
+- A conformant no-auth agent becomes **Ready** and shows its ACP protocol version and negotiated capabilities.
+- An agent advertising authentication methods becomes **Authentication required**, not ready.
+- Startup, protocol, session creation, and process-exit failures remain visible as probe diagnostics.
+- The temporary probe session and process are closed or terminated before the request completes.
+
+Refresh the browser after probing and reopen **Agents**. The readiness state, failure message, protocol version, and capability snapshot must remain available.
 
 ## 3. Onboarding tests (CLI surface)
 

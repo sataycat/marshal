@@ -40,7 +40,7 @@ export async function startInstallation(agent: RegistryAgent, machineDir = GLOBA
   const running = getLatestInstallationOperation(agent.id, agent.version, machineDir);
   if (running?.status === "installing") return running;
   const operationId = randomUUID();
-  const operation = createInstallation({ id: agent.id, version: agent.version, source: "registry", license: agent.license, distribution: "npx", package_specifier: packageSpecifier, launch: { command: "npx", args: ["--yes", packageSpecifier] } satisfies AgentLaunchSpec, registry_snapshot_fetched_at: getRegistryCatalog(machineDir).snapshot?.fetched_at ?? "unknown", integrity_status: "not_applicable", status: "installing" }, operationId, machineDir);
+  const operation = createInstallation({ id: agent.id, version: agent.version, source: "registry", license: agent.license, distribution: "npx", package_specifier: packageSpecifier, launch: { command: "npx", args: ["--yes", packageSpecifier] } satisfies AgentLaunchSpec, registry_snapshot_fetched_at: getRegistryCatalog(machineDir).snapshot?.fetched_at ?? "unknown", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, operationId, machineDir);
   void (async () => {
     const installRoot = resolve(machineDir, "agents", agent.id, agent.version);
     try {

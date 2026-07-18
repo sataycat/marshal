@@ -131,7 +131,7 @@ start daemon
 
 **Implemented:** Machine-scoped installed-agent and installation-operation records are persisted in `machine.db`. The first distribution path is an exact semver-pinned `npx` package, launched without a shell in a durable operation. Registry cards support explicit confirmation, progress, retry, removal, and idempotent duplicate requests; failed installations remain inspectable and are never selectable as installed.
 
-## [ ] Slice 4: Probe Readiness And Show Capabilities
+## [x] Slice 4: Probe Readiness And Show Capabilities
 
 **Depends on:** Slice 3.
 
@@ -160,6 +160,8 @@ start daemon
 **Likely areas:** `src/acp/`, `src/agents/`, `src/agent/sdk-adapter.ts` migration seams, storage schema, agent APIs, agent detail UI, ACP fixture tests.
 
 **Out of scope:** Long-lived chat sessions, terminal authentication, environment-secret collection.
+
+**Implemented:** Installed agents now have durable readiness and capability state. The daemon probes only the persisted launch specification, performs ACP initialize plus a temporary session, classifies ready/authentication-required/failure outcomes, persists normalized capabilities and raw initialization metadata, and exposes `/api/agents/:id/probe`. The Agents UI presents probe status, protocol version, image capability, authentication-required state, and actionable failures.
 
 ## [ ] Slice 5: Complete Agent-Managed Authentication
 

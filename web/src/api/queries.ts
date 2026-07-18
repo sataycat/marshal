@@ -23,6 +23,7 @@ export function useInstallationQuery(id: string | null) {
 export const useRefreshRegistryMutation = () => useMutation({ mutationFn: api.refreshRegistry });
 export const useInstallRegistryAgentMutation = () => useMutation({ mutationFn: ({ agentId, version }: { agentId: string; version: string }) => api.installRegistryAgent(agentId, version) });
 export const useRemoveInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version }: { agentId: string; version: string }) => api.removeInstalledAgent(agentId, version) });
+export const useProbeInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version }: { agentId: string; version: string }) => api.probeInstalledAgent(agentId, version) });
 export const useRegisterRepositoryMutation = () => useMutation({ mutationFn: api.registerRepository });
 export const useSelectRepositoryMutation = () => useMutation({ mutationFn: api.selectRepository });
 export const useRemoveRepositoryMutation = () => useMutation({ mutationFn: api.removeRepository });

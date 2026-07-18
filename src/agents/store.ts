@@ -31,6 +31,15 @@ function tables(machineDir?: string) {
       error TEXT
     );
   `);
+  for (const statement of [
+    "ALTER TABLE installed_agents ADD COLUMN readiness_status TEXT NOT NULL DEFAULT 'unknown'",
+    "ALTER TABLE installed_agents ADD COLUMN readiness_error TEXT",
+    "ALTER TABLE installed_agents ADD COLUMN protocol_version INTEGER",
+    "ALTER TABLE installed_agents ADD COLUMN capabilities TEXT",
+    "ALTER TABLE installed_agents ADD COLUMN auth_methods TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE installed_agents ADD COLUMN raw_initialize TEXT",
+    "ALTER TABLE installed_agents ADD COLUMN probed_at TEXT",
+  ]) { try { db.exec(statement); } catch (error) { if (!(error instanceof Error) || !error.message.includes("duplicate column name")) throw error; } }
   return db;
 }
 
@@ -41,6 +50,9 @@ function agent(row: Record<string, unknown>): InstalledAgent {
     registry_snapshot_fetched_at: String(row.registry_snapshot_fetched_at), integrity_status: "not_applicable",
     status: String(row.status) as InstalledAgent["status"], created_at: String(row.created_at), updated_at: String(row.updated_at),
     failure: row.failure === null || row.failure === undefined ? null : String(row.failure),
+    readiness_status: String(row.readiness_status ?? "unknown") as InstalledAgent["readiness_status"], readiness_error: row.readiness_error ? String(row.readiness_error) : null,
+    protocol_version: row.protocol_version == null ? null : Number(row.protocol_version), capabilities: row.capabilities ? JSON.parse(String(row.capabilities)) : null,
+    auth_methods: row.auth_methods ? JSON.parse(String(row.auth_methods)) : [], raw_initialize: row.raw_initialize ? JSON.parse(String(row.raw_initialize)) : null, probed_at: row.probed_at ? String(row.probed_at) : null,
   };
 }
 
@@ -95,4 +107,10 @@ export function getInstallationOperation(id: string, machineDir?: string): Insta
 export function removeInstalledAgent(id: string, version: string, machineDir?: string): boolean {
   const db = tables(machineDir);
   return db.prepare("DELETE FROM installed_agents WHERE id = ? AND version = ? AND status != 'installing'").run(id, version).changes > 0;
+}
+
+export function setAgentReadiness(id: string, version: string, result: { readiness_status: InstalledAgent["readiness_status"]; readiness_error: string | null; protocol_version: number | null; capabilities: unknown; auth_methods: unknown; raw_initialize: unknown; probed_at: string }, machineDir?: string): InstalledAgent {
+  const db = tables(machineDir);
+  db.prepare("UPDATE installed_agents SET readiness_status = ?, readiness_error = ?, protocol_version = ?, capabilities = ?, auth_methods = ?, raw_initialize = ?, probed_at = ?, updated_at = ? WHERE id = ? AND version = ?").run(result.readiness_status, result.readiness_error, result.protocol_version, result.capabilities ? JSON.stringify(result.capabilities) : null, JSON.stringify(result.auth_methods), result.raw_initialize ? JSON.stringify(result.raw_initialize) : null, result.probed_at, result.probed_at, id, version);
+  return getInstalledAgent(id, version, machineDir)!;
 }
