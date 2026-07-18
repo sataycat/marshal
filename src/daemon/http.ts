@@ -79,6 +79,7 @@ import { authenticateAgent } from "../acp/authenticate.js";
 import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
 import { randomUUID } from "node:crypto";
 import { reconcileThreadPermissions } from "../acp/permission-store.js";
+import { deleteWorkflowProfile, getWorkflowProfile, listWorkflowProfiles, saveWorkflowProfile, WorkflowValidationError, type WorkflowProfileInput } from "../workflows/store.js";
 
 const authenticationControllers = new Map<string, AbortController>();
 
@@ -166,6 +167,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerRepositoryRoutes(app);
   registerRegistryRoutes(app, options.machineDir);
   registerAgentRoutes(app, options.machineDir);
+  registerWorkflowProfileRoutes(app, options.machineDir);
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
   registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent);
@@ -408,8 +410,50 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof ChatFileTooLargeError) return new ApiError(422, err.message, "file_too_large");
   if (err instanceof ChatAttachmentError) return new ApiError(422, err.message, err.code);
   if (err instanceof RepositoryError) return new ApiError(err.code === "duplicate_path" ? 409 : 422, err.message, err.code);
+  if (err instanceof WorkflowValidationError) return new ApiError(422, err.message, "workflow_profile_invalid");
   logger.error({ err }, "Unexpected error in task HTTP handler");
   return new ApiError(500, "Internal server error", "internal_error");
+}
+
+function workflowInput(body: Record<string, unknown>): WorkflowProfileInput {
+  const assignments = body.assignments;
+  if (!Array.isArray(assignments)) throw new ApiError(422, "assignments must be an array", "invalid_field");
+  return {
+    name: assertString(body.name, "name"),
+    permission_policy: assertString(body.permission_policy, "permission_policy") as WorkflowProfileInput["permission_policy"],
+    unattended_authorized: body.unattended_authorized === true,
+    timeout_ms: typeof body.timeout_ms === "number" ? body.timeout_ms : Number.NaN,
+    max_retries: typeof body.max_retries === "number" ? body.max_retries : Number.NaN,
+    verification_commands: Array.isArray(body.verification_commands) ? body.verification_commands.map((value) => assertString(value, "verification_commands")) : [],
+    require_decorrelated_builder_validator: body.require_decorrelated_builder_validator === true,
+    assignments: assignments.map((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new ApiError(422, "assignments must contain objects", "invalid_field");
+      const item = value as Record<string, unknown>;
+      return { role: assertString(item.role, "assignment.role") as WorkflowProfileInput["assignments"][number]["role"], agent_id: assertString(item.agent_id, "assignment.agent_id"), agent_version: assertString(item.agent_version, "assignment.agent_version"), model: item.model == null ? null : assertString(item.model, "assignment.model"), mode: item.mode == null ? null : assertString(item.mode, "assignment.mode") };
+    }),
+  };
+}
+
+function registerWorkflowProfileRoutes(app: Hono, machineDir?: string): void {
+  const fields = new Set(["name", "permission_policy", "unattended_authorized", "timeout_ms", "max_retries", "verification_commands", "require_decorrelated_builder_validator", "assignments"]);
+  app.get("/api/repositories/:repositoryId/workflow-profiles", (c) => c.json({ profiles: listWorkflowProfiles(c.req.param("repositoryId"), machineDir) }));
+  app.get("/api/repositories/:repositoryId/workflow-profiles/:id", (c) => {
+    const found = getWorkflowProfile(c.req.param("repositoryId"), c.req.param("id"), machineDir);
+    if (!found) throw new ApiError(404, "Workflow profile not found", "workflow_profile_not_found");
+    return c.json({ profile: found });
+  });
+  app.post("/api/repositories/:repositoryId/workflow-profiles", async (c) => {
+    const body = await readJsonObject(c, new Set([...fields, "id"]));
+    try { return c.json({ profile: saveWorkflowProfile(c.req.param("repositoryId"), workflowInput(body), typeof body.id === "string" ? body.id as `${string}-${string}-${string}-${string}-${string}` : undefined, machineDir) }, 201); } catch (error) { throw mapDomainError(error); }
+  });
+  app.put("/api/repositories/:repositoryId/workflow-profiles/:id", async (c) => {
+    const body = await readJsonObject(c, fields);
+    try { return c.json({ profile: saveWorkflowProfile(c.req.param("repositoryId"), workflowInput(body), c.req.param("id") as `${string}-${string}-${string}-${string}-${string}`, machineDir) }); } catch (error) { throw mapDomainError(error); }
+  });
+  app.delete("/api/repositories/:repositoryId/workflow-profiles/:id", (c) => {
+    if (!deleteWorkflowProfile(c.req.param("repositoryId"), c.req.param("id"), machineDir)) throw new ApiError(404, "Workflow profile not found", "workflow_profile_not_found");
+    return c.json({ deleted: true });
+  });
 }
 
 function registerRepositoryRoutes(app: Hono): void {

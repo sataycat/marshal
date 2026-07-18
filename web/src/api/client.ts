@@ -18,6 +18,9 @@ import type {
   InstallationOperation,
   AgentAuthenticationOperation,
   AcpEvent,
+  WorkflowProfile,
+  WorkflowRole,
+  PermissionPolicy,
 } from "../types";
 
 export async function fetchRepositories(signal?: AbortSignal): Promise<{ repositories: Repository[]; selected_repository_id: string | null }> {
@@ -36,6 +39,12 @@ export async function removeRepository(id: string): Promise<void> {
   const res = await fetch(`/api/repositories/${encodeURIComponent(id)}`, { method: "DELETE" });
   await jsonOrThrow(res);
 }
+
+export interface WorkflowProfileInput { name: string; permission_policy: PermissionPolicy; unattended_authorized: boolean; timeout_ms: number; max_retries: number; verification_commands: string[]; require_decorrelated_builder_validator: boolean; assignments: Array<{ role: WorkflowRole; agent_id: string; agent_version: string; model: string | null; mode: string | null }> }
+export async function fetchWorkflowProfiles(repositoryId: string, signal?: AbortSignal): Promise<WorkflowProfile[]> { const res = await fetch(`/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles`, { signal }); return (await jsonOrThrow<{ profiles: WorkflowProfile[] }>(res)).profiles; }
+export async function createWorkflowProfile(repositoryId: string, input: WorkflowProfileInput): Promise<WorkflowProfile> { const res = await fetch(`/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }); return (await jsonOrThrow<{ profile: WorkflowProfile }>(res)).profile; }
+export async function updateWorkflowProfile(repositoryId: string, id: string, input: WorkflowProfileInput): Promise<WorkflowProfile> { const res = await fetch(`/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }); return (await jsonOrThrow<{ profile: WorkflowProfile }>(res)).profile; }
+export async function deleteWorkflowProfile(repositoryId: string, id: string): Promise<void> { const res = await fetch(`/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles/${encodeURIComponent(id)}`, { method: "DELETE" }); await jsonOrThrow(res); }
 
 export interface RegistryCatalogResponse {
   agents: RegistryAgent[];

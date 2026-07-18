@@ -29,6 +29,7 @@ It is written for local-first testing on one machine.
 - Installed-agent chat: ready-agent selection, exact version pinning, streamed transcripts, refresh recovery, and capability-gated image attachments
 - Durable interactive ACP supervision: session/prompt/event history hydration, cancellation, interruption after daemon restart, and recoverable diagnostics
 - Durable interactive permissions: refresh-safe pending requests, kind/ID-based approve/deny decisions, conservative cancellation and restart reconciliation
+- Repository-scoped workflow profiles: ready-agent assignments, capability-aware optional configuration, explicit permissions and unattended authorization, deterministic checks, retries, timeouts, and decorrelation
 
 ### Out of scope (not current product behavior)
 
@@ -140,6 +141,12 @@ Expected:
 - Repeating a decision, using a stale request ID, or using a request from another thread fails closed and cannot approve anything else.
 - Cancelling the turn, deleting the thread, stopping the process, or restarting the daemon resolves an unresolved request as cancelled/interrupted rather than approved.
 - The UI states that permission mediation is not filesystem/process isolation.
+
+### 3.11 Workflow profiles
+
+Open **Workflows** for the selected repository and create a profile. Select only agents that are installed and **Ready** for the spec-author, builder, and validator assignments. The same installation may fill multiple roles unless decorrelation is enabled; with decorrelation enabled, identical builder and validator identity/configuration is rejected.
+
+Set optional model/mode values only when the readiness capability snapshot advertises them, then configure permission policy, timeout, retry count, and one deterministic verification command per line. Assignment and unattended authorization are separate trust decisions: checking unattended authorization is explicit and requires the unattended policy. Saving a profile must not spawn an agent or create a task. Switch repositories and confirm profiles remain isolated; remove or make an agent unready and confirm the next save reports a clear validation error.
 
 ## 3. Onboarding tests (CLI surface)
 

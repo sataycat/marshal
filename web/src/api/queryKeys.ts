@@ -15,4 +15,5 @@ export const queryKeys = {
   permissions: (id: string) => ["thread", id, "permissions"] as const,
   attachments: (id: string) => ["thread", id, "attachments"] as const,
   chatAgents: ["chat-agents"] as const,
+  workflowProfiles: (repositoryId: string) => ["workflow-profiles", repositoryId] as const,
 };

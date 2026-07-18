@@ -4,16 +4,18 @@ export const ROUTES = {
   home: "/",
   chat: "/chat",
   agents: "/agents",
+  workflows: "/workflows",
   chatThread: (threadId: string): `/chat/${string}` => `/chat/${threadId}`,
 } as const;
 
-export type StaticPath = (typeof ROUTES)["home" | "chat" | "agents"];
+export type StaticPath = (typeof ROUTES)["home" | "chat" | "agents" | "workflows"];
 export type ChatPath = `/chat/${string}`;
 export type RoutePath = StaticPath | ChatPath;
 
 export const NAV_ITEMS: readonly { path: StaticPath; label: string }[] = [
   { path: ROUTES.chat, label: "Chat" },
   { path: ROUTES.agents, label: "Agents" },
+  { path: ROUTES.workflows, label: "Workflows" },
 ];
 
 export interface RouteComponent {
@@ -52,6 +54,7 @@ export function preloadStatic(path: StaticPath): void {
       return;
     case ROUTES.home:
     case ROUTES.agents:
+    case ROUTES.workflows:
       return;
   }
 }

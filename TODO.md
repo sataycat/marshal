@@ -290,7 +290,7 @@ start daemon
 
 **Implemented:** Interactive ACP permission callbacks are owned by the shared supervisor and persisted in durable `permission_requests` records. Browser decisions resolve ACP option kinds and IDs fail-closed and idempotently; cancellation, deletion, process exit, and restart reconcile unresolved requests without implying approval. The browser renders durable pending choices and explicitly distinguishes permission mediation from process isolation.
 
-## [ ] Slice 9: Configure Workflow Profiles In The Browser
+## [x] Slice 9: Configure Workflow Profiles In The Browser
 
 **Depends on:** Slices 1, 4, and 6.
 
@@ -319,6 +319,8 @@ start daemon
 **Likely areas:** `src/workflows/`, storage schema, daemon workflow-profile APIs, `web/src/workflows/`, assignment validation tests and frontend pure-logic tests.
 
 **Out of scope:** Executing profiles and strong sandbox implementation.
+
+**Implemented:** Repository-scoped workflow profiles and agent assignments now persist in the machine database with CRUD daemon APIs and a browser editor/list. Save-time validation requires installed ready agents, checks negotiated optional model/mode values, enforces permission and unattended trust rules, and supports deterministic commands, timeout/retry settings, and builder/validator decorrelation. The execution-facing validation primitive is reusable by future factory consumers; Slice 10/11 execution remains unchanged and the new UI never writes legacy command roles.
 
 ## [ ] Slice 10: Author And Freeze A Profile-Backed Task
 
