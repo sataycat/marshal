@@ -90,6 +90,8 @@ export interface RegistryRefresh {
   error: string | null;
   snapshot_fetched_at: string | null;
 }
+export interface DiagnosticIssue { code: string; message: string; action: string; severity: "error" | "warning" }
+export interface DiagnosticsResponse { daemon: { status: string; version: string; host: string | null }; repository: { selected: Repository | null; registered_count: number; root: string | null }; registry: { snapshot: RegistrySnapshot | null; refresh: RegistryRefresh | null }; agents: InstalledAgent[]; issues: DiagnosticIssue[] }
 
 export interface TaskCard {
   id: number;

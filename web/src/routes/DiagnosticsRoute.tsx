@@ -1,0 +1,10 @@
+import { useDiagnosticsQuery } from "../api/queries";
+
+export function DiagnosticsRoute(): JSX.Element {
+  const query = useDiagnosticsQuery();
+  if (query.isPending) return <div className="mx-auto w-full max-w-5xl px-4 py-8 text-sm text-muted">Loading diagnostics...</div>;
+  if (query.isError) return <div className="mx-auto w-full max-w-5xl px-4 py-8 text-sm text-danger">Diagnostics unavailable: {query.error.message}</div>;
+  const data = query.data;
+  return <div className="mx-auto w-full max-w-5xl px-4 py-8 md:px-8"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">System</p><h1 className="mt-2 text-3xl font-semibold">Diagnostics</h1><p className="mt-2 text-sm text-muted">Stable machine codes and next actions for browser-first recovery.</p><div className="mt-7 grid gap-4 md:grid-cols-3"><Status title="Daemon" value={`${data.daemon.status} · v${data.daemon.version}`} /><Status title="Repository" value={data.repository.selected?.name ?? "Not selected"} /><Status title="Registry" value={data.registry.snapshot ? `Fresh ${new Date(data.registry.snapshot.fetched_at).toLocaleString()}` : "No snapshot"} /></div>{data.issues.length === 0 ? <div className="mt-6 rounded-xl border border-border bg-panel p-5 text-sm text-success">No known diagnostics require attention.</div> : <div className="mt-6 space-y-3">{data.issues.map((issue) => <article key={`${issue.code}:${issue.message}`} className="rounded-xl border border-border bg-panel p-5"><div className="flex flex-wrap items-center gap-3"><code className="rounded bg-secondary px-2 py-1 text-xs">{issue.code}</code><span className={issue.severity === "error" ? "text-sm text-danger" : "text-sm text-warn"}>{issue.message}</span></div><p className="mt-2 text-sm text-muted">Next action: {issue.action}</p></article>)}</div>}</div>;
+}
+function Status({ title, value }: { title: string; value: string }): JSX.Element { return <div className="rounded-xl border border-border bg-panel p-5"><p className="text-xs uppercase tracking-wide text-muted">{title}</p><p className="mt-2 text-sm font-medium">{value}</p></div>; }

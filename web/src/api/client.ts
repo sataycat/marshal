@@ -21,7 +21,10 @@ import type {
   WorkflowProfile,
   WorkflowRole,
   PermissionPolicy,
+  DiagnosticsResponse,
 } from "../types";
+
+export async function fetchDiagnostics(signal?: AbortSignal): Promise<DiagnosticsResponse> { const res = await fetch("/api/diagnostics", { signal }); return jsonOrThrow<DiagnosticsResponse>(res); }
 
 export async function fetchRepositories(signal?: AbortSignal): Promise<{ repositories: Repository[]; selected_repository_id: string | null }> {
   const res = await fetch("/api/repositories", { signal });

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { logger } from "../logger.js";
-import { getRepoStateDir, initRepoState } from "./config.js";
+import { getRepoStateDir, initRepoState, GLOBAL_DIR, ensureDir } from "./config.js";
 import {
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_PORT,
@@ -165,6 +165,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
     });
   }
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
+  registerDiagnosticsRoute(app, options.machineDir, root, version);
   registerRepositoryRoutes(app);
   registerRegistryRoutes(app, options.machineDir);
   registerAgentRoutes(app, options.machineDir);
@@ -482,6 +483,25 @@ function registerRepositoryRoutes(app: Hono): void {
   app.delete("/api/repositories/:id", (c) => {
     if (!removeRepository(c.req.param("id"))) throw new ApiError(404, "Repository not found", "repository_not_found");
     return c.json({ deleted: true });
+  });
+}
+
+function registerDiagnosticsRoute(app: Hono, machineDir: string | undefined, root: string | undefined, version: string): void {
+  app.get("/api/diagnostics", (c) => {
+    const repositories = listRepositories();
+    const selected = getSelectedRepository();
+    const catalog = getRegistryCatalog(machineDir);
+    const agents = listInstalledAgents(machineDir);
+    const issues: Array<{ code: string; message: string; action: string; severity: "error" | "warning" }> = [];
+    if (!selected) issues.push({ code: "REPOSITORY_NOT_SELECTED", message: "No repository is selected.", action: "Register and select a git repository in the browser.", severity: "warning" });
+    if (catalog.refresh?.status === "failed") issues.push({ code: "REGISTRY_REFRESH_FAILED", message: catalog.refresh.error ?? "The registry refresh failed.", action: "Check network access and refresh the catalog; the last valid snapshot remains usable.", severity: "warning" });
+    if (!catalog.snapshot) issues.push({ code: "REGISTRY_UNAVAILABLE", message: "No validated ACP Registry snapshot is available.", action: "Open Agents and refresh the catalog.", severity: "warning" });
+    for (const agent of agents) {
+      if (agent.status === "failed") issues.push({ code: "INSTALLATION_FAILED", message: `${agent.id}@${agent.version}: ${agent.failure ?? "installation failed"}`, action: "Retry or remove the failed installation from Agents.", severity: "error" });
+      if (agent.readiness_status === "failed") issues.push({ code: "ACP_READINESS_FAILED", message: `${agent.id}@${agent.version}: ${agent.readiness_error ?? "readiness probe failed"}`, action: "Probe again after checking the installation and authentication state.", severity: "error" });
+      if (agent.readiness_status === "authentication_required") issues.push({ code: "AGENT_AUTHENTICATION_REQUIRED", message: `${agent.id}@${agent.version} requires authentication.`, action: "Complete the advertised authentication flow in Agents.", severity: "warning" });
+    }
+    return c.json({ daemon: { status: "ok", version, host: c.req.header("host") ?? null }, repository: { selected: selected ?? null, registered_count: repositories.length, root: root ?? null }, registry: { snapshot: catalog.snapshot, refresh: catalog.refresh }, agents, issues });
   });
 }
 
@@ -1246,7 +1266,11 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   }
 
   const portFile = portFilePath();
+  ensureDir(GLOBAL_DIR);
+  const pidFile = resolve(GLOBAL_DIR, "daemon.pid");
   writeFileSync(portFile, String(bound.port));
+  writeFileSync(resolve(GLOBAL_DIR, "daemon.port"), String(bound.port));
+  writeFileSync(pidFile, String(process.pid));
 
   logger.info({ host: bound.host, port: bound.port, portFile }, "HTTP server listening");
 
@@ -1256,7 +1280,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     portFile,
     bus,
     close() {
-      return closeServer(server, portFile, wsHandle);
+      return closeServer(server, portFile, wsHandle, pidFile, resolve(GLOBAL_DIR, "daemon.port"));
     },
   };
 }
@@ -1265,6 +1289,8 @@ async function closeServer(
   server: ServerType,
   portFile: string,
   wsHandle?: WebSocketBridgeHandle,
+  pidFile?: string,
+  globalPortFile?: string,
 ): Promise<void> {
   if (wsHandle) {
     try {
@@ -1299,4 +1325,6 @@ async function closeServer(
   } catch (err) {
     logger.warn({ err, portFile }, "Failed to remove daemon.port file");
   }
+  if (pidFile) { try { if (existsSync(pidFile)) unlinkSync(pidFile); } catch (err) { logger.warn({ err, pidFile }, "Failed to remove daemon pid file"); } }
+  if (globalPortFile) { try { if (existsSync(globalPortFile)) unlinkSync(globalPortFile); } catch (err) { logger.warn({ err, globalPortFile }, "Failed to remove global daemon port file"); } }
 }

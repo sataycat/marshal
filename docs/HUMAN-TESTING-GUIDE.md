@@ -2,7 +2,7 @@
 
 This guide is a practical, end-to-end manual test plan for Marshal across all implemented surfaces:
 
-- CLI onboarding and daily operations
+- CLI daemon lifecycle and daily operations
 - Daemon HTTP + WebSocket API
 - Web board + spec authoring chat + review/merge
 - Reliability and edge conditions
@@ -13,7 +13,7 @@ It is written for local-first testing on one machine.
 
 ### In scope (implemented)
 
-- `marshal init` / `marshal doctor`
+- `marshal start` / `marshal stop` / `marshal status`
 - task lifecycle (`backlog -> ready -> building -> validating -> review -> done`)
 - escape hatches (`building -> ready`, `building -> backlog`, `validating -> backlog`, `review -> backlog`)
 - run history APIs
@@ -160,53 +160,29 @@ Review the proposed markdown, explicitly update the task spec, then click **Free
 
 Open **Tasks** (`/board`) and freeze a profile-backed task. Start the daemon and observe the task move through **Building**, **Validating**, and **Review**. Each attempt must show the independently resolved builder/validator identity, exact version, supervisor session, operation, capabilities, streamed events, commit, and deterministic verification result in the run APIs. A validator narrative cannot pass a task when a configured verification command fails. Failed validation preserves the worktree and retry evidence; after review, inspect the diff and merge from the browser. A successful merge cleans up the task worktree only after the merge completes, while merge conflicts and cleanup failures leave the task inspectable for recovery.
 
-## 3. Onboarding tests (CLI surface)
+## 3. Browser-first setup and diagnostics
 
-### 3.1 Happy path: first-time init
+Open the daemon URL after `marshal start`. On a clean machine, register a temporary git repository, refresh the ACP Registry, install an exact pinned npx distribution, probe readiness, authenticate if required, create a chat thread, create a workflow profile, author and freeze a task, then run it through build, validation, review, and merge. No JSON editing, `marshal init`, or executable command knowledge is required.
 
-```sh
-marshal init
-```
+Open **Diagnostics** at any point. It should show daemon state, selected repository, registry freshness, installation/authentication/readiness failures, and stable machine codes with a concrete next action.
 
-Expected:
-
-- machine preflight output printed
-- repo initialized
-- `.marshal/state.db` exists
-- `~/.marshal/config.json` exists or is updated (interactive path)
-
-### 3.2 Fast path: already configured machine
-
-Run `marshal init` again in the same repo.
-
-Expected:
-
-- output indicates machine already configured
-- repo init still succeeds
-
-### 3.3 Doctor: read-only diagnostics
+### 3.1 CLI lifecycle
 
 ```sh
-marshal doctor
+marshal start
 ```
 
-Expected:
+Expected: the browser opens and reports daemon health.
 
-- no repo mutation
-- clear pass/warn/fail lines
-- useful remediation hints when checks fail
+### 3.2 Stop and status
 
-### 3.4 Negative onboarding checks
-
-1. Replace one structured role with a legacy string ID, then run `marshal doctor`
-2. unset provider API keys, run `marshal doctor`
-3. if possible, run with older Node major (<18)
+Run `marshal status`, then `marshal stop`, then `marshal status` again.
 
 Expected:
 
-- a string role ID is a **fail** with a structured-command migration hint
-- missing auth env is **warning**
-- old Node major is **fail**
+- status reports running, then stopped
+
+The retired `marshal init`, `marshal doctor`, task, and worktree commands are recovery/development-only and must not be needed for the browser journey.
 
 ## 4. Core lifecycle tests (CLI + daemon loop)
 

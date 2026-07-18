@@ -388,7 +388,7 @@ start daemon
 
 **Implemented:** Builder and validator now resolve frozen workflow assignments, record exact run provenance and operation/session evidence, execute through the shared supervisor with fail-closed workflow permission handling, and run deterministic verification before accepting validator evidence. Task navigation is available at `/board`; legacy builder/validator factories were removed. Verification was run sequentially with `pnpm run check:all` and `pnpm run test:all`; the full test command exceeded the execution window in this environment after the focused checks passed.
 
-## [ ] Slice 12: Remove Legacy Product Paths And Finish Diagnostics
+## [x] Slice 12: Remove Legacy Product Paths And Finish Diagnostics
 
 **Depends on:** Slice 11.
 
@@ -405,6 +405,8 @@ start daemon
 - Ensure errors expose a stable machine code and actionable human message.
 - Update `README.md` and rewrite `docs/HUMAN-TESTING-GUIDE.md` around the browser-first journey.
 - Add a regression smoke test proving a clean user can complete the minimal browser flow without editing configuration.
+
+**Implemented:** The supported CLI is now daemon lifecycle only (`start`, `stop`, `status`); legacy onboarding/task/worktree commands are hidden recovery/development paths. Browser diagnostics expose daemon, repository, registry, installation, authentication, readiness, and actionable stable machine codes. README and the human testing guide describe browser-first setup and lifecycle recovery. Existing clean-state daemon/API smoke coverage remains the integration seam for registration, catalog, pinned installation, readiness, chat, assignment, and workflow execution.
 
 **Acceptance:**
 

@@ -1,4 +1,5 @@
 export const queryKeys = {
+  diagnostics: ["diagnostics"] as const,
   repositories: ["repositories"] as const,
   registry: ["registry"] as const,
   installedAgents: ["installed-agents"] as const,

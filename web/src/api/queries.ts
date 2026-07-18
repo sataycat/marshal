@@ -11,6 +11,7 @@ export function useTaskDetailQuery(slug: string) {
 export function useRepositoriesQuery() {
   return useQuery({ queryKey: queryKeys.repositories, queryFn: ({ signal }) => api.fetchRepositories(signal), ...queryOptions });
 }
+export function useDiagnosticsQuery() { return useQuery({ queryKey: queryKeys.diagnostics, queryFn: ({ signal }) => api.fetchDiagnostics(signal), ...queryOptions, refetchInterval: 5000 }); }
 export function useWorkflowProfilesQuery(repositoryId: string | null) { return useQuery({ queryKey: queryKeys.workflowProfiles(repositoryId ?? ""), queryFn: ({ signal }) => api.fetchWorkflowProfiles(repositoryId ?? "", signal), enabled: Boolean(repositoryId), ...queryOptions }); }
 export const useCreateWorkflowProfileMutation = () => useMutation({ mutationFn: ({ repositoryId, input }: { repositoryId: string; input: api.WorkflowProfileInput }) => api.createWorkflowProfile(repositoryId, input) });
 export const useUpdateWorkflowProfileMutation = () => useMutation({ mutationFn: ({ repositoryId, id, input }: { repositoryId: string; id: string; input: api.WorkflowProfileInput }) => api.updateWorkflowProfile(repositoryId, id, input) });

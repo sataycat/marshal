@@ -10,7 +10,7 @@ See [`docs/PROJECT.md`](docs/PROJECT.md) for the design tenets and vision, and [
 - **git**.
 - **A C++ toolchain** (`python3`, `make`, `g++` or `clang`) for `better-sqlite3`'s native build. Prebuilt binaries cover common platforms; the long tail needs the toolchain.
 - **ACP agent commands.** Marshal connects directly through the official ACP SDK.
-- **A builder agent and a validator agent reachable through their configured commands.** Generated defaults use `npx -y opencode-ai acp` (builder/spec author) and `npx -y pi-acp` (validator).
+- **A browser.** Agents are discovered, installed, authenticated, and assigned from the web application; Marshal never requires hand-written role commands.
 
 ## Install
 
@@ -18,38 +18,22 @@ See [`docs/PROJECT.md`](docs/PROJECT.md) for the design tenets and vision, and [
 npm i -g sataycat/marshal
 ```
 
-This installs the `marshal` binary on PATH. Then onboard a repo:
+This installs the `marshal` binary on PATH. Start the daemon, then complete setup in the browser:
 
 ```sh
-cd your-repo
-marshal init
+marshal start
+# open http://127.0.0.1:7433/ and register your repository
 ```
 
-`marshal init` is non-interactive. It checks system prerequisites, writes `~/.marshal/config.json` with structured direct ACP commands, and creates `.marshal/` for per-repo state. A legacy config containing string role IDs is migrated to the generated direct defaults; customize those commands afterward if needed.
-
-To verify a setup without mutating anything:
-
-```sh
-marshal doctor
-```
+Diagnostics, installation, authentication, readiness, and workflow assignment are browser flows under **Diagnostics**, **Agents**, and **Workflows**.
 
 ## Quickstart
 
 ```sh
-# 1. Create a task in the backlog.
-marshal task create --slug add-feature --title "Add the feature" --spec-file ./spec.md
-
-# 2. Freeze the spec and move to ready (creates the worktree + commits the spec).
-marshal task ready add-feature
-
-# 3. Start Marshal.
-marshal start                     # serves the UI and polls every 5s
-
-# 4. When the task reaches `review`, inspect and merge.
-marshal task show add-feature
-# In the web board, open http://127.0.0.1:7433/, click "Approve & Merge"
-# Or via API:
-curl -X POST http://127.0.0.1:7433/api/tasks/add-feature/merge
+# 1. Start Marshal and open the browser.
+marshal start
+# 2. Register a repository, install/authenticate a ready agent, and create a workflow profile.
+# 3. Author, freeze, build, validate, review, and merge from the browser.
 ```
 
 The daemon's HTTP + WebSocket API is at `http://127.0.0.1:7433/` (the port is configurable). The web board (a React SPA) is served from the same origin.
@@ -71,18 +55,12 @@ See [`docs/ARCHITECTURE.md` §0.1](docs/ARCHITECTURE.md#01-task-state-machine) a
 ## CLI reference
 
 ```
-marshal init
-marshal doctor
-marshal task list
-marshal task create   --slug <slug> --title <title> [--spec <md> | --spec-file <path>]
-marshal task show     <slug>
-marshal task ready    <slug>
-marshal task freeze   <slug>             # re-freeze after editing the spec
-marshal task transition <slug> <state>   # manual transition (incl. escape hatches)
-marshal worktree create  --task <slug>
-marshal worktree destroy --task <slug>
 marshal start [--interval <ms>] [--port <port>] [--host <addr>] [--lan] [--password <password>]
+marshal stop
+marshal status
 ```
+
+`init`, `doctor`, `task`, and `worktree` are hidden development/recovery commands retained only for pre-browser state recovery. They are not required or supported for normal product use.
 
 `marshal start` exposes the HTTP + WebSocket API on the daemon port. Use `marshal start --help` for the full flag list. LAN access requires a UI password, for example `marshal start --lan --password <password>`.
 
@@ -100,54 +78,11 @@ Authentication protects the control plane but does not sandbox ACP agents. Run t
 
 ## Configuration
 
-### Global (`~/.marshal/config.json`)
+### Browser-owned configuration
 
-```jsonc
-{
-  "agents": {
-    "builder": {
-      "id": "opencode",
-      "command": "npx",
-      "args": ["-y", "opencode-ai", "acp"],
-    },
-    "validator": {
-      "id": "pi",
-      "command": "npx",
-      "args": ["-y", "pi-acp"],
-    },
-    "specAuthor": {
-      "id": "opencode",
-      "command": "npx",
-      "args": ["-y", "opencode-ai", "acp"],
-    },
-  },
-  "policy": { "maxRetries": 2 },
-  "daemon": { "host": "127.0.0.1", "port": 7433 },
-}
-```
+Normal setup does not use `~/.marshal/config.json`, direct executable defaults, or role command configuration. The browser persists repositories, pinned installations, readiness/authentication state, and workflow assignments in daemon-owned storage.
 
-Any ACP-compatible executable can be used by configuring its command directly. The defaults are written by `marshal init`; edit the file to override:
-
-```json
-{
-  "agents": {
-    "builder": {
-      "id": "opencode",
-      "command": "npx",
-      "args": ["-y", "opencode-ai", "acp"]
-    },
-    "validator": {
-      "id": "codex",
-      "command": "npx",
-      "args": ["-y", "@agentclientprotocol/codex-acp"]
-    }
-  }
-}
-```
-
-Commands are executed directly without a shell. Optional `env` values are merged into the child process environment. String agent IDs are not supported.
-
-### Per-repo (`marshal.json`)
+### Optional per-repo (`marshal.json`)
 
 ```jsonc
 {

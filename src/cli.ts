@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startHttpServer } from "./daemon/http.js";
@@ -8,7 +8,7 @@ import { startDaemon } from "./daemon/loop.js";
 import { runDoctor, runInit } from "./setup/init.js";
 import { registerTaskCommands } from "./tasks/commands.js";
 import { WorktreeManager } from "./worktree/manager.js";
-import { loadGlobalConfig } from "./worktree/config.js";
+import { GLOBAL_DIR } from "./daemon/config.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const pkgPath = resolve(__dirname, "../package.json");
@@ -20,8 +20,8 @@ const program = new Command()
   .version(pkg.version);
 
 program
-  .command("init")
-  .description("Run onboarding preflight and initialize marshal state in the current repo")
+  .command("init", { hidden: true })
+  .description("[recovery] retired browser onboarding; use the web application")
   .action(async () => {
     const result = await runInit();
     if (!result.ok) {
@@ -30,8 +30,8 @@ program
   });
 
 program
-  .command("doctor")
-  .description("Run read-only preflight checks (no installs, no config writes, no repo init)")
+  .command("doctor", { hidden: true })
+  .description("[recovery] retired diagnostics; use the browser Diagnostics page")
   .action(async () => {
     const result = await runDoctor();
     if (!result.ok) {
@@ -39,10 +39,10 @@ program
     }
   });
 
-const task = program.command("task").description("Task management");
+const task = program.command("task").description("[development/recovery] task management; use the browser Board");
 registerTaskCommands(task);
 
-const worktree = program.command("worktree").description("Worktree management");
+const worktree = program.command("worktree").description("[development/recovery] worktree management; use the browser workflow");
 
 worktree
   .command("create")
@@ -65,7 +65,7 @@ worktree
 
 program
   .command("start")
-  .description("Run the orchestrator daemon, polling for ready tasks")
+  .description("Start the daemon and serve the browser application")
   .option("--interval <ms>", "Poll interval in milliseconds", "5000")
   .option("--port <number>", "HTTP API port (default: 7433 or config daemon.port)")
   .option("--host <addr>", "HTTP API bind address (default: 127.0.0.1)")
@@ -80,15 +80,13 @@ program
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     try {
-      const config = loadGlobalConfig();
-      const port = options.port !== undefined ? Number(options.port) : config.daemon?.port;
-      const host = options.lan ? "0.0.0.0" : options.host ?? config.daemon?.host;
+      const port = options.port !== undefined ? Number(options.port) : undefined;
+      const host = options.lan ? "0.0.0.0" : options.host;
       const http = await startHttpServer({
         host,
         port,
         uiPassword: options.password,
         version: pkg.version,
-        config,
       });
       try {
         await startDaemon({
@@ -104,6 +102,22 @@ program
       process.off("SIGTERM", stop);
     }
   });
+
+program.command("stop").description("Stop the Marshal daemon").action(() => {
+  const pidPath = resolve(GLOBAL_DIR, "daemon.pid");
+  if (!existsSync(pidPath)) { console.log("Marshal daemon is not running."); return; }
+  const pid = Number(readFileSync(pidPath, "utf8"));
+  try { process.kill(pid, "SIGTERM"); console.log(`Stopped Marshal daemon (pid ${pid}).`); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") { unlinkSync(pidPath); console.log("Marshal daemon was not running."); return; } throw error; }
+});
+
+program.command("status").description("Inspect Marshal daemon status").action(async () => {
+  const portPath = resolve(GLOBAL_DIR, "daemon.port");
+  if (!existsSync(portPath)) { console.log("Marshal daemon: stopped"); return; }
+  const port = Number(readFileSync(portPath, "utf8"));
+  try { const response = await fetch(`http://127.0.0.1:${port}/api/health`); const body = await response.json() as { version?: string }; console.log(`Marshal daemon: running (port ${port}${body.version ? `, version ${body.version}` : ""})`); }
+  catch { console.log(`Marshal daemon: unavailable (stale port ${port})`); process.exitCode = 1; }
+});
 
 try {
   await program.parseAsync(process.argv);
