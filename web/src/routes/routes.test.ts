@@ -13,9 +13,9 @@ describe("ROUTES", () => {
 });
 
 describe("NAV_ITEMS", () => {
-  it("has a Chat entry pointing at a static path", () => {
+  it("has Chat and Agents entries pointing at static paths", () => {
     const paths = NAV_ITEMS.map((i) => i.path);
-    expect(paths).toEqual([ROUTES.chat]);
+    expect(paths).toEqual([ROUTES.chat, ROUTES.agents]);
   });
 
   it("gives every entry a non-empty label", () => {

@@ -22,6 +22,7 @@ It is written for local-first testing on one machine.
 - SPA static serving and WebSocket live updates
 - Chat-first Phase 1 workbench: threads, drafts, files, permissions, images, reconnects, and mobile navigation
 - Browser-first repository registration: register, select, switch, and remove local git repositories without deleting checkouts
+- Browser-first ACP Registry catalog: cached public metadata, search, refresh, and stale-cache recovery
 
 ### Out of scope (not current product behavior)
 
@@ -36,7 +37,7 @@ It is written for local-first testing on one machine.
 1. Node.js >= 18
 2. git
 3. pnpm (recommended; missing pnpm is warning-level in onboarding)
-4. Configured direct ACP commands for builder/validator/spec author agents
+4. Network access to the public ACP Registry for the catalog refresh test
 
 ### Build
 
@@ -44,6 +45,25 @@ It is written for local-first testing on one machine.
 pnpm install
 pnpm run build:all
 ```
+
+## 3.5 Registry catalog
+
+Open **Agents** in the web application.
+
+Expected:
+
+- The public catalog lists agent ID, name, version, description, source, license, links, and distribution kinds.
+- Searching matches ID, name, and description without another network request.
+- Registry launch arguments are not shown as editable product configuration.
+- Clicking **Refresh catalog** shows a durable refreshing state. Refreshing the browser during the request does not lose that state.
+
+To test stale recovery, temporarily block access to `cdn.agentclientprotocol.com` and refresh again.
+
+Expected:
+
+- The previous valid catalog remains visible.
+- A stale warning identifies the failed refresh and its error.
+- Restoring network access and refreshing replaces the snapshot only after the response validates.
 
 ### Test repo bootstrap
 

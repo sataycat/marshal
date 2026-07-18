@@ -66,7 +66,7 @@ start daemon
 
 **Implemented:** Machine-scoped repository registrations live in `~/.marshal/machine.db`; legacy checkout-local databases are preserved in place and continue to be selected explicitly through the browser. The daemon lifecycle port file remains compatible with root-scoped test callers, while normal `marshal start` uses the machine-level default.
 
-## [ ] Slice 2: Browse A Cached Registry Catalog
+## [x] Slice 2: Browse A Cached Registry Catalog
 
 **Depends on:** Slice 1.
 

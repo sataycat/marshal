@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { Link, useLocation } from "wouter";
-import { MessagesSquare } from "lucide-react";
+import { Bot, MessagesSquare } from "lucide-react";
 import { NAV_ITEMS, ROUTES, type StaticPath } from "../routes/routes";
 import { cn } from "@/lib/utils";
 import { useRepositoriesQuery, useRemoveRepositoryMutation, useSelectRepositoryMutation } from "../api/queries";
@@ -64,7 +64,7 @@ function PrefetchNavLink({ path, label }: PrefetchNavLinkProps): JSX.Element {
         isActive && "bg-secondary text-text border-border",
       )}
     >
-      <MessagesSquare aria-hidden className="size-4" />
+      {path === ROUTES.agents ? <Bot aria-hidden className="size-4" /> : <MessagesSquare aria-hidden className="size-4" />}
       {label}
     </Link>
   );

@@ -1,9 +1,9 @@
-import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
-import { GLOBAL_DIR, ensureDir } from "../daemon/config.js";
+import { GLOBAL_DIR } from "../daemon/config.js";
+import { openMachineDb } from "../storage/machine.js";
 
 export interface Repository {
   id: string;
@@ -20,29 +20,6 @@ export class RepositoryError extends Error {
     super(message);
     this.name = "RepositoryError";
   }
-}
-
-function machineDbPath(machineDir = GLOBAL_DIR): string { return resolve(machineDir, "machine.db"); }
-
-function openMachineDb(machineDir = GLOBAL_DIR): Database.Database {
-  ensureDir(machineDir);
-  const db = new Database(machineDbPath(machineDir));
-  db.pragma("journal_mode = WAL");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS repositories (
-      id TEXT PRIMARY KEY,
-      path TEXT NOT NULL UNIQUE,
-      name TEXT NOT NULL,
-      preferences TEXT NOT NULL DEFAULT '{}',
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS machine_preferences (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-  return db;
 }
 
 function rowToRepository(row: Record<string, unknown>): Repository {

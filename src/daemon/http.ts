@@ -68,6 +68,9 @@ import { ChatFileTooLargeError, InvalidChatPathError, listChatFiles, readChatFil
 import { ChatAttachmentError, createChatAttachment, listChatAttachments, MAX_ATTACHMENT_BYTES, readChatAttachment } from "../chat/attachments.js";
 import { AuthService } from "./auth.js";
 import { getRepository, getSelectedRepository, listRepositories, registerRepository, removeRepository, selectRepository, repositoryRoot, RepositoryError } from "../repositories/store.js";
+import { fetchRegistrySnapshot } from "../registry/fetch.js";
+import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
+import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
 
 export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
@@ -83,6 +86,7 @@ export interface HttpServerOptions {
   uiPassword?: string;
   trustedOrigins?: string[];
   trustedProxy?: boolean;
+  machineDir?: string;
 }
 
 export interface HttpServerHandle {
@@ -113,6 +117,7 @@ export interface BuildAppOptions {
   chatAgent?: Agent;
   auth?: AuthService;
   trustedProxy?: boolean;
+  machineDir?: string;
 }
 
 export function defaultWebDistDir(): string {
@@ -148,6 +153,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   }
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
   registerRepositoryRoutes(app);
+  registerRegistryRoutes(app, options.machineDir);
   registerTaskRoutes(app, root, options.worktreeRoot, bus);
   registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent);
@@ -414,6 +420,38 @@ function registerRepositoryRoutes(app: Hono): void {
   app.delete("/api/repositories/:id", (c) => {
     if (!removeRepository(c.req.param("id"))) throw new ApiError(404, "Repository not found", "repository_not_found");
     return c.json({ deleted: true });
+  });
+}
+
+function registryAgent(agent: RegistryAgent): RegistryAgent {
+  return agent;
+}
+
+function registerRegistryRoutes(app: Hono, machineDir?: string): void {
+  app.get("/api/registry", (c) => {
+    const catalog = getRegistryCatalog(machineDir);
+    return c.json({ ...catalog, source: catalog.snapshot?.source ?? PUBLIC_REGISTRY_URL });
+  });
+  app.get("/api/registry/agents", (c) => {
+    const catalog = getRegistryCatalog(machineDir);
+    const query = c.req.query("q")?.trim().toLowerCase() ?? "";
+    const agents = (catalog.snapshot?.agents ?? []).filter((agent) => !query || [agent.id, agent.name, agent.description].some((field) => field.toLowerCase().includes(query))).map(registryAgent);
+    return c.json({ agents, snapshot: catalog.snapshot, refresh: catalog.refresh });
+  });
+  app.get("/api/registry/agents/:id", (c) => {
+    const catalog = getRegistryCatalog(machineDir);
+    const agent = catalog.snapshot?.agents.find((entry) => entry.id === c.req.param("id"));
+    if (!agent) throw new ApiError(404, "Registry agent not found", "registry_agent_not_found");
+    return c.json({ agent: registryAgent(agent), snapshot: catalog.snapshot, refresh: catalog.refresh });
+  });
+  app.post("/api/registry/refresh", (c) => {
+    const current = getRegistryCatalog(machineDir).refresh;
+    if (current?.status === "running") return c.json({ refresh: current }, 202);
+    const refresh = beginRegistryRefresh(machineDir);
+    void fetchRegistrySnapshot().then((snapshot) => completeRegistryRefresh(refresh.id, snapshot, machineDir)).catch((error: unknown) => {
+      failRegistryRefresh(refresh.id, error instanceof Error ? error.message : "Registry refresh failed", machineDir);
+    });
+    return c.json({ refresh }, 202);
   });
 }
 
@@ -980,7 +1018,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const attachWs = options.attachWebSockets ?? true;
 
   const trustedProxy = options.trustedProxy ?? options.config?.daemon?.trustedProxy ?? false;
-  const app = buildApp(version, { root, bus, webDir: options.webDir, auth, trustedProxy });
+  const app = buildApp(version, { root, bus, webDir: options.webDir, auth, trustedProxy, machineDir: options.machineDir });
   const server = serve({ fetch: app.fetch, hostname: host, port });
 
   let bound: { host: string; port: number };

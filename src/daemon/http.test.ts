@@ -24,6 +24,18 @@ describe("buildApp /api/health", () => {
     const res = await app.request("/api/nope");
     expect(res.status).toBe(404);
   });
+
+  it("serves the cached registry catalog and searches validated fields", async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-registry-http-"));
+    const { beginRegistryRefresh, completeRegistryRefresh } = await import("../registry/store.js");
+    const refresh = beginRegistryRefresh(machineDir);
+    completeRegistryRefresh(refresh.id, { version: "1.0.0", source: "fixture://registry", fetched_at: new Date().toISOString(), agents: [{ id: "demo", name: "Demo Agent", version: "1.0.0", description: "Searchable coding helper", license: "MIT", authors: [], distributions: [{ kind: "npx", package: "demo@1.0.0" }] }] }, machineDir);
+    const app = buildApp("0.0.1", { machineDir });
+    const res = await app.request("/api/registry/agents?q=searchable");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { agents: unknown[] };
+    expect(body.agents).toHaveLength(1);
+  });
 });
 
 describe("authenticated HTTP server", () => {

@@ -19,6 +19,7 @@ const ChatThreadRoute = lazy(() =>
 const NotFoundRoute = lazy(() =>
   import("./routes/NotFoundRoute").then((m) => ({ default: m.NotFoundRoute })),
 );
+const AgentsRoute = lazy(() => import("./routes/AgentsRoute").then((m) => ({ default: m.AgentsRoute })));
 
 function RouteFallback(): JSX.Element {
   return <div className="route-loading">Loading…</div>;
@@ -42,6 +43,9 @@ export function App(): JSX.Element {
               </Route>
               <Route path={ROUTES.chat}>
                 <ChatRoute />
+              </Route>
+              <Route path={ROUTES.agents}>
+                <AgentsRoute />
               </Route>
               <Route path="/chat/:threadId">
                 {(params) => <ChatThreadRoute threadId={params.threadId ?? ""} />}

@@ -11,6 +11,9 @@ import type {
   TaskStatus,
   PendingPermission,
   Repository,
+  RegistryAgent,
+  RegistryRefresh,
+  RegistrySnapshot,
 } from "../types";
 
 export async function fetchRepositories(signal?: AbortSignal): Promise<{ repositories: Repository[]; selected_repository_id: string | null }> {
@@ -28,6 +31,23 @@ export async function selectRepository(id: string): Promise<Repository> {
 export async function removeRepository(id: string): Promise<void> {
   const res = await fetch(`/api/repositories/${encodeURIComponent(id)}`, { method: "DELETE" });
   await jsonOrThrow(res);
+}
+
+export interface RegistryCatalogResponse {
+  agents: RegistryAgent[];
+  snapshot: RegistrySnapshot | null;
+  refresh: RegistryRefresh | null;
+  source: string;
+}
+
+export async function fetchRegistryCatalog(signal?: AbortSignal): Promise<RegistryCatalogResponse> {
+  const res = await fetch("/api/registry/agents", { signal });
+  return jsonOrThrow<RegistryCatalogResponse>(res);
+}
+
+export async function refreshRegistry(): Promise<RegistryRefresh> {
+  const res = await fetch("/api/registry/refresh", { method: "POST" });
+  return (await jsonOrThrow<{ refresh: RegistryRefresh }>(res)).refresh;
 }
 
 export interface DiffStats {
