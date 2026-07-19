@@ -4,7 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import { Link, useLocation } from "wouter";
 import { Archive, AlertCircle, ArrowLeft, Check, ChevronLeft, ChevronRight, FileText, Folder, ImagePlus, LoaderCircle, MoreHorizontal, Pencil, Pin, Plus, RefreshCw, Search, Send, Square, Trash2, X } from "lucide-react";
 import { chatAttachmentUrl } from "../api/client";
-import { useChatAgentsQuery, useChatAttachmentsQuery, useChatFileQuery, useChatFilesQuery, useChatPermissionsQuery, useChatThreadQuery, useChatThreadsQuery, useCreateThreadMutation, useDeleteThreadMutation, usePermissionMutation, useSendChatMutation, useUpdateThreadMutation, useCancelChatMutation, useUploadAttachmentMutation } from "../api/queries";
+import { useChatAgentsQuery, useChatAttachmentsQuery, useChatFileQuery, useChatFilesQuery, useChatPermissionsQuery, useChatThreadQuery, useChatThreadsQuery, useCreateThreadMutation, useDeleteThreadMutation, usePermissionMutation, useSendChatMutation, useUpdateThreadMutation, useCancelChatMutation, useUploadAttachmentMutation, useDirectorySuggestionsQuery, useRegisterRepositoryMutation, useRepositoriesQuery, useSelectRepositoryMutation } from "../api/queries";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
 import { CodeBlock } from "../codemirror/CodeBlock";
 import { useChatStore, selectMessages, selectPermissions, selectThreads } from "../state/chatStore";
@@ -230,20 +230,44 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
   const createMutation = useCreateThreadMutation();
   const sendMutation = useSendChatMutation();
   const pushError = useToastStore((state) => state.pushError);
+  const repositories = useRepositoriesQuery();
+  const register = useRegisterRepositoryMutation();
+  const select = useSelectRepositoryMutation();
+  const [projectPath, setProjectPath] = useState("~");
+  const [project, setProject] = useState<string | null>(null);
+  const [projectSearch, setProjectSearch] = useState("");
+  const directoryQuery = useDirectorySuggestionsQuery(projectPath, projectSearch);
+  const selectedRepository = repositories.data?.repositories.find((item) => item.id === repositories.data?.selected_repository_id);
+  useEffect(() => {
+    if (selectedRepository && !project) { setProject(selectedRepository.path); setProjectPath(selectedRepository.path); }
+  }, [selectedRepository, project]);
+  const chooseProject = async (path: string): Promise<void> => {
+    setProject(path);
+    setProjectPath(path);
+    setProjectSearch("");
+    try {
+      const existing = repositories.data?.repositories.find((item) => item.path === path);
+      const repo = existing ?? await register.mutateAsync(path);
+      await select.mutateAsync(repo.id);
+    } catch (error) {
+      setProject(null);
+      pushError(error instanceof Error ? error.message : "Unable to select this project.");
+    }
+  };
   const send = async (): Promise<void> => {
     const content = value.trim();
-    if (!content || sending) return;
+     if (!content || !project || sending) return;
     setSending(true);
     try {
       const [agentId, agentVersion] = agent.split("@");
-      const thread = await createMutation.mutateAsync({ agent_id: agentId, agent_version: agentVersion });
+       const thread = await createMutation.mutateAsync({ agent_id: agentId, agent_version: agentVersion, cwd: project });
       await sendMutation.mutateAsync({ id: thread.id, content });
       onCreated(thread);
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to start the conversation.");
     } finally { setSending(false); }
   };
-  return <div className="flex min-h-0 flex-1 items-center justify-center p-4 md:p-8"><div className="w-full max-w-2xl"><div className="mb-5 text-center"><h1 className="text-2xl font-semibold tracking-tight">What are you working on?</h1><p className="mt-2 text-sm text-muted">Start a conversation with a ready installed agent. The selected version is pinned to this thread.</p></div><div className="rounded-xl border border-border bg-panel p-3 shadow-sm"><Textarea value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder="Message the coding agent..." rows={4} disabled={sending || agents.length === 0} autoFocus /><div className="mt-3 flex items-center gap-2"><label className="sr-only" htmlFor="new-chat-agent">Installed agent</label><select id="new-chat-agent" value={agent} onChange={(event) => setAgent(event.target.value)} className="h-9 min-w-0 rounded-md border border-input bg-transparent px-3 text-sm" disabled={sending || agents.length === 0}>{agents.map((item) => <option key={`${item.id}@${item.version}`} value={`${item.id}@${item.version}`}>{item.id}@{item.version} {item.capabilities?.prompt.image ? "(images)" : ""}</option>)}</select><span className="text-xs text-muted">Ready</span><Button type="button" className="ml-auto" onClick={() => void send()} disabled={sending || agents.length === 0 || value.trim().length === 0}>{sending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Send aria-hidden />}Send</Button></div>{agents.length === 0 && <p className="mt-3 text-xs text-muted">Install and probe an agent in Agents before starting a thread.</p>}</div><p className="mt-2 text-center text-xs text-muted">Enter to send, Shift+Enter for a new line</p></div></div>;
+  return <div className="flex min-h-0 flex-1 items-center justify-center p-4 md:p-8"><div className="w-full max-w-3xl"><div className="mb-8 text-center"><h1 className="text-3xl font-medium tracking-tight">What should we build?</h1><p className="mt-2 text-sm text-muted">Choose a project when you are ready, then tell your ACP server what to do.</p></div><div className="rounded-2xl border border-border bg-panel p-4 shadow-sm"><Textarea value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder="Do anything" rows={4} disabled={sending || agents.length === 0} autoFocus /><div className="mt-3 flex flex-wrap items-center gap-2"><label className="sr-only" htmlFor="new-chat-agent">Installed agent</label><select id="new-chat-agent" value={agent} onChange={(event) => setAgent(event.target.value)} className="h-9 min-w-0 rounded-md border border-input bg-transparent px-3 text-sm" disabled={sending || agents.length === 0}>{agents.map((item) => <option key={`${item.id}@${item.version}`} value={`${item.id}@${item.version}`}>{item.id}@{item.version}</option>)}</select><span className="text-xs text-muted">Ready</span><Button type="button" className="ml-auto" onClick={() => void send()} disabled={sending || agents.length === 0 || !project || value.trim().length === 0}>{sending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Send aria-hidden />}Enter</Button></div><div className="relative mt-3 border-t border-border pt-3"><div className="flex items-center gap-2 text-sm"><span className="text-muted">Project</span><button type="button" className="rounded-md bg-secondary px-3 py-1.5 font-medium hover:bg-secondary/70" onClick={() => setProject((current) => current ? null : projectPath)}>{project ? project.split("/").filter(Boolean).pop() ?? "~" : "Select project"}</button><span className="truncate text-xs text-muted">{project ?? "No project selected"}</span></div>{!project && <div className="mt-2 rounded-lg border border-border bg-bg p-2"><label className="sr-only" htmlFor="project-search">Search projects</label><Input id="project-search" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Search projects" autoFocus /><div className="mt-1 max-h-48 overflow-y-auto">{directoryQuery.data?.directories.map((directory) => <button key={directory.path} type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-secondary" onClick={() => void chooseProject(directory.path)}><Folder className="size-4 text-muted" aria-hidden /><span className="min-w-0 flex-1 truncate">{directory.name}</span>{directory.is_git ? <span className="text-xs text-success">Git</span> : <span className="text-xs text-muted">Open</span>}</button>)}{directoryQuery.data?.directories.length === 0 && <p className="px-2 py-3 text-xs text-muted">No directories match here.</p>}</div><div className="mt-1 flex items-center justify-between px-2 text-xs text-muted"><span>Searching {directoryQuery.data?.display_path ?? projectPath}</span><button type="button" className="hover:text-text" onClick={() => { setProject(null); setProjectPath("~"); setProjectSearch(""); }}>Home</button></div></div>}</div>{agents.length === 0 && <p className="mt-3 text-xs text-muted">Install and probe an ACP server in Agents before starting a thread.</p>}</div><p className="mt-2 text-center text-xs text-muted">Select a project before pressing Enter. Shift+Enter adds a new line.</p></div></div>;
 }
 
 function ChatPane({ thread, seeded, live, permissions, attachments, supportsImages, onAttachments, onPermission, loading, loadError, onRetryLoad, onBack, draft, onDraftChange, sending: externalSending, filesOpen, onToggleFiles }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; permissions: PendingPermission[]; attachments: ChatAttachment[]; supportsImages: boolean; onAttachments: (items: ChatAttachment[]) => void; onPermission: (requestId: string, action: "approve" | "deny") => Promise<void>; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void; draft: string; onDraftChange: (value: string) => void; sending: boolean; filesOpen: boolean; onToggleFiles: () => void }): JSX.Element {

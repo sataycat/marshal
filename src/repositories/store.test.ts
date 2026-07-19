@@ -1,7 +1,7 @@
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { getSelectedRepository, listRepositories, registerRepository, removeRepository, selectRepository } from "./store.js";
@@ -31,6 +31,6 @@ describe("repository store", () => {
     const file = join(machine, "file"); writeFileSync(file, "x");
     expect(() => registerRepository(file, machine)).toThrow(/not a directory/);
     const plain = mkdtempSync(join(tmpdir(), "marshal-plain-")); mkdirSync(join(plain, "nested"));
-    expect(() => registerRepository(plain, machine)).toThrow(/not a git/);
+    expect(registerRepository(plain, machine)).toMatchObject({ path: realpathSync(plain), name: basename(plain) });
   });
 });

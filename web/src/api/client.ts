@@ -22,6 +22,7 @@ import type {
   WorkflowRole,
   PermissionPolicy,
   DiagnosticsResponse,
+  DirectorySuggestion,
 } from "../types";
 
 export async function fetchDiagnostics(signal?: AbortSignal): Promise<DiagnosticsResponse> { const res = await fetch("/api/diagnostics", { signal }); return jsonOrThrow<DiagnosticsResponse>(res); }
@@ -41,6 +42,12 @@ export async function selectRepository(id: string): Promise<Repository> {
 export async function removeRepository(id: string): Promise<void> {
   const res = await fetch(`/api/repositories/${encodeURIComponent(id)}`, { method: "DELETE" });
   await jsonOrThrow(res);
+}
+export async function fetchDirectorySuggestions(path = "~", query = "", signal?: AbortSignal): Promise<{ path: string; display_path: string; directories: DirectorySuggestion[] }> {
+  const params = new URLSearchParams({ path });
+  if (query) params.set("q", query);
+  const res = await fetch(`/api/repositories/directories?${params}`, { signal });
+  return jsonOrThrow(res);
 }
 
 export interface WorkflowProfileInput { name: string; permission_policy: PermissionPolicy; unattended_authorized: boolean; timeout_ms: number; max_retries: number; verification_commands: string[]; require_decorrelated_builder_validator: boolean; assignments: Array<{ role: WorkflowRole; agent_id: string; agent_version: string; model: string | null; mode: string | null }> }
@@ -294,7 +301,7 @@ export async function fetchChatThreads(includeArchived = false, signal?: AbortSi
   return body.threads;
 }
 
-export async function createChatThread(input: { agent_id: string; agent_version: string }): Promise<ChatThread> {
+export async function createChatThread(input: { agent_id: string; agent_version: string; cwd?: string }): Promise<ChatThread> {
   const res = await fetch("/api/threads", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

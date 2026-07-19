@@ -9,6 +9,7 @@ export interface Repository {
   preferences: Record<string, unknown>;
   legacy_state: "preserved" | "none";
 }
+export interface DirectorySuggestion { name: string; path: string; is_git: boolean }
 
 export type WorkflowRole = "specAuthor" | "builder" | "validator";
 export type PermissionPolicy = "reject_all" | "allow_reads_ask_writes" | "allow_workspace" | "unattended_allow_all";

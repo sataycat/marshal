@@ -1,10 +1,10 @@
 import { Hono, type Context } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import type { Server as HttpServer } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, statSync, unlinkSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, unlinkSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
-import { extname, resolve, sep } from "node:path";
-import { tmpdir } from "node:os";
+import { basename, extname, resolve, sep } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { logger } from "../logger.js";
@@ -466,6 +466,19 @@ function registerWorkflowProfileRoutes(app: Hono, machineDir?: string): void {
 function registerRepositoryRoutes(app: Hono): void {
   app.get("/api/repositories", (c) => c.json({ repositories: listRepositories(), selected_repository_id: getSelectedRepository()?.id ?? null }));
   app.get("/api/repositories/selected", (c) => c.json({ repository: getSelectedRepository() ?? null }));
+  app.get("/api/repositories/directories", (c) => {
+    const requested = c.req.query("path")?.trim() || homedir();
+    const parent = resolve(requested.replace(/^~/, homedir()));
+    if (!existsSync(parent) || !statSync(parent).isDirectory()) throw new ApiError(422, "Directory does not exist", "invalid_path");
+    const query = c.req.query("q")?.trim().toLowerCase() ?? "";
+    const directories = readdirSync(parent, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      .map((entry) => ({ name: entry.name, path: resolve(parent, entry.name), is_git: existsSync(resolve(parent, entry.name, ".git")) }))
+      .filter((entry) => !query || entry.name.toLowerCase().includes(query))
+      .sort((a, b) => Number(b.is_git) - Number(a.is_git) || a.name.localeCompare(b.name))
+      .slice(0, 30);
+    return c.json({ path: parent, display_path: parent === homedir() ? "~" : parent, directories });
+  });
   app.get("/api/repositories/:id", (c) => {
     const repository = getRepository(c.req.param("id"));
     if (!repository) throw new ApiError(404, "Repository not found", "repository_not_found");

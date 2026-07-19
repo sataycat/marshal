@@ -12,6 +12,9 @@ export function useTaskDetailQuery(slug: string) {
 export function useRepositoriesQuery() {
   return useQuery({ queryKey: queryKeys.repositories, queryFn: ({ signal }) => api.fetchRepositories(signal), ...queryOptions });
 }
+export function useDirectorySuggestionsQuery(path: string, query: string, enabled = true) {
+  return useQuery({ queryKey: ["repository-directories", path, query], queryFn: ({ signal }) => api.fetchDirectorySuggestions(path, query, signal), enabled, ...queryOptions });
+}
 export function useDiagnosticsQuery() { return useQuery({ queryKey: queryKeys.diagnostics, queryFn: ({ signal }) => api.fetchDiagnostics(signal), ...queryOptions, refetchInterval: 5000 }); }
 export function useWorkflowProfilesQuery(repositoryId: string | null) { return useQuery({ queryKey: queryKeys.workflowProfiles(repositoryId ?? ""), queryFn: ({ signal }) => api.fetchWorkflowProfiles(repositoryId ?? "", signal), enabled: Boolean(repositoryId), ...queryOptions }); }
 export const useCreateWorkflowProfileMutation = () => useMutation({ mutationFn: ({ repositoryId, input }: { repositoryId: string; input: api.WorkflowProfileInput }) => api.createWorkflowProfile(repositoryId, input) });

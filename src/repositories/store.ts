@@ -37,9 +37,12 @@ function canonicalGitRoot(input: string): string {
   if (!existsSync(requested)) throw new RepositoryError("missing_path", `Repository path does not exist: ${input}`);
   if (!statSync(requested).isDirectory()) throw new RepositoryError("not_directory", `Repository path is not a directory: ${input}`);
   let gitRoot: string;
-  try { gitRoot = execFileSync("git", ["-C", requested, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
-  catch { throw new RepositoryError("not_git", `Path is not a git worktree: ${input}`); }
-  return realpathSync(gitRoot);
+  try {
+    gitRoot = execFileSync("git", ["-C", requested, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return realpathSync(gitRoot);
+  } catch {
+    return realpathSync(requested);
+  }
 }
 
 export function listRepositories(machineDir = GLOBAL_DIR): Repository[] {

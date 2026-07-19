@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Route, Switch, Redirect } from "wouter";
+import { Route, Switch, Redirect, useLocation } from "wouter";
 import { AppShell } from "./shell/AppShell";
 import { ToastHost } from "./toast/ToastHost";
 import { ROUTES } from "./routes/routes";
@@ -7,7 +7,7 @@ import { WebSocketBridge } from "./state/WebSocketBridge";
 import { ConfirmProvider } from "./components/ConfirmDialog";
 import { AuthGate } from "./auth/AuthGate";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
-import { useRepositoriesQuery } from "./api/queries";
+import { useInstalledAgentsQuery, useRepositoriesQuery } from "./api/queries";
 import { RepositorySetup } from "./repositories/RepositorySetup";
 import { BoardRoute } from "./routes/BoardRoute";
 
@@ -30,9 +30,11 @@ function RouteFallback(): JSX.Element {
 
 export function App(): JSX.Element {
   const repositories = useRepositoriesQuery();
-  if (repositories.isPending) return <div className="flex min-h-svh items-center justify-center bg-bg text-muted">Loading repositories...</div>;
-  if (repositories.isError) return <div className="flex min-h-svh items-center justify-center bg-bg text-danger">Unable to load repositories: {repositories.error.message}</div>;
-  if (!repositories.data.selected_repository_id) return <RepositorySetup repositories={repositories.data.repositories} />;
+  const agents = useInstalledAgentsQuery();
+  const [location] = useLocation();
+  if (repositories.isPending || agents.isPending) return <div className="flex min-h-svh items-center justify-center bg-bg text-muted">Loading Marshal...</div>;
+  if (repositories.isError || agents.isError) return <div className="flex min-h-svh items-center justify-center bg-bg text-danger">Unable to load Marshal: {(repositories.error ?? agents.error)?.message}</div>;
+  if (!agents.data.some((agent) => agent.status === "installed") && location !== ROUTES.agents) return <RepositorySetup />;
   return (
     <AppErrorBoundary>
       <AuthGate>
