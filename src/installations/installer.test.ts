@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { exactNpxPackage, exactUvxPackage, installBinary, installCandidate, selectDistribution, startInstallation } from "./installer.js";
+import { cancelInstallationOperation, exactNpxPackage, exactUvxPackage, installBinary, installCandidate, selectDistribution, startInstallation } from "./installer.js";
 import { createInstallation, getInstalledAgent, getInstallationOperation, reconcileInstallationOperations } from "../agents/store.js";
 import type { RegistryAgent } from "../registry/types.js";
 
@@ -61,6 +61,18 @@ describe("uvx installations", () => {
   it("accepts only exact package launch pins for both package distributions", () => {
     expect(exactNpxPackage("precedence@1.2.3")).toBe("precedence@1.2.3");
     expect(exactUvxPackage("precedence==1.2.3")).toBe("precedence==1.2.3");
+  });
+
+  it("cancels before publication, cleans the temporary root, and remains retryable", async () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-cancel-`); let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    const operation = await startInstallation(uvxAgent, machineDir, async () => waiting);
+    const cancelled = cancelInstallationOperation(operation.id, machineDir);
+    expect(cancelled).toMatchObject({ status: "interrupted", phase: "interrupted", error_code: "installation_cancelled" });
+    release(); await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(existsSync(cancelled.temporary_root ?? "")).toBe(false);
+    const retry = await startInstallation(uvxAgent, machineDir, async () => undefined, undefined, { retry: true });
+    expect(retry.id).not.toBe(operation.id);
   });
 
   it("rejects moving aliases and preserves exact package pins", () => {

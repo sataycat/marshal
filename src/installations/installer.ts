@@ -8,7 +8,7 @@ import { GLOBAL_DIR } from "../daemon/config.js";
 import { getRegistryCatalog } from "../registry/store.js";
 import type { RegistryAgent } from "../registry/types.js";
 import type { RegistryDistribution } from "../registry/types.js";
-import { createInstallation, finishInstallation, getInstalledAgent, getInstallationOperation, getLatestInstallationOperation, persistInstallationIntegrity, updateInstallationPhase, getInstallationByIdentity } from "../agents/store.js";
+import { cancelInstallation, createInstallation, finishInstallation, getInstalledAgent, getInstallationOperation, getLatestInstallationOperation, persistInstallationIntegrity, updateInstallationPhase, getInstallationByIdentity } from "../agents/store.js";
 import type { AgentLaunchSpec, InstallationOperation } from "../agents/types.js";
 import type { EventBus } from "../daemon/bus.js";
 import { publishInstallationOperationUpdated } from "../daemon/bus.js";
@@ -91,6 +91,7 @@ export function runNpx(packageSpecifier: string, cwd: string): Promise<void> {
 export interface UvxRunner { (packageSpecifier: string, cwd: string): Promise<void>; }
 
 export interface BinaryInstallOptions { allowUnverified?: boolean; fetch?: typeof fetch; retry?: boolean; }
+const installationRoots = new Map<string, string>();
 
 async function downloadBinary(url: string, fetchImpl: typeof fetch, redirects = 0): Promise<Uint8Array> {
   if (redirects > BINARY_MAX_REDIRECTS) throw new Error("binary redirect limit exceeded");
@@ -133,10 +134,10 @@ export async function installBinary(agent: RegistryAgent, distribution: Registry
     else throw new Error("binary distribution is incomplete");
     const launch = binaryLaunch(temp, distribution.executable, distribution.args ?? [], distribution.env); chmodSync(launch.command, 0o755);
     writeFileSync(resolve(temp, "manifest.json"), JSON.stringify({ agent_id: agent.id, version: agent.version, installation_id: operation.installation_id, archive_url: distribution.archive_url, expected_digest: distribution.checksum ?? null, observed_digest: observed, integrity_status: distribution.checksum ? "verified" : "unverified", launch: { executable: distribution.executable, args: distribution.args ?? [], env: distribution.env ?? null } }) + "\n");
-    updateInstallationPhase(operationId, "publishing", {}, machineDir); publish(); mkdirSync(dirname(root), { recursive: true }); if (existsSync(root)) throw new Error("installation publication target already exists"); renameSync(temp, root);
+     if (getInstallationOperation(operationId, machineDir)?.status !== "installing") throw new Error("installation cancelled"); updateInstallationPhase(operationId, "publishing", {}, machineDir); publish(); mkdirSync(dirname(root), { recursive: true }); if (getInstallationOperation(operationId, machineDir)?.status !== "installing") throw new Error("installation cancelled"); if (existsSync(root)) throw new Error("installation publication target already exists"); renameSync(temp, root);
     finishInstallation(operationId, "installed", null, machineDir); publish();
   } catch (error) { finishInstallation(operationId, "failed", error instanceof Error ? error.message : String(error), machineDir, { code: failureCode(error), diagnostic: { message: error instanceof Error ? error.message : String(error), action: "Review the diagnostic and retry the installation." } }); publish(); }
-  finally { rmSync(temp, { recursive: true, force: true }); }
+  finally { rmSync(temp, { recursive: true, force: true }); installationRoots.delete(operationId); }
 }
 
 export function runUvx(packageSpecifier: string, cwd: string): Promise<void> {
@@ -157,7 +158,7 @@ export async function startInstallation(agent: RegistryAgent, machineDir = GLOBA
      const installationId = `${agent.id}@${agent.version}:binary:${distribution.archive_url}`; const duplicate = getInstallationByIdentity(agent.id, agent.version, "binary", installationId, machineDir); if (duplicate && !options.retry) return duplicate;
     const operationId = randomUUID(); const root = resolve(machineDir, "agents", agent.id, agent.version, randomUUID()); mkdirSync(resolve(machineDir, "agents"), { recursive: true }); const temp = mkdtempSync(resolve(machineDir, "agents", `.tmp-${randomUUID()}-`)); const integrity = distribution.checksum ? "unknown" : "unverified";
     const operation = createInstallation({ id: agent.id, version: agent.version, source: "registry", license: agent.license, distribution: "binary", package_specifier: null, launch: { command: resolve(root, distribution.executable ?? "") , args: distribution.args ?? [], env: distribution.env }, provenance: { exact_version: agent.version, distribution: "binary", source: "registry", package_specifier: null, archive_identity: distribution.archive_url ?? null, registry_snapshot_fetched_at: getRegistryCatalog(machineDir).snapshot?.fetched_at ?? "unknown", installation_root: root, integrity_status: integrity, expected_digest: distribution.checksum ?? null, observed_digest: null }, installation_id: installationId, installation_root: root, registry_snapshot_fetched_at: getRegistryCatalog(machineDir).snapshot?.fetched_at ?? "unknown", integrity_status: integrity, status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, operationId, machineDir, { phase: "resolving", temporary_root: temp, published_root: root });
-     void installBinary(agent, distribution, machineDir, operationId, options.allowUnverified, options.fetch, bus).catch(() => undefined); return operation;
+      installationRoots.set(operationId, temp); void installBinary(agent, distribution, machineDir, operationId, options.allowUnverified, options.fetch, bus).catch(() => undefined); return operation;
   }
   if (!distribution.package) throw new Error(`agent does not provide a ${distribution.kind} distribution`);
   const packageSpecifier = distribution.kind === "npx" ? exactNpxPackage(distribution.package) : exactUvxPackage(distribution.package);
@@ -169,7 +170,7 @@ export async function startInstallation(agent: RegistryAgent, machineDir = GLOBA
   const operationId = randomUUID();
   mkdirSync(resolve(machineDir, "agents"), { recursive: true });
   const installationRoot = resolve(machineDir, "agents", agent.id, agent.version, randomUUID());
-  const temporaryRoot = mkdtempSync(resolve(machineDir, "agents", ".tmp-package-"));
+   const temporaryRoot = mkdtempSync(resolve(machineDir, "agents", ".tmp-package-")); installationRoots.set(operationId, temporaryRoot);
   const launch = distribution.kind === "npx" ? { command: "npx", args: ["--yes", packageSpecifier, ...(distribution.args ?? [])] } : { command: "uvx", args: ["--from", packageSpecifier, packageSpecifier.slice(0, packageSpecifier.indexOf("==")), ...(distribution.args ?? [])] };
   const provenance = { exact_version: agent.version, distribution: distribution.kind, source: "registry" as const, package_specifier: packageSpecifier, archive_identity: null, registry_snapshot_fetched_at: getRegistryCatalog(machineDir).snapshot?.fetched_at ?? "unknown", installation_root: installationRoot, integrity_status: "not_applicable" as const };
   const operation = createInstallation({ id: agent.id, version: agent.version, source: "registry", license: agent.license, distribution: distribution.kind, package_specifier: packageSpecifier, launch: launch satisfies AgentLaunchSpec, provenance, installation_id: installationId, installation_root: installationRoot, registry_snapshot_fetched_at: provenance.registry_snapshot_fetched_at, integrity_status: provenance.integrity_status, status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, operationId, machineDir, { temporary_root: temporaryRoot, published_root: installationRoot });
@@ -177,14 +178,22 @@ export async function startInstallation(agent: RegistryAgent, machineDir = GLOBA
    publish();
    void (async () => {
        try {
-        updateInstallationPhase(operationId, "downloading", {}, machineDir); publish(); await installRunner(packageSpecifier, temporaryRoot);
-        updateInstallationPhase(operationId, "verifying", {}, machineDir); publish(); updateInstallationPhase(operationId, "publishing", {}, machineDir); publish(); writeFileSync(resolve(temporaryRoot, "manifest.json"), JSON.stringify({ agent_id: agent.id, version: agent.version, installation_id: installationId, package_specifier: packageSpecifier, installed_at: new Date().toISOString() }) + "\n", { encoding: "utf8" }); mkdirSync(dirname(installationRoot), { recursive: true }); if (existsSync(installationRoot)) throw new Error("installation publication target already exists"); renameSync(temporaryRoot, installationRoot);
+         updateInstallationPhase(operationId, "downloading", {}, machineDir); publish(); await installRunner(packageSpecifier, temporaryRoot);
+         if (getInstallationOperation(operationId, machineDir)?.status !== "installing") throw new Error("installation cancelled");
+         updateInstallationPhase(operationId, "verifying", {}, machineDir); publish(); updateInstallationPhase(operationId, "publishing", {}, machineDir); publish(); writeFileSync(resolve(temporaryRoot, "manifest.json"), JSON.stringify({ agent_id: agent.id, version: agent.version, installation_id: installationId, package_specifier: packageSpecifier, installed_at: new Date().toISOString() }) + "\n", { encoding: "utf8" }); mkdirSync(dirname(installationRoot), { recursive: true }); if (getInstallationOperation(operationId, machineDir)?.status !== "installing") throw new Error("installation cancelled"); if (existsSync(installationRoot)) throw new Error("installation publication target already exists"); renameSync(temporaryRoot, installationRoot);
         finishInstallation(operationId, "installed", null, machineDir); publish();
     } catch (error) {
-       finishInstallation(operationId, "failed", error instanceof Error ? error.message : String(error), machineDir, { code: failureCode(error), diagnostic: { message: error instanceof Error ? error.message : String(error), action: "Review the diagnostic and retry the installation." } }); publish();
-     } finally { if (existsSync(temporaryRoot)) rmSync(temporaryRoot, { recursive: true, force: true }); }
+        if (getInstallationOperation(operationId, machineDir)?.status === "installing") finishInstallation(operationId, "failed", error instanceof Error ? error.message : String(error), machineDir, { code: failureCode(error), diagnostic: { message: error instanceof Error ? error.message : String(error), action: "Retry the installation." } }); publish();
+      } finally { if (existsSync(temporaryRoot)) rmSync(temporaryRoot, { recursive: true, force: true }); installationRoots.delete(operationId); }
   })();
   return operation;
+}
+
+export function cancelInstallationOperation(operationId: string, machineDir = GLOBAL_DIR, bus?: EventBus): InstallationOperation {
+  const operation = getInstallationOperation(operationId, machineDir); if (!operation) throw new Error("installation operation not found");
+  if (operation.status !== "installing") return operation;
+  const temp = installationRoots.get(operationId) ?? operation.temporary_root; if (temp) rmSync(temp, { recursive: true, force: true });
+  const cancelled = cancelInstallation(operationId, machineDir); if (bus) publishInstallationOperationUpdated(bus, cancelled); return cancelled;
 }
 
 export function installationOperation(id: string, machineDir = GLOBAL_DIR): InstallationOperation {

@@ -187,6 +187,15 @@ export function finishInstallation(operationId: string, status: "installed" | "f
   return getInstallationOperation(operationId, machineDir)!;
 }
 
+export function cancelInstallation(operationId: string, machineDir?: string): InstallationOperation {
+  const db = tables(machineDir); const now = new Date().toISOString();
+  db.transaction(() => {
+    db.prepare("UPDATE installation_operations SET status = 'interrupted', phase = 'interrupted', finished_at = ?, error = ?, error_code = ?, diagnostic = ? WHERE id = ? AND status = 'installing'").run(now, "Installation cancelled by the user", "installation_cancelled", JSON.stringify({ message: "Installation cancelled before publication", action: "Retry the installation." }), operationId);
+    db.prepare("UPDATE installed_agents SET status = 'interrupted', updated_at = ?, failure = ? WHERE id = (SELECT agent_id FROM installation_operations WHERE id = ?) AND version = (SELECT version FROM installation_operations WHERE id = ?) AND distribution = (SELECT distribution FROM installation_operations WHERE id = ?) AND installation_id = (SELECT installation_id FROM installation_operations WHERE id = ?) AND status = 'installing'").run(now, "Installation cancelled by the user", operationId, operationId, operationId, operationId);
+  })();
+  return getInstallationOperation(operationId, machineDir)!;
+}
+
 export function reconcileInstallationOperations(machineDir?: string): void {
   const db = tables(machineDir);
   const rows = db.prepare("SELECT * FROM installation_operations WHERE status = 'installing'").all() as Record<string, unknown>[];

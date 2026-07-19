@@ -52,6 +52,13 @@ describe("installation operation API durability", () => {
     expect(response.status).toBe(202);
     expect((await response.json() as { operation: { agent_id: string; status: string } }).operation).toMatchObject({ agent_id: "retry-agent", status: "installing" });
   });
+
+  it("cancels an installation through the durable API", async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-cancel-api-"));
+    const operation = createInstallation({ id: "cancel-agent", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "cancel-agent@1.0.0", launch: { command: "npx", args: ["cancel-agent@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "cancel-op", machineDir);
+    const app = buildApp("0.0.1", { machineDir }); const response = await app.request(`/api/agents/operations/${operation.id}/cancel`, { method: "POST" });
+    expect(response.status).toBe(200); expect((await response.json() as { operation: { status: string; error_code: string } }).operation).toMatchObject({ status: "interrupted", error_code: "installation_cancelled" });
+  });
   it("hydrates progress and terminal diagnostics from durable storage", async () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-api-"));
     const operation = createInstallation({ id: "demo", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "demo@1.0.0", launch: { command: "npx", args: ["demo@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "op-api", machineDir);

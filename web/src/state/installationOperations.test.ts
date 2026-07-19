@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyInstallationOperationEvent, isTerminalInstallationOperation, retryInstallationOperation, type InstallationOperationsState } from "./installationOperations";
+import { applyInstallationOperationEvent, cancelInstallationOperation, isTerminalInstallationOperation, retryInstallationOperation, type InstallationOperationsState } from "./installationOperations";
 import type { InstallationOperation } from "../types";
 
 function operation(overrides: Partial<InstallationOperation> = {}): InstallationOperation {
@@ -27,5 +27,12 @@ describe("installation operation state", () => {
     const failed = operation({ phase: "failed", status: "failed", finished_at: "later", error: "nope", error_code: "installation_failed", diagnostic: { message: "nope", action: "Retry" } });
     const retried = retryInstallationOperation({ byId: {} }, failed).byId[failed.id];
     expect(retried).toMatchObject({ id: failed.id, status: "installing", phase: "resolving", finished_at: null, error: null, error_code: null, diagnostic: null });
+  });
+
+  it("marks a live operation interrupted and ignores cancellation after terminal state", () => {
+    const live = operation({ phase: "downloading" });
+    expect(cancelInstallationOperation({ byId: {} }, live).byId[live.id]).toMatchObject({ status: "interrupted", phase: "interrupted", error_code: "installation_cancelled" });
+    const done = operation({ phase: "completed", status: "installed" });
+    expect(cancelInstallationOperation({ byId: { [done.id]: done } }, done).byId[done.id]).toEqual(done);
   });
 });

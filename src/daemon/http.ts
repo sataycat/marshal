@@ -73,7 +73,7 @@ import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
 import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
 import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, listInstallationOperations, getInstallationOperation, removeInstalledAgent, executeAgentRemoval, getAgentRemovalOperation, listAgentRemovalOperations, setAgentReadiness, setDefaultInstalledAgent, getDefaultInstalledAgent } from "../agents/store.js";
-import { installationOperation, installCandidate, startInstallation } from "../installations/installer.js";
+import { cancelInstallationOperation, installationOperation, installCandidate, startInstallation } from "../installations/installer.js";
 import { probeAgent } from "../acp/probe.js";
 import { authenticateAgent } from "../acp/authenticate.js";
 import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
@@ -662,6 +662,10 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
   app.get("/api/agents/operations/:id", (c) => {
     try { return c.json({ operation: installationOperation(c.req.param("id"), machineDir) }); }
     catch { throw new ApiError(404, "Installation operation not found", "operation_not_found"); }
+  });
+  app.post("/api/agents/operations/:id/cancel", (c) => {
+    try { return c.json({ operation: cancelInstallationOperation(c.req.param("id"), machineDir, bus) }); }
+    catch (error) { throw new ApiError(409, error instanceof Error ? error.message : String(error), "installation_cancel_failed"); }
   });
   app.post("/api/agents/operations/:id/retry", async (c) => {
     const prior = getInstallationOperation(c.req.param("id"), machineDir);
