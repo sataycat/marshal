@@ -40,11 +40,16 @@ export interface InstallCandidate {
 
 export function selectDistribution(agent: RegistryAgent, platform = `${process.platform}-${process.arch}`, preferred?: RegistryDistribution["kind"]): RegistryDistribution {
   if (preferred) {
-    const selected = agent.distributions.find((entry) => entry.kind === preferred && (entry.kind !== "binary" || entry.platforms?.includes(platform)));
+    const candidates = agent.distributions.filter((entry) => entry.kind === preferred && (entry.kind !== "binary" || entry.platforms?.includes(platform)));
+    const selected = preferred === "binary" ? (candidates.find((entry) => Boolean(entry.checksum)) ?? candidates[0]) : candidates[0];
     if (!selected) throw new Error(`agent does not provide a ${preferred} distribution for ${platform}`);
     return selected;
   }
-  const binary = agent.distributions.find((entry) => entry.kind === "binary" && entry.platforms?.includes(platform));
+  // A compatible, checksummed archive is the strongest local distribution. Do
+  // not let registry ordering make an unverified binary win over a verified
+  // one; checksumless binaries remain an explicit opt-in.
+  const compatibleBinaries = agent.distributions.filter((entry) => entry.kind === "binary" && entry.platforms?.includes(platform));
+  const binary = compatibleBinaries.find((entry) => Boolean(entry.checksum)) ?? compatibleBinaries[0];
   return binary ?? agent.distributions.find((entry) => entry.kind === "npx") ?? agent.distributions.find((entry) => entry.kind === "uvx") ?? (() => { throw new Error(`agent does not provide a supported distribution for ${platform}`); })();
 }
 

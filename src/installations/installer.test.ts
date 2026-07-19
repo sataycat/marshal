@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { exactUvxPackage, selectDistribution, startInstallation } from "./installer.js";
+import { exactNpxPackage, exactUvxPackage, installCandidate, selectDistribution, startInstallation } from "./installer.js";
 import { createInstallation, getInstalledAgent, getInstallationOperation, reconcileInstallationOperations } from "../agents/store.js";
 import type { RegistryAgent } from "../registry/types.js";
 
@@ -11,6 +11,28 @@ const uvxAgent: RegistryAgent = {
 };
 
 describe("uvx installations", () => {
+  it("uses lifecycle distribution precedence and honors an explicit override", () => {
+    const agent: RegistryAgent = {
+      id: "precedence", name: "Precedence", version: "1.2.3", description: "fixture", license: "MIT", authors: [],
+      distributions: [
+        { kind: "binary", platforms: ["linux-x64"], archive_url: "https://example.invalid/unverified.tgz", archive_format: "tgz", executable: "agent" },
+        { kind: "binary", platforms: ["linux-x64"], archive_url: "https://example.invalid/verified.tgz", archive_format: "tgz", checksum: "a".repeat(64), executable: "agent" },
+        { kind: "npx", package: "precedence@1.2.3" },
+        { kind: "uvx", package: "precedence==1.2.3" },
+      ],
+    };
+    expect(selectDistribution(agent, "linux-x64").archive_url).toContain("verified");
+    expect(selectDistribution(agent, "linux-arm64").kind).toBe("npx");
+    expect(selectDistribution(agent, "linux-x64", "npx").kind).toBe("npx");
+    expect(selectDistribution(agent, "linux-x64", "uvx").kind).toBe("uvx");
+    expect(installCandidate(agent, "linux-x64", "binary")).toMatchObject({ checksum: "a".repeat(64), integrity_policy: "verified_if_declared" });
+  });
+
+  it("accepts only exact package launch pins for both package distributions", () => {
+    expect(exactNpxPackage("precedence@1.2.3")).toBe("precedence@1.2.3");
+    expect(exactUvxPackage("precedence==1.2.3")).toBe("precedence==1.2.3");
+  });
+
   it("rejects moving aliases and preserves exact package pins", () => {
     expect(exactUvxPackage("uv-agent==1.2.3")).toBe("uv-agent==1.2.3");
     for (const value of ["uv-agent", "uv-agent==latest", "uv-agent==main", "uv-agent==1.2", "uv-agent==1.2.3 foo"]) {

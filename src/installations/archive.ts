@@ -23,7 +23,7 @@ function checkLimits(entries: number, expanded: number, compressed: number): voi
   if (compressed > 0 && expanded / compressed > ARCHIVE_MAX_COMPRESSION_RATIO) throw new Error("archive compression ratio limit exceeded");
 }
 
-export function extractTar(bytes: Uint8Array, root: string): void {
+export function extractTar(bytes: Uint8Array, root: string, compressedBytes = bytes.byteLength): void {
   let offset = 0; let entries = 0; let expanded = 0;
   while (offset + 512 <= bytes.byteLength) {
     const header = bytes.subarray(offset, offset + 512); offset += 512;
@@ -32,7 +32,7 @@ export function extractTar(bytes: Uint8Array, root: string): void {
     const prefix = new TextDecoder().decode(header.subarray(345, 500)).replace(/\0.*$/, "");
     const fullName = prefix ? `${prefix}/${name}` : name;
     const size = Number.parseInt(new TextDecoder().decode(header.subarray(124, 136)).replace(/\0.*$/, "").trim() || "0", 8);
-    const type = header[156]; entries++; expanded += size; checkLimits(entries, expanded, bytes.byteLength);
+    const type = header[156]; entries++; expanded += size; checkLimits(entries, expanded, compressedBytes);
     if ([50, 49, 51, 52, 54].includes(type)) throw new Error("archive contains an unsupported link or device entry");
     if (![0, 48, 53].includes(type)) throw new Error("archive contains an unsupported entry");
     const payload = bytes.subarray(offset, offset + size); if (payload.byteLength !== size) throw new Error("archive entry is truncated");
@@ -62,5 +62,5 @@ export function extractZip(bytes: Uint8Array, root: string): void {
 
 export function extractArchive(bytes: Uint8Array, format: "tar.gz" | "tgz" | "zip", root: string): void {
   mkdirSync(root, { recursive: true });
-  if (format === "zip") extractZip(bytes, root); else extractTar(gunzipSync(bytes), root);
+  if (format === "zip") extractZip(bytes, root); else extractTar(gunzipSync(bytes), root, bytes.byteLength);
 }

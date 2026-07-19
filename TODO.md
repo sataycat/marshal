@@ -103,9 +103,9 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 
 ### 11. Verify the complete ADR lifecycle
 
-- [ ] Add focused coverage for distribution selection precedence: checksummed compatible binary, exact `npx`, exact `uvx`, and explicit user override.
-- [ ] Cover checksum match, mismatch, checksumless policy, unsafe archive entries, extraction limits, executable containment, and no-shell launch.
-- [ ] Cover atomic publication, interrupted-operation recovery, stale temporary cleanup, duplicate requests, cancellation, and retry.
-- [ ] Cover side-by-side versions, default selection, update immutability, active-reference removal conflicts, payload cleanup, and historical provenance.
-- [ ] Cover API and WebSocket recovery after browser refresh and daemon restart.
-- [ ] Run `pnpm run check`, `pnpm run test`, and the relevant daemon/API integration tests before considering ADR-0008 implemented.
+- [x] Add focused coverage for distribution selection precedence: checksummed compatible binary, exact `npx`, exact `uvx`, and explicit user override. (Selection and exact package-pin coverage added; the remaining lifecycle checks are tracked below.)
+- [ ] Cover checksum match, mismatch, checksumless policy, unsafe archive entries, extraction limits, executable containment, and no-shell launch. (Archive limits and no-shell launch covered; binary checksum/policy and containment still need focused end-to-end coverage.)
+- [ ] Cover atomic publication, interrupted-operation recovery, stale temporary cleanup, duplicate requests, cancellation, and retry. (Atomic publication, interrupted recovery, stale cleanup, and duplicate requests covered; installation cancellation and retry APIs are not supported, so no cancellation test was added.)
+- [x] Cover side-by-side versions, default selection, update immutability, active-reference removal conflicts, payload cleanup, and historical provenance. (Existing focused coverage covers these areas.)
+- [ ] Cover API and WebSocket recovery after browser refresh and daemon restart. (Refresh/reconnect hydration is covered; daemon-restart recovery still needs an integration test.)
+- [x] Run `pnpm run check`, `pnpm run test`, and the relevant daemon/API integration tests before considering ADR-0008 implemented. (`pnpm run check`, full `pnpm run test`, and focused daemon/API tests passed; ADR completion remains blocked by the incomplete boxes above.)
