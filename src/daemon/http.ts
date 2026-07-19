@@ -72,7 +72,7 @@ import { getRepository, getSelectedRepository, listRepositories, registerReposit
 import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
 import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
-import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, removeInstalledAgent, executeAgentRemoval, getAgentRemovalOperation, listAgentRemovalOperations, setAgentReadiness, setDefaultInstalledAgent, getDefaultInstalledAgent } from "../agents/store.js";
+import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, listInstallationOperations, removeInstalledAgent, executeAgentRemoval, getAgentRemovalOperation, listAgentRemovalOperations, setAgentReadiness, setDefaultInstalledAgent, getDefaultInstalledAgent } from "../agents/store.js";
 import { installationOperation, installCandidate, startInstallation } from "../installations/installer.js";
 import { probeAgent } from "../acp/probe.js";
 import { authenticateAgent } from "../acp/authenticate.js";
@@ -652,9 +652,12 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
     if (!agentId || !version) throw new ApiError(422, "agent_id and version are required", "missing_query");
     const agent = getRegistryCatalog(machineDir).snapshot?.agents.find((entry) => entry.id === agentId && entry.version === version);
     if (!agent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
-    try { return c.json({ candidate: installCandidate(agent) }); }
+    const distribution = c.req.query("distribution");
+    if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution)) throw new ApiError(422, "distribution is invalid", "installation_invalid");
+    try { return c.json({ candidate: installCandidate(agent, `${process.platform}-${process.arch}`, distribution as "npx" | "uvx" | "binary" | undefined) }); }
     catch (error) { throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid"); }
   });
+  app.get("/api/agents/operations", (c) => c.json({ operations: listInstallationOperations(machineDir) }));
   app.get("/api/agents/operations/:id", (c) => {
     try { return c.json({ operation: installationOperation(c.req.param("id"), machineDir) }); }
     catch { throw new ApiError(404, "Installation operation not found", "operation_not_found"); }

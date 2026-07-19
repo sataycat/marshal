@@ -102,6 +102,16 @@ Expected:
 
 Refresh the browser after probing and reopen **Agents**. The readiness state, failure message, protocol version, and capability snapshot must remain available.
 
+### 3.6.1 Agent installation trust and lifecycle
+
+In **Agents**, distinguish the catalog card from the installed-version rows and the durable operation history. For an agent with multiple supported distributions, choose each distribution in turn and confirm the daemon rejects an unsupported or unavailable override.
+
+Before confirming installation or update, verify the confirmation describes the exact version, registry source, selected distribution, license, package/archive identity, checksum (or that a binary is unverified), integrity policy, and the requested trust transition: downloading and permitting third-party ACP code to run. Launch commands and installation roots must not appear as editable ordinary configuration.
+
+Expected lifecycle states include **Installing**, **Installed**, **Ready**, **Authentication required**, **Failed**, and **Interrupted**. Binary installs additionally show **Verified**, **Unverified**, or **Mismatch** integrity. A mismatch must never become launchable; an unverified binary requires explicit confirmation. Probe binary, `npx`, and `uvx` installations and confirm ACP capability controls (for example image prompts) reflect the negotiated readiness result.
+
+Refresh during an install or update, then restart the daemon. The operation list must recover its phase and terminal diagnostic, and partial installations must not become selectable. Install a newer version beside the old one, confirm both rows remain available and existing threads retain their pinned version. Remove an unused version; if it is referenced by a live/recoverable session, active authentication, workflow assignment, or default selection, confirm removal is blocked with reference details. Resolve the conflict, retry cleanup, and verify only Marshal-owned payloads are removed while historical provenance remains readable.
+
 ### 3.7 Agent-managed authentication
 
 Use a registry agent or ACP fixture that advertises an `agent` authentication method. On its card, click **Authenticate** and follow the agent-owned browser/OAuth flow if one opens.

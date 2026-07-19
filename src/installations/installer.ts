@@ -48,8 +48,8 @@ export function selectDistribution(agent: RegistryAgent, platform = `${process.p
   return binary ?? agent.distributions.find((entry) => entry.kind === "npx") ?? agent.distributions.find((entry) => entry.kind === "uvx") ?? (() => { throw new Error(`agent does not provide a supported distribution for ${platform}`); })();
 }
 
-export function installCandidate(agent: RegistryAgent, platform = `${process.platform}-${process.arch}`): InstallCandidate {
-  const distribution = selectDistribution(agent, platform);
+export function installCandidate(agent: RegistryAgent, platform = `${process.platform}-${process.arch}`, preferred?: RegistryDistribution["kind"]): InstallCandidate {
+  const distribution = selectDistribution(agent, platform, preferred);
   const binary = distribution.kind === "binary";
   return { agent_id: agent.id, version: agent.version, source: "registry", license: agent.license, distribution, checksum: distribution.checksum ?? null, integrity_policy: binary ? (distribution.checksum ? "verified_if_declared" : "unverified_binary_allowed") : "not_applicable", installation_risk: binary ? (distribution.checksum ? "medium" : "high") : "medium" };
 }

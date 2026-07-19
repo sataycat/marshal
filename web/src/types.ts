@@ -19,6 +19,13 @@ export interface RegistryDistribution {
   kind: "npx" | "uvx" | "binary";
   package?: string;
   platforms?: string[];
+  args?: string[];
+  platform?: string;
+  archive_url?: string;
+  archive_format?: "tar.gz" | "tgz" | "zip";
+  checksum?: string;
+  executable?: string;
+  env?: Record<string, string>;
 }
 
 export interface RegistryAgent {
@@ -46,10 +53,10 @@ export interface InstalledAgent {
   source: "registry";
   license: string;
   distribution: "npx" | "uvx" | "binary";
-  package_specifier: string;
-  launch: { command: "npx" | "uvx"; args: string[] };
+  package_specifier: string | null;
+  launch: { command: string; args: string[]; env?: Record<string, string> };
   registry_snapshot_fetched_at: string;
-  integrity_status: "not_applicable";
+  integrity_status: "verified" | "unverified" | "mismatch" | "not_applicable" | "unknown";
   status: InstalledAgentStatus;
   created_at: string;
   updated_at: string;

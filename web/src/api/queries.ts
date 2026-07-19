@@ -20,11 +20,17 @@ export const useDeleteWorkflowProfileMutation = () => useMutation({ mutationFn: 
 export function useRegistryQuery() {
   return useQuery({ queryKey: queryKeys.registry, queryFn: ({ signal }) => api.fetchRegistryCatalog(signal), ...queryOptions, refetchInterval: (query) => query.state.data?.refresh?.status === "running" ? 1000 : false });
 }
+export function useInstallCandidateQuery(agentId: string | null, version: string | null, distribution?: "npx" | "uvx" | "binary") {
+  return useQuery({ queryKey: [...queryKeys.registry, "candidate", agentId ?? "", version ?? "", distribution ?? "auto"], queryFn: ({ signal }) => api.fetchInstallCandidate(agentId!, version!, distribution, signal), enabled: Boolean(agentId && version), ...queryOptions });
+}
 export function useInstalledAgentsQuery() {
   return useQuery({ queryKey: queryKeys.installedAgents, queryFn: ({ signal }) => api.fetchInstalledAgents(signal), ...queryOptions, refetchInterval: (query) => query.state.data?.some((agent) => agent.status === "installing") ? 1000 : false });
 }
 export function useInstallationQuery(id: string | null) {
   return useQuery({ queryKey: queryKeys.installation(id ?? ""), queryFn: ({ signal }) => api.fetchInstallationOperation(id ?? "", signal), enabled: Boolean(id), ...queryOptions, refetchInterval: (query) => query.state.data && isTerminalInstallationOperation(query.state.data) ? false : 1000 });
+}
+export function useInstallationOperationsQuery() {
+  return useQuery({ queryKey: [...queryKeys.installedAgents, "operations"], queryFn: ({ signal }) => api.fetchInstallationOperations(signal), ...queryOptions, refetchInterval: (query) => query.state.data?.some((operation) => !isTerminalInstallationOperation(operation)) ? 1000 : false });
 }
 export const useRefreshRegistryMutation = () => useMutation({ mutationFn: api.refreshRegistry });
 export const useInstallRegistryAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, distribution }: { agentId: string; version: string; distribution?: "npx" | "uvx" | "binary" }) => api.installRegistryAgent(agentId, version, distribution) });

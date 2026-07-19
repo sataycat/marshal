@@ -239,6 +239,11 @@ export function getInstallationOperation(id: string, machineDir?: string): Insta
   return row ? operation(row) : undefined;
 }
 
+export function listInstallationOperations(machineDir?: string): InstallationOperation[] {
+  const db = tables(machineDir);
+  return (db.prepare("SELECT * FROM installation_operations ORDER BY started_at DESC").all() as Record<string, unknown>[]).map(operation);
+}
+
 export function getLatestAgentAuthenticationOperation(id: string, version: string, machineDir?: string): AgentAuthenticationOperation | undefined {
   const db = tables(machineDir);
   const row = db.prepare("SELECT * FROM agent_authentication_operations WHERE agent_id = ? AND version = ? ORDER BY started_at DESC LIMIT 1").get(id, version) as Record<string, unknown> | undefined;

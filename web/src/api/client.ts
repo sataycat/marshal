@@ -60,6 +60,13 @@ export async function fetchRegistryCatalog(signal?: AbortSignal): Promise<Regist
   const res = await fetch("/api/registry/agents", { signal });
   return jsonOrThrow<RegistryCatalogResponse>(res);
 }
+export interface InstallCandidate { agent_id: string; version: string; source: "registry"; license: string; distribution: RegistryAgent["distributions"][number]; checksum: string | null; integrity_policy: "verified_if_declared" | "unverified_binary_allowed" | "not_applicable"; installation_risk: "low" | "medium" | "high" }
+export async function fetchInstallCandidate(agentId: string, version: string, distribution?: "npx" | "uvx" | "binary", signal?: AbortSignal): Promise<InstallCandidate> {
+  const params = new URLSearchParams({ agent_id: agentId, version });
+  if (distribution) params.set("distribution", distribution);
+  const res = await fetch(`/api/agents/install-candidate?${params}`, { signal });
+  return (await jsonOrThrow<{ candidate: InstallCandidate }>(res)).candidate;
+}
 
 export async function refreshRegistry(): Promise<RegistryRefresh> {
   const res = await fetch("/api/registry/refresh", { method: "POST" });
@@ -81,6 +88,10 @@ export async function setDefaultInstalledAgent(agentId: string, installationId: 
 export async function fetchInstallationOperation(id: string, signal?: AbortSignal): Promise<InstallationOperation> {
   const res = await fetch(`/api/agents/operations/${encodeURIComponent(id)}`, { signal });
   return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation;
+}
+export async function fetchInstallationOperations(signal?: AbortSignal): Promise<InstallationOperation[]> {
+  const res = await fetch("/api/agents/operations", { signal });
+  return (await jsonOrThrow<{ operations: InstallationOperation[] }>(res)).operations;
 }
 
 export interface InstallationRemovalOperation { id: string; agent_id: string; version: string; installation_id: string; status: "removing" | "blocked" | "completed" | "failed"; started_at: string; finished_at: string | null; error: string | null; error_code: string | null; diagnostic: { message: string; action: string; details?: { references?: Array<{ type: string; id: string; detail: string }> } } | null; references: Array<{ type: string; id: string; detail: string }> }

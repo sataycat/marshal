@@ -92,14 +92,14 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 
 ### 10. Finish the browser trust and lifecycle experience
 
-- [ ] Separate catalog entries, installed versions, and durable install/update/remove operations in the Agents area.
-- [ ] Before install or update, show the exact version, source, distribution, license, checksum/integrity status, and requested trust transition.
-- [ ] Show clear states for verified, unverified, mismatch, failed, interrupted, installing, installed, ready, and authentication-required versions.
-- [ ] Add distribution selection where more than one supported option is available, while retaining daemon-side selection validation.
-- [ ] Show installed versions that are absent from the current registry snapshot.
-- [ ] Keep launch internals limited to scoped diagnostics rather than ordinary product configuration.
-- [ ] Verify capability and readiness controls continue to work for binary, `npx`, and `uvx` installations.
-- [ ] Update `docs/HUMAN-TESTING-GUIDE.md` with install, integrity, update, restart-recovery, side-by-side, and removal-conflict flows.
+- [x] Separate catalog entries, installed versions, and durable install/update/remove operations in the Agents area.
+- [x] Before install or update, show the exact version, source, distribution, license, checksum/integrity status, and requested trust transition.
+- [x] Show clear states for verified, unverified, mismatch, failed, interrupted, installing, installed, ready, and authentication-required versions.
+- [x] Add distribution selection where more than one supported option is available, while retaining daemon-side selection validation.
+- [x] Show installed versions that are absent from the current registry snapshot.
+- [x] Keep launch internals limited to scoped diagnostics rather than ordinary product configuration.
+- [x] Verify capability and readiness controls continue to work for binary, `npx`, and `uvx` installations.
+- [x] Update `docs/HUMAN-TESTING-GUIDE.md` with install, integrity, update, restart-recovery, side-by-side, and removal-conflict flows.
 
 ### 11. Verify the complete ADR lifecycle
 
