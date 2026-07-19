@@ -43,13 +43,13 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 
 ### 5. Publish and recover installations atomically
 
-- [ ] Give every install attempt a unique temporary root and write a complete manifest before publication.
-- [ ] Atomically rename only a fully validated installation into `~/.marshal/agents/<agent-id>/<version>/<installation-id>`.
-- [ ] Mark an installed-agent record selectable only after the published root and manifest are complete.
-- [ ] Persist installation phases and recovery metadata sufficient to distinguish pre-publication failure from a completed publication.
-- [ ] Reconcile active installation operations during daemon startup: promote only proven complete artifacts, mark the rest interrupted or failed, and clean temporary or partial roots.
-- [ ] Make duplicate requests for the same agent, exact version, distribution, and installation identity reuse the existing operation or completed record.
-- [ ] Add failure, restart, cleanup, atomic-publication, and duplicate-request tests.
+- [x] Give every install attempt a unique temporary root and write a complete manifest before publication.
+- [x] Atomically rename only a fully validated installation into `~/.marshal/agents/<agent-id>/<version>/<installation-id>`.
+- [x] Mark an installed-agent record selectable only after the published root and manifest are complete.
+- [x] Persist installation phases and recovery metadata sufficient to distinguish pre-publication failure from a completed publication.
+- [x] Reconcile active installation operations during daemon startup: promote only proven complete artifacts, mark the rest interrupted or failed, and clean temporary or partial roots.
+- [x] Make duplicate requests for the same agent, exact version, distribution, and installation identity reuse the existing operation or completed record.
+- [x] Add failure, restart, cleanup, atomic-publication, and duplicate-request tests.
 
 ### 6. Make installation operations durable in the browser
 

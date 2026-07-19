@@ -1,8 +1,8 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { exactUvxPackage, selectDistribution, startInstallation } from "./installer.js";
-import { getInstalledAgent } from "../agents/store.js";
+import { createInstallation, getInstalledAgent, getInstallationOperation, reconcileInstallationOperations } from "../agents/store.js";
 import type { RegistryAgent } from "../registry/types.js";
 
 const uvxAgent: RegistryAgent = {
@@ -31,5 +31,29 @@ describe("uvx installations", () => {
     expect(operation.status).toBe("installing");
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(getInstalledAgent("uv-agent", "1.2.3", machineDir)?.status).toBe("installed");
+  });
+
+  it("publishes through a unique root and reuses duplicate identity", async () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-atomic-`);
+    const first = await startInstallation(uvxAgent, machineDir, async (_specifier, cwd) => { const marker = `${cwd}/payload`; await import("node:fs").then(({ writeFileSync }) => writeFileSync(marker, "ok")); });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = await startInstallation(uvxAgent, machineDir, async () => { throw new Error("duplicate must not run"); });
+    expect(second.id).toBe(first.id);
+    const operation = getInstallationOperation(first.id, machineDir)!;
+    expect(operation.phase).toBe("completed");
+    expect(operation.published_root).toContain("/agents/uv-agent/1.2.3/");
+    expect(operation.published_root).not.toBe(operation.temporary_root);
+    expect(existsSync(`${operation.published_root}/manifest.json`)).toBe(true);
+    expect(JSON.parse(readFileSync(`${operation.published_root}/manifest.json`, "utf8")).installation_id).toContain("uv-agent@1.2.3:uvx:");
+  });
+
+  it("marks incomplete operations interrupted and cleans temporary roots on recovery", () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-recovery-`);
+    const created = createInstallation({ id: "uv-agent", version: "1.2.3", source: "registry", license: "MIT", distribution: "uvx", package_specifier: "uv-agent==1.2.3", launch: { command: "uvx", args: ["--from", "uv-agent==1.2.3", "uv-agent"] }, registry_snapshot_fetched_at: null, integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "recovery-op", machineDir, { temporary_root: `${machineDir}/agents/.tmp-stale`, published_root: `${machineDir}/agents/uv-agent/1.2.3/stale` });
+    reconcileInstallationOperations(machineDir);
+    const recovered = getInstallationOperation(created.id, machineDir)!;
+    expect(recovered.status).toBe("interrupted");
+    expect(recovered.phase).toBe("interrupted");
+    expect(recovered.error).toMatch(/interrupted/i);
   });
 });

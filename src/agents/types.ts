@@ -1,4 +1,5 @@
-export type InstalledAgentStatus = "installing" | "installed" | "failed";
+export type InstalledAgentStatus = "installing" | "installed" | "failed" | "interrupted";
+export type InstallationPhase = "resolving" | "downloading" | "verifying" | "extracting" | "publishing" | "completed" | "failed" | "interrupted";
 export type AgentReadinessStatus = "unknown" | "probing" | "ready" | "authentication_required" | "failed";
 export type AgentAuthenticationStatus = "authenticating" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
@@ -77,6 +78,12 @@ export interface InstallationOperation {
   agent_id: string;
   version: string;
   package_specifier: string | null;
+  distribution: AgentDistribution;
+  installation_id: string;
+  phase: InstallationPhase;
+  temporary_root: string | null;
+  published_root: string | null;
+  recovery_metadata: Record<string, unknown> | null;
   status: InstalledAgentStatus;
   started_at: string;
   finished_at: string | null;

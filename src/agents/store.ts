@@ -1,5 +1,6 @@
 import { openMachineDb } from "../storage/machine.js";
-import { validateAgentLaunchSpec, type AgentAuthenticationOperation, type InstalledAgent, type InstallationOperation } from "./types.js";
+import { validateAgentLaunchSpec, type AgentAuthenticationOperation, type InstalledAgent, type InstallationOperation, type InstallationPhase } from "./types.js";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 
 function tables(machineDir?: string) {
   const db = openMachineDb(machineDir);
@@ -30,6 +31,12 @@ function tables(machineDir?: string) {
       agent_id TEXT NOT NULL,
       version TEXT NOT NULL,
       package_specifier TEXT NOT NULL,
+      distribution TEXT NOT NULL DEFAULT 'npx',
+      installation_id TEXT NOT NULL DEFAULT '',
+      phase TEXT NOT NULL DEFAULT 'resolving',
+      temporary_root TEXT,
+      published_root TEXT,
+      recovery_metadata TEXT,
       status TEXT NOT NULL,
       started_at TEXT NOT NULL,
       finished_at TEXT,
@@ -60,6 +67,12 @@ function tables(machineDir?: string) {
     "ALTER TABLE installed_agents ADD COLUMN probed_at TEXT",
     "ALTER TABLE installed_agents ADD COLUMN expected_digest TEXT",
     "ALTER TABLE installed_agents ADD COLUMN observed_digest TEXT",
+    "ALTER TABLE installation_operations ADD COLUMN distribution TEXT NOT NULL DEFAULT 'npx'",
+    "ALTER TABLE installation_operations ADD COLUMN installation_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE installation_operations ADD COLUMN phase TEXT NOT NULL DEFAULT 'resolving'",
+    "ALTER TABLE installation_operations ADD COLUMN temporary_root TEXT",
+    "ALTER TABLE installation_operations ADD COLUMN published_root TEXT",
+    "ALTER TABLE installation_operations ADD COLUMN recovery_metadata TEXT",
   ]) { try { db.exec(statement); } catch (error) { if (!(error instanceof Error) || !error.message.includes("duplicate column name")) throw error; } }
   return db;
 }
@@ -92,7 +105,7 @@ function agent(row: Record<string, unknown>): InstalledAgent {
 }
 
 function operation(row: Record<string, unknown>): InstallationOperation {
-  return { id: String(row.id), agent_id: String(row.agent_id), version: String(row.version), package_specifier: String(row.package_specifier), status: String(row.status) as InstallationOperation["status"], started_at: String(row.started_at), finished_at: row.finished_at ? String(row.finished_at) : null, error: row.error ? String(row.error) : null };
+  return { id: String(row.id), agent_id: String(row.agent_id), version: String(row.version), package_specifier: row.package_specifier == null ? null : String(row.package_specifier), distribution: String(row.distribution ?? "npx") as InstallationOperation["distribution"], installation_id: String(row.installation_id ?? ""), phase: String(row.phase ?? row.status) as InstallationPhase, temporary_root: row.temporary_root ? String(row.temporary_root) : null, published_root: row.published_root ? String(row.published_root) : null, recovery_metadata: row.recovery_metadata ? JSON.parse(String(row.recovery_metadata)) : null, status: String(row.status) as InstallationOperation["status"], started_at: String(row.started_at), finished_at: row.finished_at ? String(row.finished_at) : null, error: row.error ? String(row.error) : null };
 }
 
 function authenticationOperation(row: Record<string, unknown>): AgentAuthenticationOperation {
@@ -116,16 +129,16 @@ export function getLatestInstallationOperation(id: string, version: string, mach
   return row ? operation(row) : undefined;
 }
 
-export function createInstallation(input: Omit<InstalledAgent, "created_at" | "updated_at" | "failure" | "provenance" | "installation_id" | "installation_root"> & Partial<Pick<InstalledAgent, "provenance" | "installation_id" | "installation_root">>, operationId: string, machineDir?: string): InstallationOperation {
+export function createInstallation(input: Omit<InstalledAgent, "created_at" | "updated_at" | "failure" | "provenance" | "installation_id" | "installation_root"> & Partial<Pick<InstalledAgent, "provenance" | "installation_id" | "installation_root">>, operationId: string, machineDir?: string, metadata: Partial<Pick<InstallationOperation, "phase" | "temporary_root" | "published_root" | "recovery_metadata">> = {}): InstallationOperation {
   const db = tables(machineDir);
   const now = new Date().toISOString();
   const installationRoot = input.installation_root ?? "";
   const installationId = input.installation_id ?? `${input.id}@${input.version}`;
   const provenance = input.provenance ?? { exact_version: input.version, distribution: input.distribution, source: input.source, package_specifier: input.package_specifier, archive_identity: null, registry_snapshot_fetched_at: input.registry_snapshot_fetched_at, installation_root: installationRoot, integrity_status: input.integrity_status };
-  const op: InstallationOperation = { id: operationId, agent_id: input.id, version: input.version, package_specifier: input.package_specifier, status: "installing", started_at: now, finished_at: null, error: null };
+   const op: InstallationOperation = { id: operationId, agent_id: input.id, version: input.version, package_specifier: input.package_specifier, distribution: input.distribution, installation_id: installationId, phase: metadata.phase ?? "resolving", temporary_root: metadata.temporary_root ?? null, published_root: metadata.published_root ?? installationRoot, recovery_metadata: metadata.recovery_metadata ?? null, status: "installing", started_at: now, finished_at: null, error: null };
   db.transaction(() => {
      db.prepare("INSERT INTO installed_agents (id, version, source, license, distribution, package_specifier, launch, registry_snapshot_fetched_at, integrity_status, expected_digest, observed_digest, installation_id, provenance, installation_root, status, created_at, updated_at, failure) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(id, version) DO UPDATE SET package_specifier = excluded.package_specifier, launch = excluded.launch, registry_snapshot_fetched_at = excluded.registry_snapshot_fetched_at, integrity_status = excluded.integrity_status, expected_digest = excluded.expected_digest, observed_digest = excluded.observed_digest, provenance = excluded.provenance, installation_root = excluded.installation_root, license = excluded.license, status = 'installing', updated_at = excluded.updated_at, failure = NULL").run(input.id, input.version, input.source, input.license, input.distribution, input.package_specifier, JSON.stringify(input.launch), input.registry_snapshot_fetched_at ?? "unknown", input.integrity_status, (input.provenance as { expected_digest?: string | null } | undefined)?.expected_digest ?? null, (input.provenance as { observed_digest?: string | null } | undefined)?.observed_digest ?? null, installationId, JSON.stringify(provenance), installationRoot, "installing", now, now);
-    db.prepare("INSERT INTO installation_operations (id, agent_id, version, package_specifier, status, started_at) VALUES (?, ?, ?, ?, 'installing', ?)").run(op.id, op.agent_id, op.version, op.package_specifier, op.started_at);
+     db.prepare("INSERT INTO installation_operations (id, agent_id, version, package_specifier, distribution, installation_id, phase, temporary_root, published_root, recovery_metadata, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'installing', ?)").run(op.id, op.agent_id, op.version, op.package_specifier, op.distribution, op.installation_id, op.phase, op.temporary_root, op.published_root, op.recovery_metadata ? JSON.stringify(op.recovery_metadata) : null, op.started_at);
   })();
   return op;
 }
@@ -136,14 +149,42 @@ export function resolveInstalledAgentLaunch(id: string, version: string, machine
   return validateAgentLaunchSpec(installed.launch);
 }
 
-export function finishInstallation(operationId: string, status: "installed" | "failed", error: string | null, machineDir?: string): InstallationOperation {
+export function updateInstallationPhase(operationId: string, phase: InstallationPhase, metadata: Partial<Pick<InstallationOperation, "temporary_root" | "published_root" | "recovery_metadata">> = {}, machineDir?: string): void {
+  const db = tables(machineDir);
+  db.prepare("UPDATE installation_operations SET phase = ?, temporary_root = COALESCE(?, temporary_root), published_root = COALESCE(?, published_root), recovery_metadata = COALESCE(?, recovery_metadata) WHERE id = ?").run(phase, metadata.temporary_root ?? null, metadata.published_root ?? null, metadata.recovery_metadata ? JSON.stringify(metadata.recovery_metadata) : null, operationId);
+}
+
+export function finishInstallation(operationId: string, status: "installed" | "failed" | "interrupted", error: string | null, machineDir?: string): InstallationOperation {
   const db = tables(machineDir);
   const now = new Date().toISOString();
   db.transaction(() => {
-    db.prepare("UPDATE installation_operations SET status = ?, finished_at = ?, error = ? WHERE id = ?").run(status, now, error, operationId);
+    db.prepare("UPDATE installation_operations SET status = ?, phase = ?, finished_at = ?, error = ? WHERE id = ?").run(status, status === "installed" ? "completed" : status, now, error, operationId);
     db.prepare("UPDATE installed_agents SET status = ?, updated_at = ?, failure = ? WHERE id = (SELECT agent_id FROM installation_operations WHERE id = ?) AND version = (SELECT version FROM installation_operations WHERE id = ?)").run(status, now, error, operationId, operationId);
   })();
   return getInstallationOperation(operationId, machineDir)!;
+}
+
+export function reconcileInstallationOperations(machineDir?: string): void {
+  const db = tables(machineDir);
+  const rows = db.prepare("SELECT * FROM installation_operations WHERE status = 'installing'").all() as Record<string, unknown>[];
+  for (const row of rows) {
+    const temporary = row.temporary_root ? String(row.temporary_root) : null;
+    const published = row.published_root ? String(row.published_root) : null;
+    const manifest = published && existsSync(`${published}/manifest.json`);
+    if (manifest) {
+      try { JSON.parse(readFileSync(`${published}/manifest.json`, "utf8")); finishInstallation(String(row.id), "installed", null, machineDir); }
+      catch { finishInstallation(String(row.id), "failed", "Published installation manifest is invalid", machineDir); }
+    } else {
+      finishInstallation(String(row.id), "interrupted", "Installation was interrupted before publication", machineDir);
+    }
+    if (temporary && existsSync(temporary)) { try { rmSync(temporary, { recursive: true, force: true }); } catch { /* best effort cleanup */ } }
+  }
+}
+
+export function getInstallationByIdentity(agentId: string, version: string, distribution: string, installationId: string, machineDir?: string): InstallationOperation | undefined {
+  const db = tables(machineDir);
+  const row = db.prepare("SELECT * FROM installation_operations WHERE agent_id = ? AND version = ? AND distribution = ? AND installation_id = ? ORDER BY started_at DESC LIMIT 1").get(agentId, version, distribution, installationId) as Record<string, unknown> | undefined;
+  return row ? operation(row) : undefined;
 }
 
 export function persistInstallationIntegrity(operationId: string, expected: string | null, observed: string, status: "verified" | "unverified" | "mismatch", machineDir?: string): void {
