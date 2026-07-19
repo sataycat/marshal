@@ -83,10 +83,12 @@ export async function fetchInstallationOperation(id: string, signal?: AbortSigna
   return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation;
 }
 
-export async function removeInstalledAgent(agentId: string, version: string): Promise<void> {
-  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}?version=${encodeURIComponent(version)}`, { method: "DELETE" });
-  await jsonOrThrow(res);
+export interface InstallationRemovalOperation { id: string; agent_id: string; version: string; installation_id: string; status: "removing" | "blocked" | "completed" | "failed"; started_at: string; finished_at: string | null; error: string | null; error_code: string | null; diagnostic: { message: string; action: string; details?: { references?: Array<{ type: string; id: string; detail: string }> } } | null; references: Array<{ type: string; id: string; detail: string }> }
+export async function removeInstalledAgent(agentId: string, version: string, installationId?: string): Promise<{ operation: InstallationRemovalOperation }> {
+  const params = new URLSearchParams({ version }); if (installationId) params.set("installation_id", installationId);
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}?${params}`, { method: "DELETE" }); return jsonOrThrow(res);
 }
+export async function retryAgentRemoval(operationId: string): Promise<InstallationRemovalOperation> { const res = await fetch(`/api/agents/removal-operations/${encodeURIComponent(operationId)}/retry`, { method: "POST" }); return (await jsonOrThrow<{ operation: InstallationRemovalOperation }>(res)).operation; }
 
 export async function probeInstalledAgent(agentId: string, version: string): Promise<InstalledAgent> {
   const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/probe?version=${encodeURIComponent(version)}`, { method: "POST" });

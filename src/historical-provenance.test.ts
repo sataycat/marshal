@@ -3,16 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { createInstallation, finishInstallation, removeInstalledAgent, setAgentReadiness } from "./agents/store.js";
+import { clearDefaultInstalledAgent, createInstallation, finishInstallation, removeInstalledAgent, setAgentReadiness } from "./agents/store.js";
 import { historicalProvenance } from "./agents/provenance.js";
-import { createSession, getSession } from "./acp/supervisor-store.js";
+import { createSession, getSession, updateSession } from "./acp/supervisor-store.js";
 import { createChatAttachment, getChatAttachment } from "./chat/attachments.js";
 import { createChatThread, getChatThread } from "./chat/store.js";
 import { RunLog } from "./daemon/run-log.js";
 import { createSpecAuthorSession, getSpecAuthorSession } from "./tasks/author-store.js";
 import { createTask } from "./tasks/store.js";
 import { registerRepository } from "./repositories/store.js";
-import { saveWorkflowProfile } from "./workflows/store.js";
+import { deleteWorkflowProfile, saveWorkflowProfile } from "./workflows/store.js";
 
 const provenance = historicalProvenance("demo", "1.2.3", {
   exact_version: "1.2.3", distribution: "npx", source: "registry", package_specifier: "demo@1.2.3",
@@ -36,14 +36,17 @@ describe("historical agent provenance", () => {
     const thread = createChatThread({ agentId: "demo", agentVersion: "1.2.3", agentProvenance: provenance }, root);
     const attachment = createChatAttachment(thread.id, { type: "image/png", name: "evidence.png", size: 8, bytes: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]) }, root);
     const session = createSession({ ownerType: "thread", ownerId: thread.id, agentId: "demo", agentVersion: "1.2.3", agentProvenance: provenance }, root);
+    updateSession(session.id, { status: "closed", ended_at: new Date().toISOString() }, root);
     const task = createTask({ slug: "history-task", title: "History", specMarkdown: "spec" }, root);
     const runLog = new RunLog(root);
     const runId = runLog.startRun(task.id, "builder", "demo", "build", { agentVersion: "1.2.3", agentProvenance: provenance });
     const repository = registerRepository(root, machineDir);
     const profile = saveWorkflowProfile(repository.id, { name: "History", permission_policy: "allow_reads_ask_writes", unattended_authorized: false, timeout_ms: 1000, max_retries: 0, verification_commands: [], require_decorrelated_builder_validator: false, assignments: [{ role: "builder", agent_id: "demo", agent_version: "1.2.3" }] }, undefined, machineDir);
     const author = createSpecAuthorSession({ taskId: task.id, repositoryId: repository.id, workflowProfileId: profile.id, assignmentId: profile.assignments[0].id, agentId: "demo", agentVersion: "1.2.3", agentProvenance: provenance, assignmentConfig: {} }, root);
+    deleteWorkflowProfile(repository.id, profile.id, machineDir);
+    clearDefaultInstalledAgent("demo", "install-1", machineDir);
 
-    expect(removeInstalledAgent("demo", "1.2.3", machineDir)).toBe(true);
+    expect(removeInstalledAgent("demo", "1.2.3", machineDir).status).toBe("completed");
 
     expect(getChatThread(thread.id, root).agent_provenance).toMatchObject({ installation_id: "install-1", package_specifier: "demo@1.2.3", registry_snapshot_fetched_at: "snapshot-1" });
     expect(getSession(session.id, root)?.agent_provenance).toMatchObject({ installation_id: "install-1", distribution: "npx" });

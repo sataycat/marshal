@@ -1,6 +1,12 @@
 import { openMachineDb } from "../storage/machine.js";
+import { GLOBAL_DIR } from "../daemon/config.js";
 import { validateAgentLaunchSpec, type AgentAuthenticationOperation, type InstalledAgent, type InstallationOperation, type InstallationPhase } from "./types.js";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { resolve, relative } from "node:path";
+import { listRepositories } from "../repositories/store.js";
+import { openDb } from "../db/index.js";
+import type { AgentRemovalOperation, AgentRemovalReference } from "./types.js";
 
 function tables(machineDir?: string) {
   const db = openMachineDb(machineDir);
@@ -45,7 +51,7 @@ function tables(machineDir?: string) {
       ,error_code TEXT
        ,diagnostic TEXT
     );
-    CREATE TABLE IF NOT EXISTS agent_authentication_operations (
+     CREATE TABLE IF NOT EXISTS agent_authentication_operations (
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL,
       version TEXT NOT NULL,
@@ -55,7 +61,16 @@ function tables(machineDir?: string) {
       started_at TEXT NOT NULL,
       finished_at TEXT,
       error TEXT
-    );
+     );
+     CREATE TABLE IF NOT EXISTS agent_removal_operations (
+       id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, version TEXT NOT NULL, installation_id TEXT NOT NULL,
+       status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, error TEXT, error_code TEXT,
+       diagnostic TEXT, references_json TEXT NOT NULL DEFAULT '[]'
+     );
+     CREATE TABLE IF NOT EXISTS agent_removal_tombstones (
+       installation_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, version TEXT NOT NULL, provenance TEXT NOT NULL,
+       removed_at TEXT NOT NULL, removal_operation_id TEXT NOT NULL
+     );
   `);
   for (const statement of [
      "ALTER TABLE installed_agents ADD COLUMN installation_id TEXT",
@@ -117,6 +132,7 @@ function operation(row: Record<string, unknown>): InstallationOperation {
 function authenticationOperation(row: Record<string, unknown>): AgentAuthenticationOperation {
   return { id: String(row.id), agent_id: String(row.agent_id), version: String(row.version), method_id: String(row.method_id), method_name: String(row.method_name), status: String(row.status) as AgentAuthenticationOperation["status"], started_at: String(row.started_at), finished_at: row.finished_at ? String(row.finished_at) : null, error: row.error ? String(row.error) : null };
 }
+function removalOperation(row: Record<string, unknown>): AgentRemovalOperation { return { id: String(row.id), agent_id: String(row.agent_id), version: String(row.version), installation_id: String(row.installation_id), status: String(row.status) as AgentRemovalOperation["status"], started_at: String(row.started_at), finished_at: row.finished_at ? String(row.finished_at) : null, error: row.error ? String(row.error) : null, error_code: row.error_code ? String(row.error_code) : null, diagnostic: row.diagnostic ? JSON.parse(String(row.diagnostic)) : null, references: JSON.parse(String(row.references_json ?? "[]")) as AgentRemovalReference[] }; }
 
 export function listInstalledAgents(machineDir?: string): InstalledAgent[] {
   const db = tables(machineDir);
@@ -210,6 +226,7 @@ export function getDefaultInstalledAgent(agentId: string, machineDir?: string): 
   const row = database.prepare("SELECT * FROM installed_agents WHERE id = ? AND is_default = 1 AND status = 'installed'").get(agentId) as Record<string, unknown> | undefined;
   return row ? agent(row) : undefined;
 }
+export function clearDefaultInstalledAgent(agentId: string, installationId: string, machineDir?: string): void { tables(machineDir).prepare("UPDATE installed_agents SET is_default = 0, updated_at = ? WHERE id = ? AND installation_id = ?").run(new Date().toISOString(), agentId, installationId); }
 
 export function persistInstallationIntegrity(operationId: string, expected: string | null, observed: string, status: "verified" | "unverified" | "mismatch", machineDir?: string): void {
   const db = tables(machineDir);
@@ -247,9 +264,49 @@ export function finishAgentAuthentication(id: string, status: Exclude<AgentAuthe
   return getAgentAuthenticationOperation(id, machineDir)!;
 }
 
-export function removeInstalledAgent(id: string, version: string, machineDir?: string): boolean {
-  const db = tables(machineDir);
-  return db.prepare("DELETE FROM installed_agents WHERE id = ? AND version = ? AND status != 'installing'").run(id, version).changes > 0;
+function removalReferences(id: string, version: string, installationId: string, machineDir?: string): AgentRemovalReference[] {
+  const db = tables(machineDir); const refs: AgentRemovalReference[] = [];
+  for (const row of db.prepare("SELECT id, method_name FROM agent_authentication_operations WHERE agent_id = ? AND version = ? AND status = 'authenticating'").all(id, version) as Record<string, unknown>[]) refs.push({ type: "authentication", id: String(row.id), detail: `Authentication ${String(row.method_name)} is still running` });
+  for (const row of db.prepare("SELECT id FROM installation_operations WHERE agent_id = ? AND version = ? AND installation_id = ? AND status = 'installing'").all(id, version, installationId) as Record<string, unknown>[]) refs.push({ type: "installation", id: String(row.id), detail: "Installation is still running" });
+  for (const row of db.prepare("SELECT id FROM installed_agents WHERE id = ? AND installation_id = ? AND is_default = 1").all(id, installationId) as Record<string, unknown>[]) refs.push({ type: "default", id: String(row.id), detail: "This installation is the default selection; choose another default first" });
+  for (const row of db.prepare("SELECT id, role FROM agent_assignments WHERE agent_id = ? AND agent_version = ?").all(id, version) as Record<string, unknown>[]) refs.push({ type: "workflow_assignment", id: String(row.id), detail: `Workflow assignment ${String(row.role)} must be reassigned` });
+  for (const repository of listRepositories(machineDir)) {
+    try {
+      const database = openDb(repository.path);
+      for (const row of database.prepare("SELECT id, status FROM acp_sessions WHERE agent_id = ? AND agent_version = ? AND status IN ('starting','running','idle','cancelling','recoverable')").all(id, version) as Record<string, unknown>[]) {
+        const status = String(row.status); refs.push({ type: status === "recoverable" ? "recoverable_session" : "active_session", id: String(row.id), detail: `ACP session is ${status}; close or resolve it before removal` });
+      }
+    } catch { /* an uninitialized repository has no session references */ }
+  }
+  return refs;
+}
+
+export function getAgentRemovalOperation(id: string, machineDir?: string): AgentRemovalOperation | undefined { const row = tables(machineDir).prepare("SELECT * FROM agent_removal_operations WHERE id = ?").get(id) as Record<string, unknown> | undefined; return row ? removalOperation(row) : undefined; }
+export function listAgentRemovalOperations(machineDir?: string): AgentRemovalOperation[] { return (tables(machineDir).prepare("SELECT * FROM agent_removal_operations ORDER BY started_at DESC").all() as Record<string, unknown>[]).map(removalOperation); }
+
+export function removeInstalledAgent(id: string, version: string, machineDir?: string, installationId?: string): AgentRemovalOperation {
+  const db = tables(machineDir); const selected = (installationId ? db.prepare("SELECT * FROM installed_agents WHERE id = ? AND version = ? AND installation_id = ?").get(id, version, installationId) : db.prepare("SELECT * FROM installed_agents WHERE id = ? AND version = ? ORDER BY is_default DESC, updated_at DESC LIMIT 1").get(id, version)) as Record<string, unknown> | undefined;
+  if (!selected) throw Object.assign(new Error("Installed agent not found"), { code: "agent_not_found" });
+  const identity = String(selected.installation_id); const prior = db.prepare("SELECT * FROM agent_removal_operations WHERE agent_id = ? AND version = ? AND installation_id = ? ORDER BY started_at DESC LIMIT 1").get(id, version, identity) as Record<string, unknown> | undefined;
+  if (prior && ["removing", "completed"].includes(String(prior.status))) return removalOperation(prior);
+  const refs = removalReferences(id, version, identity, machineDir); const opId = randomUUID(); const now = new Date().toISOString();
+  db.prepare("INSERT INTO agent_removal_operations (id, agent_id, version, installation_id, status, started_at, references_json) VALUES (?, ?, ?, ?, ?, ?, ?)").run(opId, id, version, identity, refs.length ? "blocked" : "removing", now, JSON.stringify(refs));
+  const operation = getAgentRemovalOperation(opId, machineDir)!;
+  if (refs.length) { db.prepare("UPDATE agent_removal_operations SET error_code = ?, diagnostic = ? WHERE id = ?").run("agent_removal_conflict", JSON.stringify({ message: "Installation has live references", action: "Resolve the listed references, then retry removal.", details: { references: refs } }), opId); return getAgentRemovalOperation(opId, machineDir)!; }
+  return executeAgentRemoval(opId, machineDir);
+}
+
+export function executeAgentRemoval(operationId: string, machineDir?: string): AgentRemovalOperation {
+  const db = tables(machineDir); const op = getAgentRemovalOperation(operationId, machineDir); if (!op) throw new Error("Agent removal operation not found"); if (op.status === "completed") return op;
+  const row = db.prepare("SELECT * FROM installed_agents WHERE id = ? AND version = ? AND installation_id = ?").get(op.agent_id, op.version, op.installation_id) as Record<string, unknown> | undefined;
+  if (!row) { db.prepare("UPDATE agent_removal_operations SET status = 'completed', finished_at = ? WHERE id = ?").run(new Date().toISOString(), operationId); return getAgentRemovalOperation(operationId, machineDir)!; }
+  try {
+    const root = String(row.installation_root ?? ""); const base = resolve(machineDir ?? GLOBAL_DIR, "agents");
+    if (root && (resolve(root) === base || relative(base, root).startsWith(".."))) throw new Error("Installation payload is outside Marshal's owned agents directory");
+    if (root) rmSync(root, { recursive: true, force: true });
+    db.transaction(() => { db.prepare("INSERT OR REPLACE INTO agent_removal_tombstones (installation_id, agent_id, version, provenance, removed_at, removal_operation_id) VALUES (?, ?, ?, ?, ?, ?)").run(op.installation_id, op.agent_id, op.version, String(row.provenance ?? "{}"), new Date().toISOString(), operationId); db.prepare("DELETE FROM installed_agents WHERE id = ? AND version = ? AND installation_id = ?").run(op.agent_id, op.version, op.installation_id); db.prepare("UPDATE agent_removal_operations SET status = 'completed', finished_at = ?, error = NULL WHERE id = ?").run(new Date().toISOString(), operationId); })();
+  } catch (error) { db.prepare("UPDATE agent_removal_operations SET status = 'failed', finished_at = ?, error = ?, error_code = 'agent_cleanup_failed', diagnostic = ? WHERE id = ?").run(new Date().toISOString(), error instanceof Error ? error.message : String(error), JSON.stringify({ message: "Marshal could not clean up the installation payload", action: "Fix the payload permissions or path, then retry removal." }), operationId); }
+  return getAgentRemovalOperation(operationId, machineDir)!;
 }
 
 export function setAgentReadiness(id: string, version: string, result: { readiness_status: InstalledAgent["readiness_status"]; readiness_error: string | null; protocol_version: number | null; capabilities: unknown; auth_methods: unknown; raw_initialize: unknown; probed_at: string }, machineDir?: string): InstalledAgent {

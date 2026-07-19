@@ -1,5 +1,6 @@
 export type InstalledAgentStatus = "installing" | "installed" | "failed" | "interrupted";
 export type InstallationPhase = "resolving" | "downloading" | "verifying" | "extracting" | "publishing" | "completed" | "failed" | "interrupted";
+export type AgentRemovalStatus = "removing" | "blocked" | "completed" | "failed";
 export type AgentReadinessStatus = "unknown" | "probing" | "ready" | "authentication_required" | "failed";
 export type AgentAuthenticationStatus = "authenticating" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
@@ -105,4 +106,12 @@ export interface AgentAuthenticationOperation {
   started_at: string;
   finished_at: string | null;
   error: string | null;
+}
+
+export interface AgentRemovalReference { type: "active_session" | "recoverable_session" | "authentication" | "installation" | "workflow_assignment" | "default"; id: string; detail: string }
+export interface AgentRemovalOperation {
+  id: string; agent_id: string; version: string; installation_id: string; status: AgentRemovalStatus;
+  started_at: string; finished_at: string | null; error: string | null; error_code: string | null;
+  diagnostic: { message: string; action: string; details?: Record<string, unknown> } | null;
+  references: AgentRemovalReference[];
 }

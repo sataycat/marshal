@@ -81,13 +81,13 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 
 ### 9. Guard removal and clean up owned payloads
 
-- [ ] Inspect active ACP sessions, recoverable sessions, active authentication/install operations, workflow assignments, and default selections before removal.
-- [ ] Distinguish blocking live references from non-blocking historical references and return actionable machine error codes with reference details.
-- [ ] Replace synchronous row deletion with a durable remove operation that tracks cleanup and failure state.
-- [ ] Prevent removal of an installation needed by an active or recoverable process unless the conflict is explicitly resolved.
-- [ ] Remove only Marshal-owned installation material and metadata; never remove repository files or historical evidence.
-- [ ] Preserve a tombstone or provenance record so a removed identity remains distinguishable from a never-installed agent.
-- [ ] Make removal idempotent and expose conflict, retry, and cleanup states in the Agents area.
+- [x] Inspect active ACP sessions, recoverable sessions, active authentication/install operations, workflow assignments, and default selections before removal.
+- [x] Distinguish blocking live references from non-blocking historical references and return actionable machine error codes with reference details.
+- [x] Replace synchronous row deletion with a durable remove operation that tracks cleanup and failure state.
+- [x] Prevent removal of an installation needed by an active or recoverable process unless the conflict is explicitly resolved.
+- [x] Remove only Marshal-owned installation material and metadata; never remove repository files or historical evidence.
+- [x] Preserve a tombstone or provenance record so a removed identity remains distinguishable from a never-installed agent.
+- [x] Make removal idempotent and expose conflict, retry, and cleanup states in the Agents area.
 - [ ] Add tests for active-session conflicts, workflow reassignment, authentication conflicts, successful payload deletion, cleanup failure, and historical readability.
 
 ### 10. Finish the browser trust and lifecycle experience

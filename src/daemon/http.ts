@@ -72,7 +72,7 @@ import { getRepository, getSelectedRepository, listRepositories, registerReposit
 import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
 import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
-import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, removeInstalledAgent, setAgentReadiness, setDefaultInstalledAgent, getDefaultInstalledAgent } from "../agents/store.js";
+import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, removeInstalledAgent, executeAgentRemoval, getAgentRemovalOperation, listAgentRemovalOperations, setAgentReadiness, setDefaultInstalledAgent, getDefaultInstalledAgent } from "../agents/store.js";
 import { installationOperation, installCandidate, startInstallation } from "../installations/installer.js";
 import { probeAgent } from "../acp/probe.js";
 import { authenticateAgent } from "../acp/authenticate.js";
@@ -659,11 +659,22 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
     try { return c.json({ operation: installationOperation(c.req.param("id"), machineDir) }); }
     catch { throw new ApiError(404, "Installation operation not found", "operation_not_found"); }
   });
+  app.get("/api/agents/removal-operations", (c) => c.json({ operations: listAgentRemovalOperations(machineDir) }));
+  app.get("/api/agents/removal-operations/:operationId", (c) => {
+    const operation = getAgentRemovalOperation(c.req.param("operationId"), machineDir);
+    if (!operation) throw new ApiError(404, "Agent removal operation not found", "operation_not_found");
+    return c.json({ operation });
+  });
+  app.post("/api/agents/removal-operations/:operationId/retry", (c) => {
+    const operation = getAgentRemovalOperation(c.req.param("operationId"), machineDir);
+    if (!operation) throw new ApiError(404, "Agent removal operation not found", "operation_not_found");
+    return c.json({ operation: executeAgentRemoval(operation.id, machineDir) }, 202);
+  });
   app.delete("/api/agents/:id", (c) => {
     const version = c.req.query("version");
     if (!version) throw new ApiError(422, "version is required", "missing_query");
-    if (!removeInstalledAgent(c.req.param("id"), version, machineDir)) throw new ApiError(404, "Installed agent not found", "agent_not_found");
-    return c.json({ deleted: true });
+    try { const operation = removeInstalledAgent(c.req.param("id"), version, machineDir, c.req.query("installation_id")); return c.json({ operation }, operation.status === "blocked" ? 409 : 202); }
+    catch (error) { const code = error instanceof Error && "code" in error ? String((error as Error & { code?: string }).code) : "agent_removal_failed"; throw new ApiError(code === "agent_not_found" ? 404 : 409, error instanceof Error ? error.message : String(error), code); }
   });
 }
 
