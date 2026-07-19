@@ -269,7 +269,7 @@ function removalReferences(id: string, version: string, installationId: string, 
   for (const row of db.prepare("SELECT id, method_name FROM agent_authentication_operations WHERE agent_id = ? AND version = ? AND status = 'authenticating'").all(id, version) as Record<string, unknown>[]) refs.push({ type: "authentication", id: String(row.id), detail: `Authentication ${String(row.method_name)} is still running` });
   for (const row of db.prepare("SELECT id FROM installation_operations WHERE agent_id = ? AND version = ? AND installation_id = ? AND status = 'installing'").all(id, version, installationId) as Record<string, unknown>[]) refs.push({ type: "installation", id: String(row.id), detail: "Installation is still running" });
   for (const row of db.prepare("SELECT id FROM installed_agents WHERE id = ? AND installation_id = ? AND is_default = 1").all(id, installationId) as Record<string, unknown>[]) refs.push({ type: "default", id: String(row.id), detail: "This installation is the default selection; choose another default first" });
-  for (const row of db.prepare("SELECT id, role FROM agent_assignments WHERE agent_id = ? AND agent_version = ?").all(id, version) as Record<string, unknown>[]) refs.push({ type: "workflow_assignment", id: String(row.id), detail: `Workflow assignment ${String(row.role)} must be reassigned` });
+  try { for (const row of db.prepare("SELECT id, role FROM agent_assignments WHERE agent_id = ? AND agent_version = ?").all(id, version) as Record<string, unknown>[]) refs.push({ type: "workflow_assignment", id: String(row.id), detail: `Workflow assignment ${String(row.role)} must be reassigned` }); } catch { /* no workflow tables exist until a workflow is opened */ }
   for (const repository of listRepositories(machineDir)) {
     try {
       const database = openDb(repository.path);
@@ -285,9 +285,13 @@ export function getAgentRemovalOperation(id: string, machineDir?: string): Agent
 export function listAgentRemovalOperations(machineDir?: string): AgentRemovalOperation[] { return (tables(machineDir).prepare("SELECT * FROM agent_removal_operations ORDER BY started_at DESC").all() as Record<string, unknown>[]).map(removalOperation); }
 
 export function removeInstalledAgent(id: string, version: string, machineDir?: string, installationId?: string): AgentRemovalOperation {
-  const db = tables(machineDir); const selected = (installationId ? db.prepare("SELECT * FROM installed_agents WHERE id = ? AND version = ? AND installation_id = ?").get(id, version, installationId) : db.prepare("SELECT * FROM installed_agents WHERE id = ? AND version = ? ORDER BY is_default DESC, updated_at DESC LIMIT 1").get(id, version)) as Record<string, unknown> | undefined;
+  const db = tables(machineDir); const prior = installationId ? db.prepare("SELECT * FROM agent_removal_operations WHERE agent_id = ? AND version = ? AND installation_id = ? ORDER BY started_at DESC LIMIT 1").get(id, version, installationId) as Record<string, unknown> | undefined : undefined;
+  if (prior && ["removing", "completed"].includes(String(prior.status))) return removalOperation(prior);
+  const selected = (installationId ? db.prepare("SELECT * FROM installed_agents WHERE id = ? AND version = ? AND installation_id = ?").get(id, version, installationId) : db.prepare("SELECT * FROM installed_agents WHERE id = ? AND version = ? ORDER BY is_default DESC, updated_at DESC LIMIT 1").get(id, version)) as Record<string, unknown> | undefined;
   if (!selected) throw Object.assign(new Error("Installed agent not found"), { code: "agent_not_found" });
-  const identity = String(selected.installation_id); const prior = db.prepare("SELECT * FROM agent_removal_operations WHERE agent_id = ? AND version = ? AND installation_id = ? ORDER BY started_at DESC LIMIT 1").get(id, version, identity) as Record<string, unknown> | undefined;
+  const identity = String(selected.installation_id);
+  const existing = db.prepare("SELECT * FROM agent_removal_operations WHERE agent_id = ? AND version = ? AND installation_id = ? ORDER BY started_at DESC LIMIT 1").get(id, version, identity) as Record<string, unknown> | undefined;
+  if (existing && ["removing", "completed"].includes(String(existing.status))) return removalOperation(existing);
   if (prior && ["removing", "completed"].includes(String(prior.status))) return removalOperation(prior);
   const refs = removalReferences(id, version, identity, machineDir); const opId = randomUUID(); const now = new Date().toISOString();
   db.prepare("INSERT INTO agent_removal_operations (id, agent_id, version, installation_id, status, started_at, references_json) VALUES (?, ?, ?, ?, ?, ?, ?)").run(opId, id, version, identity, refs.length ? "blocked" : "removing", now, JSON.stringify(refs));

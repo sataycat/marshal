@@ -88,7 +88,7 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 - [x] Remove only Marshal-owned installation material and metadata; never remove repository files or historical evidence.
 - [x] Preserve a tombstone or provenance record so a removed identity remains distinguishable from a never-installed agent.
 - [x] Make removal idempotent and expose conflict, retry, and cleanup states in the Agents area.
-- [ ] Add tests for active-session conflicts, workflow reassignment, authentication conflicts, successful payload deletion, cleanup failure, and historical readability.
+- [x] Add tests for active-session and recoverable-session conflicts, workflow/default reassignment conflicts, authentication/install conflicts, successful owned-payload deletion, cleanup failure/retry, idempotency, and historical readability; pure frontend error handling covers removal conflict and cleanup retry messaging without adding Slice 10 UI behavior.
 
 ### 10. Finish the browser trust and lifecycle experience
 

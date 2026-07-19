@@ -46,5 +46,11 @@ export function friendlyErrorMessage(err: unknown): string {
   if (code === "diff_failed") {
     return "Could not load the diff for this task.";
   }
+  if (code === "agent_removal_conflict") {
+    return "This agent installation is still in use. Resolve the listed references, then retry removal.";
+  }
+  if (code === "agent_cleanup_failed") {
+    return "Marshal could not clean up the agent payload. Fix the payload permissions and retry cleanup.";
+  }
   return base;
 }

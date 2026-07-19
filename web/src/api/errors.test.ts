@@ -82,4 +82,9 @@ describe("friendlyErrorMessage", () => {
   it("falls back to the raw message when there is no code", () => {
     expect(friendlyErrorMessage(new Error("network down"))).toBe("network down");
   });
+
+  it("keeps removal conflicts and cleanup failures actionable", () => {
+    expect(friendlyErrorMessage(Object.assign(new Error("live references"), { code: "agent_removal_conflict" }))).toMatch(/resolve|removal/i);
+    expect(friendlyErrorMessage(Object.assign(new Error("payload locked"), { code: "agent_cleanup_failed" }))).toMatch(/retry|cleanup/i);
+  });
 });
