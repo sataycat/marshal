@@ -59,7 +59,7 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 - [x] Make `GET /api/agents/operations/:id` return the durable operation state after a browser refresh or daemon restart.
 - [x] Use the existing installation query in the Agents route and stop polling when the operation reaches a terminal state.
 - [ ] Add cancellation only if it guarantees bounded cleanup and cannot expose a partial installation.
-- [ ] Add API, WebSocket, and pure frontend state tests for progress, reconnect, terminal states, and retry behavior.
+- [x] Add API, WebSocket, and pure frontend state tests for progress, reconnect, terminal states, and retry behavior.
 
 ### 7. Add side-by-side versions and explicit updates
 

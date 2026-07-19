@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { startHttpServer } from "./http.js";
-import { createInstallation, finishInstallation, setAgentReadiness } from "../agents/store.js";
+import { createInstallation, finishInstallation, setAgentReadiness, updateInstallationPhase, getInstallationOperation } from "../agents/store.js";
 
 function initGitRepo(root: string): void {
   execSync("git init -b main", { cwd: root, stdio: "ignore" });
@@ -119,6 +119,30 @@ describe("WebSocket event bus", () => {
       ws.close();
       await handle.close();
     }
+  });
+
+  it("broadcasts installation progress and terminal updates, and reconnect hydrates via HTTP", async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-ws-install-"));
+    const operation = createInstallation({ id: "demo", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "demo@1.0.0", launch: { command: "npx", args: ["demo@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "op-ws", machineDir);
+    const handle = await startHttpServer({ root: repoRoot, machineDir, host: "127.0.0.1", port: 0, version: "0.0.1" });
+    const first = await openSocket(`ws://127.0.0.1:${handle.port}/ws`);
+    try {
+      await first.collector.next();
+      updateInstallationPhase(operation.id, "downloading", {}, machineDir);
+      handle.bus.publish("installation.operation.updated", { operation: getInstallationOperation(operation.id, machineDir) });
+      expect((await first.collector.next()).payload.operation).toMatchObject({ id: operation.id, phase: "downloading" });
+      finishInstallation(operation.id, "failed", "timed out", machineDir, { code: "download_timeout", diagnostic: { message: "timed out", action: "Retry" } });
+      handle.bus.publish("installation.operation.updated", { operation: getInstallationOperation(operation.id, machineDir) });
+      expect((await first.collector.next()).payload.operation).toMatchObject({ phase: "failed", error_code: "download_timeout" });
+      first.collector.close();
+      first.ws.close();
+      const second = await openSocket(`ws://127.0.0.1:${handle.port}/ws`);
+      try {
+        await second.collector.next();
+        const recovered = await fetch(`http://127.0.0.1:${handle.port}/api/agents/operations/${operation.id}`);
+        expect((await recovered.json() as { operation: { phase: string } }).operation.phase).toBe("failed");
+      } finally { second.collector.close(); second.ws.close(); }
+    } finally { first.collector.close(); first.ws.close(); await handle.close(); }
   });
 
   it("sends repository threads in the connected snapshot and broadcasts thread mutations", async () => {

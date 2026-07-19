@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import * as api from "./client";
 import { queryKeys } from "./queryKeys";
 import type { TaskStatus } from "../types";
+import { isTerminalInstallationOperation } from "../state/installationOperations";
 
 const queryOptions = { retry: 1, refetchOnWindowFocus: false } as const;
 
@@ -23,7 +24,7 @@ export function useInstalledAgentsQuery() {
   return useQuery({ queryKey: queryKeys.installedAgents, queryFn: ({ signal }) => api.fetchInstalledAgents(signal), ...queryOptions, refetchInterval: (query) => query.state.data?.some((agent) => agent.status === "installing") ? 1000 : false });
 }
 export function useInstallationQuery(id: string | null) {
-  return useQuery({ queryKey: queryKeys.installation(id ?? ""), queryFn: ({ signal }) => api.fetchInstallationOperation(id ?? "", signal), enabled: Boolean(id), ...queryOptions, refetchInterval: (query) => query.state.data && ["installed", "failed", "interrupted"].includes(query.state.data.status) ? false : 1000 });
+  return useQuery({ queryKey: queryKeys.installation(id ?? ""), queryFn: ({ signal }) => api.fetchInstallationOperation(id ?? "", signal), enabled: Boolean(id), ...queryOptions, refetchInterval: (query) => query.state.data && isTerminalInstallationOperation(query.state.data) ? false : 1000 });
 }
 export const useRefreshRegistryMutation = () => useMutation({ mutationFn: api.refreshRegistry });
 export const useInstallRegistryAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, distribution }: { agentId: string; version: string; distribution?: "npx" | "uvx" | "binary" }) => api.installRegistryAgent(agentId, version, distribution) });

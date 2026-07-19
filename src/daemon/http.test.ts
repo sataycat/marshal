@@ -6,6 +6,8 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp, portFilePath, startHttpServer } from "./http.js";
 import { loadGlobalConfig } from "../worktree/config.js";
+import { EventBus } from "./bus.js";
+import { createInstallation, finishInstallation, getInstallationOperation, updateInstallationPhase } from "../agents/store.js";
 
 function fetchJson(url: string): Promise<{ status: number; body: unknown }> {
   return fetch(url).then(async (res) => ({ status: res.status, body: await res.json() }));
@@ -35,6 +37,20 @@ describe("buildApp /api/health", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { agents: unknown[] };
     expect(body.agents).toHaveLength(1);
+  });
+});
+
+describe("installation operation API durability", () => {
+  it("hydrates progress and terminal diagnostics from durable storage", async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-api-"));
+    const operation = createInstallation({ id: "demo", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "demo@1.0.0", launch: { command: "npx", args: ["demo@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "op-api", machineDir);
+    updateInstallationPhase(operation.id, "downloading", {}, machineDir);
+    const app = buildApp("0.0.1", { machineDir, bus: new EventBus() });
+    expect((await app.request(`/api/agents/operations/${operation.id}`)).status).toBe(200);
+    expect((await (await app.request(`/api/agents/operations/${operation.id}`)).json() as { operation: { phase: string } }).operation.phase).toBe("downloading");
+    finishInstallation(operation.id, "failed", "download timed out", machineDir, { code: "download_timeout", diagnostic: { message: "download timed out", action: "Retry the installation." } });
+    const hydrated = (await (await app.request(`/api/agents/operations/${operation.id}`)).json() as { operation: ReturnType<typeof getInstallationOperation> }).operation!;
+    expect(hydrated).toMatchObject({ phase: "failed", status: "failed", error_code: "download_timeout", diagnostic: { action: "Retry the installation." } });
   });
 });
 
