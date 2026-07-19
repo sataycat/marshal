@@ -21,6 +21,7 @@ import { RunLog } from "./run-log.js";
 import type { EventBus } from "./bus.js";
 import { publishTaskTransitioned } from "./bus.js";
 import { getWorkflowProfile } from "../workflows/store.js";
+import { historicalProvenance } from "../agents/provenance.js";
 import { getSelectedRepository } from "../repositories/store.js";
 import { AcpSessionSupervisor } from "../acp/supervisor.js";
 
@@ -187,7 +188,7 @@ export async function buildTask(
 
   const worktree = manager.create(slug);
   const prompt = renderBuilderPrompt(task);
-   const runId = runLog.startRun(task.id, "builder", builderAgentId, prompt, { agentVersion: builderVersion, assignmentConfig: resolved.assignment ? { model: resolved.assignment.model, mode: resolved.assignment.mode, permission_policy: resolved.profile?.permission_policy } : {} });
+   const runId = runLog.startRun(task.id, "builder", builderAgentId, prompt, { agentVersion: builderVersion, agentProvenance: resolved.assignment?.agent_provenance ?? historicalProvenance(builderAgentId, builderVersion), assignmentConfig: resolved.assignment ? { model: resolved.assignment.model, mode: resolved.assignment.mode, permission_policy: resolved.profile?.permission_policy } : {} });
 
   const spawnOpts: SpawnOptions = {
     sessionName: `marshal-${slug}-builder`,
@@ -392,7 +393,7 @@ export async function validateTask(
   }
 
   const prompt = renderValidatorPrompt(task, diffText, trunkRef, totalDiffLines);
-   const runId = runLog.startRun(task.id, "validator", validatorAgentId, prompt, { agentVersion: validatorVersion, assignmentConfig: resolved.assignment ? { model: resolved.assignment.model, mode: resolved.assignment.mode, permission_policy: resolved.profile?.permission_policy } : {} });
+   const runId = runLog.startRun(task.id, "validator", validatorAgentId, prompt, { agentVersion: validatorVersion, agentProvenance: resolved.assignment?.agent_provenance ?? historicalProvenance(validatorAgentId, validatorVersion), assignmentConfig: resolved.assignment ? { model: resolved.assignment.model, mode: resolved.assignment.mode, permission_policy: resolved.profile?.permission_policy } : {} });
 
   const spawnOpts: SpawnOptions = {
     sessionName: `marshal-${slug}-validator`,

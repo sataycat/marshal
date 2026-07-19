@@ -10,6 +10,7 @@ import {
 import { AcpSessionSupervisor } from "../acp/supervisor.js";
 import { createSpecAuthorSession, updateSpecAuthorSession, appendSpecAuthorOperation } from "../tasks/author-store.js";
 import { getWorkflowProfile } from "../workflows/store.js";
+import { historicalProvenance } from "../agents/provenance.js";
 import { getSelectedRepository } from "../repositories/store.js";
 
 const SPEC_AUTHOR_TIMEOUT_SECONDS = 600;
@@ -186,7 +187,7 @@ export async function runSpecAuthorTurn(
 
   let assistantText = "";
   const authorRecord = profile && assignment && selectedRepository
-    ? createSpecAuthorSession({ taskId: task.id, repositoryId: selectedRepository.id, workflowProfileId: profile.id, assignmentId: assignment.id, agentId: assignment.agent_id, agentVersion: assignment.agent_version, assignmentConfig: { model: assignment.model, mode: assignment.mode, permission_policy: profile.permission_policy } }, root)
+     ? createSpecAuthorSession({ taskId: task.id, repositoryId: selectedRepository.id, workflowProfileId: profile.id, assignmentId: assignment.id, agentId: assignment.agent_id, agentVersion: assignment.agent_version, agentProvenance: assignment.agent_provenance ?? historicalProvenance(assignment.agent_id, assignment.agent_version), assignmentConfig: { model: assignment.model, mode: assignment.mode, permission_policy: profile.permission_policy } }, root)
     : undefined;
   try {
     if (!authorRecord) {

@@ -1,5 +1,6 @@
 export type WorkflowRole = "specAuthor" | "builder" | "validator";
 export type PermissionPolicy = "reject_all" | "allow_reads_ask_writes" | "allow_workspace" | "unattended_allow_all";
+import type { HistoricalAgentProvenance } from "../agents/provenance.js";
 
 export interface AgentAssignment {
   id: string;
@@ -9,6 +10,7 @@ export interface AgentAssignment {
   agent_version: string;
   model: string | null;
   mode: string | null;
+  agent_provenance: HistoricalAgentProvenance;
   created_at: string;
   updated_at: string;
 }

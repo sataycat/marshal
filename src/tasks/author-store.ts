@@ -1,16 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { openDb } from "../db/index.js";
+import type { HistoricalAgentProvenance } from "../agents/provenance.js";
 
 export interface SpecAuthorSession {
   id: string; task_id: number; repository_id: string; workflow_profile_id: string;
-  assignment_id: string; agent_id: string; agent_version: string; capabilities: unknown;
+   assignment_id: string; agent_id: string; agent_version: string; agent_provenance: HistoricalAgentProvenance; capabilities: unknown;
   assignment_config: unknown; acp_session_id: string | null; supervisor_session_id: string | null;
   status: string; created_at: string; updated_at: string;
 }
 export interface SpecAuthorOperation { id: number; author_session_id: string; operation: string; status: string; diagnostic: string | null; created_at: string }
 const parse = (value: unknown): unknown => { try { return JSON.parse(String(value)); } catch { return value; } };
-function map(row: Record<string, unknown>): SpecAuthorSession { return { ...(row as unknown as SpecAuthorSession), capabilities: parse(row.capabilities), assignment_config: parse(row.assignment_config) }; }
-export function createSpecAuthorSession(input: { taskId: number; repositoryId: string; workflowProfileId: string; assignmentId: string; agentId: string; agentVersion: string; assignmentConfig: unknown }, root?: string): SpecAuthorSession {
+function map(row: Record<string, unknown>): SpecAuthorSession { return { ...(row as unknown as SpecAuthorSession), agent_provenance: parse(row.agent_provenance) as HistoricalAgentProvenance, capabilities: parse(row.capabilities), assignment_config: parse(row.assignment_config) }; }
+export function createSpecAuthorSession(input: { taskId: number; repositoryId: string; workflowProfileId: string; assignmentId: string; agentId: string; agentVersion: string; agentProvenance?: HistoricalAgentProvenance; assignmentConfig: unknown }, root?: string): SpecAuthorSession {
   const id = randomUUID();
   openDb(root).prepare("INSERT INTO spec_author_sessions (id, task_id, repository_id, workflow_profile_id, assignment_id, agent_id, agent_version, assignment_config) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, input.taskId, input.repositoryId, input.workflowProfileId, input.assignmentId, input.agentId, input.agentVersion, JSON.stringify(input.assignmentConfig ?? {}));
   return getSpecAuthorSession(id, root)!;

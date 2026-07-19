@@ -1,21 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { openDb } from "../db/index.js";
+import type { HistoricalAgentProvenance } from "../agents/provenance.js";
 
 export type AcpSessionStatus = "starting" | "running" | "idle" | "cancelling" | "cancelled" | "failed" | "interrupted" | "recoverable" | "closed";
 export type AcpPromptStatus = "running" | "completed" | "cancelled" | "failed" | "interrupted";
-export interface AcpSessionRecord { id: string; owner_type: string; owner_id: string; agent_id: string; agent_version: string; acp_session_id: string | null; capabilities: unknown; status: AcpSessionStatus; recovery_metadata: unknown; diagnostic: string | null; created_at: string; updated_at: string; started_at: string | null; ended_at: string | null }
+export interface AcpSessionRecord { id: string; owner_type: string; owner_id: string; agent_id: string; agent_version: string; agent_provenance: HistoricalAgentProvenance; acp_session_id: string | null; capabilities: unknown; status: AcpSessionStatus; recovery_metadata: unknown; diagnostic: string | null; created_at: string; updated_at: string; started_at: string | null; ended_at: string | null }
 export interface AcpPromptRecord { id: string; session_id: string; prompt: string; status: AcpPromptStatus; cancellation_requested_at: string | null; diagnostic: string | null; started_at: string; ended_at: string | null }
 export interface AcpEventRecord { id: number; session_id: string; prompt_id: string | null; seq: number; type: string; normalized: unknown; raw_payload: unknown; created_at: string }
 
 function json(value: unknown): string { return JSON.stringify(value ?? {}); }
 function parse(value: unknown): unknown { try { return JSON.parse(String(value)); } catch { return value; } }
-function session(row: Record<string, unknown>): AcpSessionRecord { return { ...(row as unknown as AcpSessionRecord), capabilities: parse(row.capabilities), recovery_metadata: parse(row.recovery_metadata) }; }
+function session(row: Record<string, unknown>): AcpSessionRecord { return { ...(row as unknown as AcpSessionRecord), agent_provenance: parse(row.agent_provenance) as HistoricalAgentProvenance, capabilities: parse(row.capabilities), recovery_metadata: parse(row.recovery_metadata) }; }
 function prompt(row: Record<string, unknown>): AcpPromptRecord { return row as unknown as AcpPromptRecord; }
 function event(row: Record<string, unknown>): AcpEventRecord { return { ...(row as unknown as AcpEventRecord), normalized: parse(row.normalized), raw_payload: parse(row.raw_payload) }; }
 
-export function createSession(input: { ownerType: string; ownerId: string; agentId: string; agentVersion: string; capabilities?: unknown; recoveryMetadata?: unknown }, root?: string): AcpSessionRecord {
+export function createSession(input: { ownerType: string; ownerId: string; agentId: string; agentVersion: string; agentProvenance?: HistoricalAgentProvenance; capabilities?: unknown; recoveryMetadata?: unknown }, root?: string): AcpSessionRecord {
   const db = openDb(root); const id = randomUUID();
-  db.prepare("INSERT INTO acp_sessions (id, owner_type, owner_id, agent_id, agent_version, capabilities, recovery_metadata) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, input.ownerType, input.ownerId, input.agentId, input.agentVersion, json(input.capabilities), json(input.recoveryMetadata));
+  db.prepare("INSERT INTO acp_sessions (id, owner_type, owner_id, agent_id, agent_version, agent_provenance, capabilities, recovery_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, input.ownerType, input.ownerId, input.agentId, input.agentVersion, json(input.agentProvenance), json(input.capabilities), json(input.recoveryMetadata));
   return getSession(id, root)!;
 }
 export function getSession(id: string, root?: string): AcpSessionRecord | undefined { const row = openDb(root).prepare("SELECT * FROM acp_sessions WHERE id = ?").get(id) as Record<string, unknown> | undefined; return row ? session(row) : undefined; }

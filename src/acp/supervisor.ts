@@ -5,6 +5,7 @@ import { resolveInstalledAgentLaunch } from "../agents/store.js";
 import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
 import type { EventBus } from "../daemon/bus.js";
 import type { PermissionPolicy } from "../workflows/types.js";
+import type { HistoricalAgentProvenance } from "../agents/provenance.js";
 
 export interface SupervisorOptions { root?: string; machineDir?: string; bus?: EventBus; agent?: Agent; permissionPolicy?: PermissionPolicy; workflow?: boolean; permissionMode?: SpawnOptions["permissionMode"]; onEvent?: (session: AcpSessionRecord, event: AgentEvent) => void; onPermission?: (request: PermissionRequestRecord) => void }
 interface Runtime { record: AcpSessionRecord; session: AgentSession; agent: Agent; prompt?: AcpPromptRecord; }
@@ -19,10 +20,10 @@ export class AcpSessionSupervisor {
     return undefined;
   }
   events(id: string) { return listSessionEvents(id, this.options.root); }
-  async start(ownerType: string, ownerId: string, cwd: string, agentId: string, agentVersion: string, config: { model?: string | null; mode?: string | null; sessionName?: string } = {}): Promise<{ record: AcpSessionRecord; session: AgentSession }> {
+  async start(ownerType: string, ownerId: string, cwd: string, agentId: string, agentVersion: string, config: { model?: string | null; mode?: string | null; sessionName?: string; agentProvenance?: HistoricalAgentProvenance } = {}): Promise<{ record: AcpSessionRecord; session: AgentSession }> {
     const launch = this.options.agent ? null : resolveInstalledAgentLaunch(agentId, agentVersion, this.options.machineDir);
     const agent = this.options.agent ?? new SdkAcpAgentAdapter({ commands: [{ id: agentId, command: launch!.command, args: launch!.args }] });
-    const record = createSession({ ownerType, ownerId, agentId, agentVersion, recoveryMetadata: { resumable: false } }, this.options.root);
+    const record = createSession({ ownerType, ownerId, agentId, agentVersion, agentProvenance: config.agentProvenance, recoveryMetadata: { resumable: false } }, this.options.root);
     try {
       const session = await withTimeout(agent.spawn(cwd, agentId, { permissionMode: this.options.permissionMode ?? (this.options.workflow ? "deny-all" : "interactive"), model: config.model ?? undefined, sessionName: config.sessionName ?? `marshal-${ownerId}` }), 30_000, "ACP session startup timed out");
       const updated = updateSession(record.id, { acp_session_id: session.recordId ?? null, status: "idle", started_at: new Date().toISOString(), capabilities: { image: session.supportsImages === true }, recovery_metadata: { resumable: false, session_name: session.name } }, this.options.root);

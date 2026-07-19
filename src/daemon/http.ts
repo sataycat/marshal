@@ -80,6 +80,7 @@ import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store
 import { randomUUID } from "node:crypto";
 import { reconcileThreadPermissions } from "../acp/permission-store.js";
 import { deleteWorkflowProfile, getWorkflowProfile, listWorkflowProfiles, saveWorkflowProfile, WorkflowValidationError, type WorkflowProfileInput } from "../workflows/store.js";
+import { historicalProvenance } from "../agents/provenance.js";
 import { listSpecAuthorSessions, listSpecAuthorOperations } from "../tasks/author-store.js";
 
 const authenticationControllers = new Map<string, AbortController>();
@@ -685,6 +686,7 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
       cwd: body.cwd === undefined ? undefined : assertString(body.cwd, "cwd"),
       title: body.title === undefined ? undefined : assertString(body.title, "title"),
       taskSlug: body.task_slug === undefined ? undefined : assertString(body.task_slug, "task_slug"),
+      agentProvenance: historicalProvenance(agentId, agentVersion, installed?.provenance, installed?.installation_id),
     }, root);
     if (bus) publishThreadCreated(bus, thread);
     return c.json({ thread }, 201);

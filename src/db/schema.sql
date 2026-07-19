@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS chat_threads (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_message_at DATETIME,
   scratch_markdown TEXT NOT NULL DEFAULT '',
+  agent_provenance TEXT NOT NULL DEFAULT '{}',
   FOREIGN KEY (task_slug) REFERENCES tasks(slug)
 );
 
@@ -134,7 +135,8 @@ CREATE TABLE IF NOT EXISTS acp_sessions (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   started_at DATETIME,
-  ended_at DATETIME
+  ended_at DATETIME,
+  agent_provenance TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_acp_sessions_owner ON acp_sessions(owner_type, owner_id);
 
@@ -180,6 +182,7 @@ CREATE TABLE IF NOT EXISTS permission_requests (
   diagnostic TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  agent_provenance TEXT NOT NULL DEFAULT '{}',
   resolved_at DATETIME,
   FOREIGN KEY (session_id) REFERENCES acp_sessions(id) ON DELETE CASCADE
 );

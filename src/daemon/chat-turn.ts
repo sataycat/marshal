@@ -105,7 +105,7 @@ export class ChatTurnRunner {
         supervisorSessionId = existing.record.id;
       } else {
         try {
-          const started = await this.supervisor.start("thread", threadId, thread.cwd, thread.agent_id, thread.agent_version);
+          const started = await this.supervisor.start("thread", threadId, thread.cwd, thread.agent_id, thread.agent_version, { agentProvenance: thread.agent_provenance });
           session = started.session;
           supervisorSessionId = started.record.id;
         } catch (err) {

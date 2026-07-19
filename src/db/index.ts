@@ -41,6 +41,11 @@ export function openDb(root?: string): Database.Database {
   if (!threadColumns.some((column) => column.name === "agent_version")) {
     db.exec("ALTER TABLE chat_threads ADD COLUMN agent_version TEXT NOT NULL DEFAULT 'legacy'");
   }
+  if (!threadColumns.some((column) => column.name === "agent_provenance")) db.exec("ALTER TABLE chat_threads ADD COLUMN agent_provenance TEXT NOT NULL DEFAULT '{}'");
+  const sessionColumns = db.prepare("PRAGMA table_info(acp_sessions)").all() as { name: string }[];
+  if (!sessionColumns.some((column) => column.name === "agent_provenance")) db.exec("ALTER TABLE acp_sessions ADD COLUMN agent_provenance TEXT NOT NULL DEFAULT '{}'");
+  const authorColumns = db.prepare("PRAGMA table_info(spec_author_sessions)").all() as { name: string }[];
+  if (!authorColumns.some((column) => column.name === "agent_provenance")) db.exec("ALTER TABLE spec_author_sessions ADD COLUMN agent_provenance TEXT NOT NULL DEFAULT '{}'");
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
   if (!taskColumns.some((column) => column.name === "repository_id")) db.exec("ALTER TABLE tasks ADD COLUMN repository_id TEXT");
   if (!taskColumns.some((column) => column.name === "workflow_profile_id")) db.exec("ALTER TABLE tasks ADD COLUMN workflow_profile_id TEXT");
@@ -55,6 +60,7 @@ export function openDb(root?: string): Database.Database {
     ["operation_id", "TEXT"],
     ["verification_status", "TEXT"],
     ["verification_output", "TEXT"],
+    ["agent_provenance", "TEXT NOT NULL DEFAULT '{}'"],
   ];
   for (const [name, definition] of runMigrations) {
     if (!runColumns.some((column) => column.name === name)) db.exec(`ALTER TABLE runs ADD COLUMN ${name} ${definition}`);

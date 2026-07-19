@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { relative, resolve } from "node:path";
 import { openDb } from "../db/index.js";
 import { getSelectedRepository, repositoryRoot } from "../repositories/store.js";
+import type { HistoricalAgentProvenance } from "../agents/provenance.js";
 
 export type ChatThreadStatus = "draft" | "active" | "closed" | "error";
 export type ChatMessageRole = "user" | "assistant";
@@ -22,6 +23,7 @@ export interface ChatThread {
   updated_at: string;
   last_message_at: string | null;
   scratch_markdown: string;
+  agent_provenance: HistoricalAgentProvenance;
 }
 
 export interface ChatMessage {
@@ -39,6 +41,7 @@ export interface CreateChatThreadInput {
   cwd?: string;
   title?: string;
   taskSlug?: string;
+  agentProvenance?: HistoricalAgentProvenance;
 }
 
 export interface UpdateChatThreadInput {
@@ -69,11 +72,14 @@ function repoRoot(root?: string): string {
 }
 
 function rowToThread(row: Record<string, unknown>): ChatThread {
+  let provenance: HistoricalAgentProvenance;
+  try { provenance = JSON.parse(String(row.agent_provenance ?? "{}")) as HistoricalAgentProvenance; } catch { provenance = { installation_id: null, agent_id: String(row.agent_id), agent_version: String(row.agent_version), distribution: null, package_specifier: null, archive_identity: null, source: "legacy", registry_snapshot_fetched_at: null, integrity_status: "legacy", expected_digest: null, observed_digest: null }; }
   return {
     ...(row as Omit<ChatThread, "archived" | "pinned" | "status">),
     status: row.status as ChatThreadStatus,
     archived: row.archived === 1,
     pinned: row.pinned === 1,
+    agent_provenance: provenance,
   };
 }
 
@@ -111,8 +117,8 @@ export function createChatThread(input: CreateChatThreadInput, root?: string): C
     throw new Error("Thread cwd must be inside the repository root");
   }
   db.prepare(
-    "INSERT INTO chat_threads (id, repository_id, repo_root, cwd, agent_id, agent_version, title, task_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(id, getSelectedRepository()?.id ?? null, repository, cwd, input.agentId, input.agentVersion, input.title?.trim() || "New thread", input.taskSlug ?? null);
+    "INSERT INTO chat_threads (id, repository_id, repo_root, cwd, agent_id, agent_version, title, task_slug, agent_provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, getSelectedRepository()?.id ?? null, repository, cwd, input.agentId, input.agentVersion, input.title?.trim() || "New thread", input.taskSlug ?? null, JSON.stringify(input.agentProvenance ?? { installation_id: null, agent_id: input.agentId, agent_version: input.agentVersion, distribution: null, package_specifier: null, archive_identity: null, source: "legacy", registry_snapshot_fetched_at: null, integrity_status: "legacy", expected_digest: null, observed_digest: null }));
   return getChatThread(id, root);
 }
 

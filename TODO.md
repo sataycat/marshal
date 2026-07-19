@@ -73,10 +73,10 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 
 ### 8. Preserve historical provenance independently of installation rows
 
-- [ ] Persist an installation identity or compact immutable provenance snapshot on threads, ACP sessions, workflow assignments, spec-author sessions, and runs when they are created.
-- [ ] Include distribution, exact package or archive identity, integrity result, and registry provenance in historical execution records.
-- [ ] Keep historical APIs readable without resolving a removed installed-agent row.
-- [ ] Define migration behavior for existing records that only contain `agent_id` and `agent_version`.
+- [x] Persist an installation identity or compact immutable provenance snapshot on threads, ACP sessions, workflow assignments, spec-author sessions, and runs when they are created.
+- [x] Include distribution, exact package or archive identity, integrity result, and registry provenance in historical execution records.
+- [x] Keep historical APIs readable without resolving a removed installed-agent row.
+- [x] Define migration behavior for existing records that only contain `agent_id` and `agent_version`.
 - [ ] Add tests proving thread, session, run, assignment, and artifact history remains inspectable after an installed version is removed.
 
 ### 9. Guard removal and clean up owned payloads

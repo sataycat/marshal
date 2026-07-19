@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { openDb } from "../db/index.js";
 import type { AgentEvent } from "../agent/types.js";
+import type { HistoricalAgentProvenance } from "../agents/provenance.js";
 import {
   publishRunEvent,
   publishRunFinished,
@@ -38,6 +39,7 @@ export interface RunRecord {
   operationId?: string | null;
   verificationStatus?: "pass" | "fail" | null;
   verificationOutput?: string | null;
+  agentProvenance?: HistoricalAgentProvenance;
 }
 
 export interface RunEventRecord {
@@ -80,6 +82,7 @@ interface RunRow {
   operation_id: string | null;
   verification_status: string | null;
   verification_output: string | null;
+  agent_provenance: string;
 }
 
 interface RunEventRow {
@@ -124,6 +127,7 @@ function rowToRun(row: RunRow): RunRecord {
     operationId: row.operation_id,
     verificationStatus: row.verification_status === "pass" || row.verification_status === "fail" ? row.verification_status : null,
     verificationOutput: row.verification_output,
+    agentProvenance: parseJson(row.agent_provenance, {}) as HistoricalAgentProvenance,
   };
 }
 
@@ -147,12 +151,12 @@ export class RunLog {
     this.bus = bus;
   }
 
-  startRun(taskId: number, role: RunRole, agentId: string, prompt: string, provenance: { agentVersion?: string; assignmentConfig?: unknown } = {}): number {
+  startRun(taskId: number, role: RunRole, agentId: string, prompt: string, provenance: { agentVersion?: string; agentProvenance?: HistoricalAgentProvenance; assignmentConfig?: unknown } = {}): number {
     const info = this.db
       .prepare(
-        "INSERT INTO runs (task_id, role, agent_id, status, prompt, agent_version, assignment_config, operation_id) VALUES (?, ?, ?, 'running', ?, ?, ?, ?)",
+        "INSERT INTO runs (task_id, role, agent_id, status, prompt, agent_version, agent_provenance, assignment_config, operation_id) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?)",
       )
-      .run(taskId, role, agentId, prompt, provenance.agentVersion ?? "legacy", JSON.stringify(provenance.assignmentConfig ?? {}), randomUUID());
+      .run(taskId, role, agentId, prompt, provenance.agentVersion ?? "legacy", JSON.stringify(provenance.agentProvenance ?? {}), JSON.stringify(provenance.assignmentConfig ?? {}), randomUUID());
     const runId = Number(info.lastInsertRowid);
     const operationId = (this.db.prepare("SELECT operation_id FROM runs WHERE id = ?").get(runId) as { operation_id: string }).operation_id;
     this.db.prepare("INSERT INTO run_operations (id, run_id, operation, status) VALUES (?, ?, ?, 'running')").run(operationId, runId, role);
