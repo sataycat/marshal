@@ -75,6 +75,8 @@ export async function installRegistryAgent(agentId: string, version: string, dis
   const res = await fetch("/api/agents/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent_id: agentId, version, ...(distribution ? { distribution } : {}) }) });
   return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation;
 }
+export async function updateRegistryAgent(agentId: string, version: string, distribution?: "npx" | "uvx" | "binary"): Promise<InstallationOperation> { const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/update`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, ...(distribution ? { distribution } : {}) }) }); return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation; }
+export async function setDefaultInstalledAgent(agentId: string, installationId: string): Promise<InstalledAgent> { const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/default`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ installation_id: installationId }) }); return (await jsonOrThrow<{ agent: InstalledAgent }>(res)).agent; }
 
 export async function fetchInstallationOperation(id: string, signal?: AbortSignal): Promise<InstallationOperation> {
   const res = await fetch(`/api/agents/operations/${encodeURIComponent(id)}`, { signal });

@@ -28,6 +28,8 @@ export function useInstallationQuery(id: string | null) {
 }
 export const useRefreshRegistryMutation = () => useMutation({ mutationFn: api.refreshRegistry });
 export const useInstallRegistryAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, distribution }: { agentId: string; version: string; distribution?: "npx" | "uvx" | "binary" }) => api.installRegistryAgent(agentId, version, distribution) });
+export const useUpdateRegistryAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, distribution }: { agentId: string; version: string; distribution?: "npx" | "uvx" | "binary" }) => api.updateRegistryAgent(agentId, version, distribution) });
+export const useSetDefaultInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, installationId }: { agentId: string; installationId: string }) => api.setDefaultInstalledAgent(agentId, installationId) });
 export const useRemoveInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version }: { agentId: string; version: string }) => api.removeInstalledAgent(agentId, version) });
 export const useProbeInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version }: { agentId: string; version: string }) => api.probeInstalledAgent(agentId, version) });
 export const useAuthenticateInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, methodId }: { agentId: string; version: string; methodId: string }) => api.authenticateInstalledAgent(agentId, version, methodId) });

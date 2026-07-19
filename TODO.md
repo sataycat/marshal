@@ -63,13 +63,13 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 
 ### 7. Add side-by-side versions and explicit updates
 
-- [ ] Treat update as a new immutable installation operation and artifact rather than in-place mutation.
-- [ ] Allow multiple distributions and versions of one agent to coexist with an idempotency key that includes distribution and installation identity.
-- [ ] Add an explicit update API and a machine-scoped default selection for future threads and workflow assignments.
-- [ ] Group installed versions by agent in the Agents area and show distribution, integrity, provenance, readiness, and the selected default.
-- [ ] Keep existing thread, session, assignment, and run records pinned to their original installed identity and version.
-- [ ] Let chat and workflow selectors use the default while still permitting an explicit installed version choice.
-- [ ] Add tests proving an update leaves the old version launchable and historical records unchanged.
+- [x] Treat update as a new immutable installation operation and artifact rather than in-place mutation.
+- [x] Allow multiple distributions and versions of one agent to coexist with an idempotency key that includes distribution and installation identity.
+- [x] Add an explicit update API and a machine-scoped default selection for future threads and workflow assignments.
+- [x] Group installed versions by agent in the Agents area and show distribution, integrity, provenance, readiness, and the selected default.
+- [x] Keep existing thread, session, assignment, and run records pinned to their original installed identity and version.
+- [x] Let chat and workflow selectors use the default while still permitting an explicit installed version choice.
+- [x] Add tests proving an update leaves the old version launchable and historical records unchanged.
 
 ### 8. Preserve historical provenance independently of installation rows
 

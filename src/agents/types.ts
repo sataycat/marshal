@@ -71,6 +71,7 @@ export interface InstalledAgent {
   auth_methods: AgentAuthMethod[];
   raw_initialize: Record<string, unknown> | null;
   probed_at: string | null;
+  is_default: boolean;
 }
 
 export interface InstallationOperation {
@@ -91,6 +92,8 @@ export interface InstallationOperation {
   error_code: string | null;
   diagnostic: { message: string; action: string; details?: Record<string, unknown> } | null;
 }
+
+export interface AgentDefaultSelection { agent_id: string; installation_id: string; distribution: AgentDistribution; version: string; updated_at: string }
 
 export interface AgentAuthenticationOperation {
   id: string;

@@ -149,10 +149,8 @@ export async function startInstallation(agent: RegistryAgent, machineDir = GLOBA
   const installRunner = runner ?? (distribution.kind === "npx" ? runNpx : runUvx);
   const installationId = `${agent.id}@${agent.version}:${distribution.kind}:${packageSpecifier}`;
   const duplicate = getInstallationByIdentity(agent.id, agent.version, distribution.kind, installationId, machineDir); if (duplicate) return duplicate;
-  const existing = getInstalledAgent(agent.id, agent.version, machineDir);
-  if (existing?.status === "installed") return getLatestInstallationOperation(agent.id, agent.version, machineDir)!;
-  const running = getLatestInstallationOperation(agent.id, agent.version, machineDir);
-  if (running?.status === "installing") return running;
+   const running = getInstallationByIdentity(agent.id, agent.version, distribution.kind, installationId, machineDir);
+   if (running?.status === "installing") return running;
   const operationId = randomUUID();
   mkdirSync(resolve(machineDir, "agents"), { recursive: true });
   const installationRoot = resolve(machineDir, "agents", agent.id, agent.version, randomUUID());

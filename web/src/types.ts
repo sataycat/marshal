@@ -61,6 +61,10 @@ export interface InstalledAgent {
   auth_methods: AgentAuthMethod[];
   raw_initialize: Record<string, unknown> | null;
   probed_at: string | null;
+  installation_id: string;
+  installation_root: string;
+  provenance: { exact_version: string; distribution: "binary" | "npx" | "uvx"; source: "registry" | "custom"; package_specifier: string | null; archive_identity: string | null; registry_snapshot_fetched_at: string | null; installation_root: string; integrity_status: string };
+  is_default: boolean;
 }
 export interface AgentAuthenticationOperation { id: string; agent_id: string; version: string; method_id: string; method_name: string; status: AgentAuthenticationStatus; started_at: string; finished_at: string | null; error: string | null }
 export interface InstallationOperation {

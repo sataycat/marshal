@@ -72,7 +72,7 @@ import { getRepository, getSelectedRepository, listRepositories, registerReposit
 import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
 import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
-import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, removeInstalledAgent, setAgentReadiness } from "../agents/store.js";
+import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, removeInstalledAgent, setAgentReadiness, setDefaultInstalledAgent, getDefaultInstalledAgent } from "../agents/store.js";
 import { installationOperation, installCandidate, startInstallation } from "../installations/installer.js";
 import { probeAgent } from "../acp/probe.js";
 import { authenticateAgent } from "../acp/authenticate.js";
@@ -539,6 +539,12 @@ function registerRegistryRoutes(app: Hono, machineDir?: string): void {
 
 function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): void {
   app.get("/api/agents", (c) => c.json({ agents: listInstalledAgents(machineDir) }));
+  app.post("/api/agents/:id/default", async (c) => {
+    const body = await readJsonObject(c, new Set(["installation_id"]));
+    const installationId = assertString(body.installation_id, "installation_id");
+    try { return c.json({ agent: setDefaultInstalledAgent(c.req.param("id"), installationId, machineDir) }); }
+    catch (error) { throw new ApiError(409, error instanceof Error ? error.message : String(error), "agent_not_installed"); }
+  });
   app.get("/api/agents/:id", (c) => {
     const version = c.req.query("version");
     if (!version) throw new ApiError(422, "version is required", "missing_query");
@@ -629,6 +635,16 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
       throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid");
     }
   });
+  app.post("/api/agents/:id/update", async (c) => {
+    const body = await readJsonObject(c, new Set(["version", "distribution"]));
+    const version = assertString(body.version, "version");
+    const distribution = body.distribution === undefined ? undefined : assertString(body.distribution, "distribution");
+    if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution)) throw new ApiError(422, "distribution is invalid", "installation_invalid");
+    const registryAgent = getRegistryCatalog(machineDir).snapshot?.agents.find((agent) => agent.id === c.req.param("id") && agent.version === version);
+    if (!registryAgent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
+    try { return c.json({ operation: await startInstallation(registryAgent, machineDir, undefined, distribution as "npx" | "uvx" | "binary" | undefined, {}, bus) }, 202); }
+    catch (error) { throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid"); }
+  });
   app.get("/api/agents/install-candidate", (c) => {
     const agentId = c.req.query("agent_id");
     const version = c.req.query("version");
@@ -657,8 +673,8 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
     const body = await readJsonObject(c, new Set(["agent_id", "agent_version", "cwd", "title", "task_slug"]));
     if (body.agent_id === undefined) throw new ApiError(422, "agent_id is required", "missing_field");
     const agentId = assertString(body.agent_id, "agent_id");
-    if (body.agent_version === undefined) throw new ApiError(422, "agent_version is required", "missing_field");
-    const agentVersion = assertString(body.agent_version, "agent_version");
+    const agentVersion = body.agent_version === undefined ? getDefaultInstalledAgent(agentId, machineDir)?.version : assertString(body.agent_version, "agent_version");
+    if (!agentVersion) throw new ApiError(422, "agent_version is required when no default is selected", "missing_field");
     if (!agentId.trim()) throw new ApiError(422, "agent_id must not be empty", "invalid_field");
     const installed = getInstalledAgent(agentId, agentVersion, machineDir);
     if (!chatAgent && (!installed || installed.status !== "installed")) throw new ApiError(409, "Only an installed agent can be selected for a thread", "agent_not_installed");
