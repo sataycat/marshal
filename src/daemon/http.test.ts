@@ -8,6 +8,7 @@ import { buildApp, portFilePath, startHttpServer } from "./http.js";
 import { loadGlobalConfig } from "../worktree/config.js";
 import { EventBus } from "./bus.js";
 import { createInstallation, finishInstallation, getInstallationOperation, updateInstallationPhase } from "../agents/store.js";
+import { completeRegistryRefresh, beginRegistryRefresh } from "../registry/store.js";
 
 function fetchJson(url: string): Promise<{ status: number; body: unknown }> {
   return fetch(url).then(async (res) => ({ status: res.status, body: await res.json() }));
@@ -41,6 +42,16 @@ describe("buildApp /api/health", () => {
 });
 
 describe("installation operation API durability", () => {
+  it("retries a failed durable operation using the cached registry version", async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-retry-")); const refresh = beginRegistryRefresh(machineDir);
+    completeRegistryRefresh(refresh.id, { version: "1.0.0", source: "fixture", fetched_at: "fixture", agents: [{ id: "retry-agent", name: "Retry", version: "1.0.0", description: "fixture", license: "MIT", authors: [], distributions: [{ kind: "npx", package: "retry-agent@1.0.0" }] }] }, machineDir);
+    const operation = createInstallation({ id: "retry-agent", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "retry-agent@1.0.0", launch: { command: "npx", args: ["retry-agent@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "retry-op", machineDir);
+    finishInstallation(operation.id, "failed", "failed", machineDir, { code: "installation_failed", diagnostic: { message: "failed", action: "Retry" } });
+    const app = buildApp("0.0.1", { machineDir });
+    const response = await app.request(`/api/agents/operations/${operation.id}/retry`, { method: "POST", body: "{}", headers: { "content-type": "application/json" } });
+    expect(response.status).toBe(202);
+    expect((await response.json() as { operation: { agent_id: string; status: string } }).operation).toMatchObject({ agent_id: "retry-agent", status: "installing" });
+  });
   it("hydrates progress and terminal diagnostics from durable storage", async () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-api-"));
     const operation = createInstallation({ id: "demo", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "demo@1.0.0", launch: { command: "npx", args: ["demo@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "op-api", machineDir);
@@ -51,6 +62,16 @@ describe("installation operation API durability", () => {
     finishInstallation(operation.id, "failed", "download timed out", machineDir, { code: "download_timeout", diagnostic: { message: "download timed out", action: "Retry the installation." } });
     const hydrated = (await (await app.request(`/api/agents/operations/${operation.id}`)).json() as { operation: ReturnType<typeof getInstallationOperation> }).operation!;
     expect(hydrated).toMatchObject({ phase: "failed", status: "failed", error_code: "download_timeout", diagnostic: { action: "Retry the installation." } });
+  });
+
+  it("recovers an interrupted operation from durable storage across a new app instance", async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-restart-"));
+    const operation = createInstallation({ id: "restart-agent", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "restart-agent@1.0.0", launch: { command: "npx", args: ["restart-agent@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "restart-op", machineDir, { temporary_root: join(machineDir, "agents", ".tmp-restart"), published_root: join(machineDir, "agents", "restart-agent", "1.0.0", "published") });
+    const first = buildApp("0.0.1", { machineDir });
+    expect((await first.request(`/api/agents/operations/${operation.id}`)).status).toBe(200);
+    const { reconcileInstallationOperations } = await import("../agents/store.js"); reconcileInstallationOperations(machineDir);
+    const afterRestart = buildApp("0.0.1", { machineDir });
+    expect((await (await afterRestart.request(`/api/agents/operations/${operation.id}`)).json() as { operation: { status: string; phase: string } }).operation).toMatchObject({ status: "interrupted", phase: "interrupted" });
   });
 });
 

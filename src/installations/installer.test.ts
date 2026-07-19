@@ -1,7 +1,8 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { exactNpxPackage, exactUvxPackage, installCandidate, selectDistribution, startInstallation } from "./installer.js";
+import { exactNpxPackage, exactUvxPackage, installBinary, installCandidate, selectDistribution, startInstallation } from "./installer.js";
 import { createInstallation, getInstalledAgent, getInstallationOperation, reconcileInstallationOperations } from "../agents/store.js";
 import type { RegistryAgent } from "../registry/types.js";
 
@@ -11,6 +12,35 @@ const uvxAgent: RegistryAgent = {
 };
 
 describe("uvx installations", () => {
+  function binaryTar(executable = "bin/agent"): Uint8Array {
+    const header = new Uint8Array(512); header.set(new TextEncoder().encode(executable), 0); header.set(new TextEncoder().encode("00000000011\0"), 124); header[156] = 48;
+    const body = new TextEncoder().encode("#!/bin/sh\n"); const out = new Uint8Array(1024 + 512); out.set(header); out.set(body, 512); return gzipSync(out);
+  }
+  function binaryOperation(machineDir: string, operationId: string, executable = "bin/agent") {
+    return createInstallation({ id: "binary", version: "1.0.0", source: "registry", license: "MIT", distribution: "binary", package_specifier: "archive", launch: { command: "pending", args: [] }, registry_snapshot_fetched_at: "fixture", integrity_status: "unknown", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null, provenance: { exact_version: "1.0.0", distribution: "binary", source: "registry", package_specifier: null, archive_identity: "fixture://binary", registry_snapshot_fetched_at: "fixture", installation_root: `${machineDir}/agents/binary/1.0.0/published`, integrity_status: "unknown" }, installation_id: "binary-install", installation_root: `${machineDir}/agents/binary/1.0.0/published` }, operationId, machineDir, { temporary_root: `${machineDir}/agents/.tmp-binary`, published_root: `${machineDir}/agents/binary/1.0.0/published` });
+  }
+
+  it("verifies binary checksums and refuses mismatches", async () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-binary-integrity-`); const bytes = binaryTar();
+    const digest = (await import("node:crypto")).createHash("sha256").update(bytes).digest("hex");
+    binaryOperation(machineDir, "binary-match");
+    await installBinary({ id: "binary", name: "Binary", version: "1.0.0", description: "fixture", license: "MIT", authors: [], distributions: [] }, { kind: "binary", archive_url: "https://fixture/binary.tgz", archive_format: "tgz", executable: "bin/agent", checksum: digest }, machineDir, "binary-match", false, async () => new Response(bytes));
+    expect(getInstallationOperation("binary-match", machineDir)).toMatchObject({ status: "installed", phase: "completed" });
+    binaryOperation(machineDir, "binary-mismatch");
+    await installBinary({ id: "binary", name: "Binary", version: "1.0.0", description: "fixture", license: "MIT", authors: [], distributions: [] }, { kind: "binary", archive_url: "https://fixture/binary.tgz", archive_format: "tgz", executable: "bin/agent", checksum: "b".repeat(64) }, machineDir, "binary-mismatch", false, async () => new Response(bytes));
+    expect(getInstallationOperation("binary-mismatch", machineDir)).toMatchObject({ status: "failed", error_code: "integrity_mismatch" });
+  });
+
+  it("requires confirmation for checksumless binaries and rejects escaping executables", async () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-binary-policy-`); const bytes = binaryTar();
+    binaryOperation(machineDir, "binary-unverified");
+    await installBinary({ id: "binary", name: "Binary", version: "1.0.0", description: "fixture", license: "MIT", authors: [], distributions: [] }, { kind: "binary", archive_url: "https://fixture/binary.tgz", archive_format: "tgz", executable: "bin/agent" }, machineDir, "binary-unverified", false, async () => new Response(bytes));
+    expect(getInstallationOperation("binary-unverified", machineDir)).toMatchObject({ status: "failed", error_code: "unverified_binary" });
+    binaryOperation(machineDir, "binary-escape", "../escape");
+    await installBinary({ id: "binary", name: "Binary", version: "1.0.0", description: "fixture", license: "MIT", authors: [], distributions: [] }, { kind: "binary", archive_url: "https://fixture/binary.tgz", archive_format: "tgz", executable: "../escape" }, machineDir, "binary-escape", true, async () => new Response(bytes));
+    expect(getInstallationOperation("binary-escape", machineDir)).toMatchObject({ status: "failed", error_code: "unsafe_archive" });
+  });
+
   it("uses lifecycle distribution precedence and honors an explicit override", () => {
     const agent: RegistryAgent = {
       id: "precedence", name: "Precedence", version: "1.2.3", description: "fixture", license: "MIT", authors: [],

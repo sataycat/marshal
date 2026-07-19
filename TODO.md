@@ -58,7 +58,7 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 - [x] Publish installation operation updates through the daemon event bus and WebSocket, while retaining HTTP polling as the hydration and recovery path.
 - [x] Make `GET /api/agents/operations/:id` return the durable operation state after a browser refresh or daemon restart.
 - [x] Use the existing installation query in the Agents route and stop polling when the operation reaches a terminal state.
-- [ ] Add cancellation only if it guarantees bounded cleanup and cannot expose a partial installation.
+- [ ] Add cancellation only if it guarantees bounded cleanup and cannot expose a partial installation. (Not implemented: package runners and fetch cancellation cannot guarantee cleanup of external package-manager state; retry is supported instead.)
 - [x] Add API, WebSocket, and pure frontend state tests for progress, reconnect, terminal states, and retry behavior.
 
 ### 7. Add side-by-side versions and explicit updates
@@ -104,8 +104,8 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 ### 11. Verify the complete ADR lifecycle
 
 - [x] Add focused coverage for distribution selection precedence: checksummed compatible binary, exact `npx`, exact `uvx`, and explicit user override. (Selection and exact package-pin coverage added; the remaining lifecycle checks are tracked below.)
-- [ ] Cover checksum match, mismatch, checksumless policy, unsafe archive entries, extraction limits, executable containment, and no-shell launch. (Archive limits and no-shell launch covered; binary checksum/policy and containment still need focused end-to-end coverage.)
-- [ ] Cover atomic publication, interrupted-operation recovery, stale temporary cleanup, duplicate requests, cancellation, and retry. (Atomic publication, interrupted recovery, stale cleanup, and duplicate requests covered; installation cancellation and retry APIs are not supported, so no cancellation test was added.)
+- [x] Cover checksum match, mismatch, checksumless policy, unsafe archive entries, extraction limits, executable containment, and no-shell launch. (Focused binary integrity, policy, containment, archive, and launch coverage added.)
+- [ ] Cover atomic publication, interrupted-operation recovery, stale temporary cleanup, duplicate requests, cancellation, and retry. (Atomic publication, interrupted recovery, stale cleanup, duplicate requests, and durable retry are covered. Cancellation remains intentionally unsupported for the bounded-cleanup reason documented in Slice 6.)
 - [x] Cover side-by-side versions, default selection, update immutability, active-reference removal conflicts, payload cleanup, and historical provenance. (Existing focused coverage covers these areas.)
-- [ ] Cover API and WebSocket recovery after browser refresh and daemon restart. (Refresh/reconnect hydration is covered; daemon-restart recovery still needs an integration test.)
+- [x] Cover API and WebSocket recovery after browser refresh and daemon restart. (HTTP hydration after durable reconciliation and WebSocket reconnect hydration are covered against durable state.)
 - [x] Run `pnpm run check`, `pnpm run test`, and the relevant daemon/API integration tests before considering ADR-0008 implemented. (`pnpm run check`, full `pnpm run test`, and focused daemon/API tests passed; ADR completion remains blocked by the incomplete boxes above.)

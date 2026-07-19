@@ -72,7 +72,7 @@ import { getRepository, getSelectedRepository, listRepositories, registerReposit
 import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
 import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
-import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, listInstallationOperations, removeInstalledAgent, executeAgentRemoval, getAgentRemovalOperation, listAgentRemovalOperations, setAgentReadiness, setDefaultInstalledAgent, getDefaultInstalledAgent } from "../agents/store.js";
+import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, listInstallationOperations, getInstallationOperation, removeInstalledAgent, executeAgentRemoval, getAgentRemovalOperation, listAgentRemovalOperations, setAgentReadiness, setDefaultInstalledAgent, getDefaultInstalledAgent } from "../agents/store.js";
 import { installationOperation, installCandidate, startInstallation } from "../installations/installer.js";
 import { probeAgent } from "../acp/probe.js";
 import { authenticateAgent } from "../acp/authenticate.js";
@@ -622,7 +622,7 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
     return c.json({ authentication: getAgentAuthenticationOperation(operation.id, machineDir) });
   });
   app.post("/api/agents/install", async (c) => {
-     const body = await readJsonObject(c, new Set(["agent_id", "version", "distribution"]));
+     const body = await readJsonObject(c, new Set(["agent_id", "version", "distribution", "allow_unverified"]));
     const agentId = assertString(body.agent_id, "agent_id");
      const version = assertString(body.version, "version");
      const distribution = body.distribution === undefined ? undefined : assertString(body.distribution, "distribution");
@@ -630,20 +630,21 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
     const catalog = getRegistryCatalog(machineDir);
     const registryAgent = catalog.snapshot?.agents.find((agent) => agent.id === agentId && agent.version === version);
     if (!registryAgent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
-    try {
-        return c.json({ operation: await startInstallation(registryAgent, machineDir, undefined, distribution as "npx" | "uvx" | "binary" | undefined, {}, bus) }, 202);
+     try {
+         if (body.allow_unverified !== undefined && typeof body.allow_unverified !== "boolean") throw new Error("allow_unverified must be a boolean");
+         return c.json({ operation: await startInstallation(registryAgent, machineDir, undefined, distribution as "npx" | "uvx" | "binary" | undefined, { allowUnverified: body.allow_unverified === true }, bus) }, 202);
     } catch (error) {
       throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid");
     }
   });
   app.post("/api/agents/:id/update", async (c) => {
-    const body = await readJsonObject(c, new Set(["version", "distribution"]));
+     const body = await readJsonObject(c, new Set(["version", "distribution", "allow_unverified"]));
     const version = assertString(body.version, "version");
     const distribution = body.distribution === undefined ? undefined : assertString(body.distribution, "distribution");
     if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution)) throw new ApiError(422, "distribution is invalid", "installation_invalid");
     const registryAgent = getRegistryCatalog(machineDir).snapshot?.agents.find((agent) => agent.id === c.req.param("id") && agent.version === version);
     if (!registryAgent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
-    try { return c.json({ operation: await startInstallation(registryAgent, machineDir, undefined, distribution as "npx" | "uvx" | "binary" | undefined, {}, bus) }, 202); }
+     try { if (body.allow_unverified !== undefined && typeof body.allow_unverified !== "boolean") throw new Error("allow_unverified must be a boolean"); return c.json({ operation: await startInstallation(registryAgent, machineDir, undefined, distribution as "npx" | "uvx" | "binary" | undefined, { allowUnverified: body.allow_unverified === true }, bus) }, 202); }
     catch (error) { throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid"); }
   });
   app.get("/api/agents/install-candidate", (c) => {
@@ -661,6 +662,16 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
   app.get("/api/agents/operations/:id", (c) => {
     try { return c.json({ operation: installationOperation(c.req.param("id"), machineDir) }); }
     catch { throw new ApiError(404, "Installation operation not found", "operation_not_found"); }
+  });
+  app.post("/api/agents/operations/:id/retry", async (c) => {
+    const prior = getInstallationOperation(c.req.param("id"), machineDir);
+    if (!prior) throw new ApiError(404, "Installation operation not found", "operation_not_found");
+    if (prior.status !== "failed" && prior.status !== "interrupted") throw new ApiError(409, "Only failed or interrupted installations can be retried", "installation_not_retryable");
+    const agent = getRegistryCatalog(machineDir).snapshot?.agents.find((entry) => entry.id === prior.agent_id && entry.version === prior.version);
+    if (!agent) throw new ApiError(409, "The registry no longer contains this agent version", "registry_agent_not_found");
+    const body = await readJsonObject(c, new Set(["allow_unverified"]));
+    if (body.allow_unverified !== undefined && typeof body.allow_unverified !== "boolean") throw new ApiError(422, "allow_unverified must be a boolean", "invalid_field");
+    return c.json({ operation: await startInstallation(agent, machineDir, undefined, prior.distribution, { retry: true, allowUnverified: body.allow_unverified === true }, bus) }, 202);
   });
   app.get("/api/agents/removal-operations", (c) => c.json({ operations: listAgentRemovalOperations(machineDir) }));
   app.get("/api/agents/removal-operations/:operationId", (c) => {
