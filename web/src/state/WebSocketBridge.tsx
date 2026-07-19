@@ -32,6 +32,11 @@ export function WebSocketBridge({ children }: { children: ReactNode }): JSX.Elem
       applyTaskEvent(event);
       applyChatEvent(event);
       reconcileBusEvent(queryClient, event);
+      if (event.type === "installation.operation.updated") {
+        const operation = (event.payload as { operation?: unknown }).operation;
+        if (operation && typeof operation === "object" && "id" in operation) queryClient.setQueryData(queryKeys.installation(String((operation as { id: string }).id)), operation);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.installedAgents });
+      }
     }, { onStatus: (status) => useTaskStore.getState().setSocketStatus(status) });
 
     return () => {

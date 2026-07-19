@@ -168,7 +168,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerDiagnosticsRoute(app, options.machineDir, root, version);
   registerRepositoryRoutes(app);
   registerRegistryRoutes(app, options.machineDir);
-  registerAgentRoutes(app, options.machineDir);
+   registerAgentRoutes(app, options.machineDir, bus);
   registerWorkflowProfileRoutes(app, options.machineDir);
    registerTaskRoutes(app, root, options.worktreeRoot, bus, options.machineDir);
    registerRunRoutes(app, root);
@@ -537,7 +537,7 @@ function registerRegistryRoutes(app: Hono, machineDir?: string): void {
   });
 }
 
-function registerAgentRoutes(app: Hono, machineDir?: string): void {
+function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): void {
   app.get("/api/agents", (c) => c.json({ agents: listInstalledAgents(machineDir) }));
   app.get("/api/agents/:id", (c) => {
     const version = c.req.query("version");
@@ -624,7 +624,7 @@ function registerAgentRoutes(app: Hono, machineDir?: string): void {
     const registryAgent = catalog.snapshot?.agents.find((agent) => agent.id === agentId && agent.version === version);
     if (!registryAgent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
     try {
-       return c.json({ operation: await startInstallation(registryAgent, machineDir, undefined, distribution as "npx" | "uvx" | "binary" | undefined) }, 202);
+        return c.json({ operation: await startInstallation(registryAgent, machineDir, undefined, distribution as "npx" | "uvx" | "binary" | undefined, {}, bus) }, 202);
     } catch (error) {
       throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid");
     }

@@ -47,6 +47,11 @@ export const ThreadUpdatedType = "thread.updated";
 export const ThreadMessageType = "thread.message";
 export const ThreadDeletedType = "thread.deleted";
 export const ThreadEventType = "thread.event";
+export const InstallationOperationUpdatedType = "installation.operation.updated";
+
+export function publishInstallationOperationUpdated(bus: EventBus, operation: unknown): void {
+  bus.publish(InstallationOperationUpdatedType, { operation });
+}
 
 export interface SpecMessagePayload {
   taskSlug: string;

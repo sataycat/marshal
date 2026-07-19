@@ -53,11 +53,11 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 
 ### 6. Make installation operations durable in the browser
 
-- [ ] Extend installation operations with stable phases such as resolving, downloading, verifying, extracting, publishing, completed, failed, and interrupted.
-- [ ] Persist actionable diagnostics and stable machine error codes for each terminal failure.
-- [ ] Publish installation operation updates through the daemon event bus and WebSocket, while retaining HTTP polling as the hydration and recovery path.
-- [ ] Make `GET /api/agents/operations/:id` return the durable operation state after a browser refresh or daemon restart.
-- [ ] Use the existing installation query in the Agents route and stop polling when the operation reaches a terminal state.
+- [x] Extend installation operations with stable phases such as resolving, downloading, verifying, extracting, publishing, completed, failed, and interrupted.
+- [x] Persist actionable diagnostics and stable machine error codes for each terminal failure.
+- [x] Publish installation operation updates through the daemon event bus and WebSocket, while retaining HTTP polling as the hydration and recovery path.
+- [x] Make `GET /api/agents/operations/:id` return the durable operation state after a browser refresh or daemon restart.
+- [x] Use the existing installation query in the Agents route and stop polling when the operation reaches a terminal state.
 - [ ] Add cancellation only if it guarantees bounded cleanup and cannot expose a partial installation.
 - [ ] Add API, WebSocket, and pure frontend state tests for progress, reconnect, terminal states, and retry behavior.
 

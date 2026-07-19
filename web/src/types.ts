@@ -34,7 +34,8 @@ export interface RegistryAgent {
   distributions: RegistryDistribution[];
 }
 
-export type InstalledAgentStatus = "installing" | "installed" | "failed";
+export type InstalledAgentStatus = "installing" | "installed" | "failed" | "interrupted";
+export type InstallationPhase = "resolving" | "downloading" | "verifying" | "extracting" | "publishing" | "completed" | "failed" | "interrupted";
 export type AgentReadinessStatus = "unknown" | "probing" | "ready" | "authentication_required" | "failed";
 export type AgentAuthenticationStatus = "authenticating" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export interface AgentCapabilities { prompt: { text: boolean; image: boolean; audio: boolean; embedded_context: boolean }; session: { close: boolean; list: boolean; load: boolean; fork: boolean; resume: boolean }; load_session: boolean; auth: { logout: boolean } }
@@ -44,7 +45,7 @@ export interface InstalledAgent {
   version: string;
   source: "registry";
   license: string;
-  distribution: "npx" | "uvx";
+  distribution: "npx" | "uvx" | "binary";
   package_specifier: string;
   launch: { command: "npx" | "uvx"; args: string[] };
   registry_snapshot_fetched_at: string;
@@ -67,10 +68,15 @@ export interface InstallationOperation {
   agent_id: string;
   version: string;
   package_specifier: string;
+  distribution: "npx" | "uvx" | "binary";
+  installation_id: string;
+  phase: InstallationPhase;
   status: InstalledAgentStatus;
   started_at: string;
   finished_at: string | null;
   error: string | null;
+  error_code: string | null;
+  diagnostic: { message: string; action: string; details?: Record<string, unknown> } | null;
 }
 
 export interface RegistrySnapshot {

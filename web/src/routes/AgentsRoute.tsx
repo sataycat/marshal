@@ -4,11 +4,12 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../api/queryKeys";
-import { useAuthenticateInstalledAgentMutation, useCancelAgentAuthenticationMutation, useInstallRegistryAgentMutation, useInstalledAgentsQuery, useRefreshRegistryMutation, useRegistryQuery, useRemoveInstalledAgentMutation, useProbeInstalledAgentMutation, useAgentAuthenticationQuery } from "../api/queries";
+import { useAuthenticateInstalledAgentMutation, useCancelAgentAuthenticationMutation, useInstallRegistryAgentMutation, useInstalledAgentsQuery, useRefreshRegistryMutation, useRegistryQuery, useRemoveInstalledAgentMutation, useProbeInstalledAgentMutation, useAgentAuthenticationQuery, useInstallationQuery } from "../api/queries";
 import type { RegistryAgent } from "../types";
 
 export function AgentsRoute(): JSX.Element {
   const [search, setSearch] = useState("");
+  const [operationIds, setOperationIds] = useState<Record<string, string>>({});
   const catalog = useRegistryQuery();
   const installed = useInstalledAgentsQuery();
   const refresh = useRefreshRegistryMutation();
@@ -26,7 +27,8 @@ export function AgentsRoute(): JSX.Element {
   const installedFor = (agent: RegistryAgent) => installed.data?.find((entry) => entry.id === agent.id && entry.version === agent.version);
   const installAgent = async (agent: RegistryAgent, distribution: "npx" | "uvx" | "binary"): Promise<void> => {
     if (!window.confirm(`Install ${agent.name} ${agent.version} from the ACP Registry? This downloads and runs third-party code.`)) return;
-     await install.mutateAsync({ agentId: agent.id, version: agent.version, distribution });
+     const operation = await install.mutateAsync({ agentId: agent.id, version: agent.version, distribution });
+     setOperationIds((current) => ({ ...current, [`${agent.id}@${agent.version}`]: operation.id }));
     await client.invalidateQueries({ queryKey: queryKeys.installedAgents });
   };
   const removeAgent = async (agent: RegistryAgent): Promise<void> => {
@@ -44,16 +46,17 @@ export function AgentsRoute(): JSX.Element {
     {stale && <div className="mt-5 rounded-lg border border-error-border bg-error-bg px-4 py-3 text-sm text-error"><strong>Showing a stale catalog.</strong> The last refresh failed: {catalog.data?.refresh?.error ?? "unknown error"}. The previous valid snapshot remains available.</div>}
     {!catalog.data?.snapshot && catalog.data?.refresh?.status === "failed" && <div className="mt-5 rounded-lg border border-border bg-panel px-4 py-3 text-sm text-muted">No valid catalog snapshot is available yet. Check the daemon network connection and try again.</div>}
     <label className="relative mt-7 block max-w-xl"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" /><Input className="h-10 pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by ID, name, or description" /></label>
-     {catalog.isPending ? <p className="mt-10 text-sm text-muted">Loading catalog...</p> : agents.length === 0 ? <div className="mt-10 rounded-xl border border-dashed border-border px-6 py-12 text-center"><p className="font-medium">{catalog.data?.snapshot ? "No agents match this search" : "The catalog is empty"}</p><p className="mt-2 text-sm text-muted">{catalog.data?.snapshot ? "Try a different name, ID, or description." : "Refresh to load the public ACP Registry."}</p></div> : <div className="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{agents.map((agent) => <AgentCard key={agent.id} agent={agent} installed={installedFor(agent)} onInstall={(distribution) => void installAgent(agent, distribution)} onProbe={() => void probeAgent(agent)} onAuthenticate={(methodId) => void authenticateAgent(agent, methodId)} onRemove={() => void removeAgent(agent)} busy={install.isPending || remove.isPending || probe.isPending || authenticate.isPending} />)}</div>}
+     {catalog.isPending ? <p className="mt-10 text-sm text-muted">Loading catalog...</p> : agents.length === 0 ? <div className="mt-10 rounded-xl border border-dashed border-border px-6 py-12 text-center"><p className="font-medium">{catalog.data?.snapshot ? "No agents match this search" : "The catalog is empty"}</p><p className="mt-2 text-sm text-muted">{catalog.data?.snapshot ? "Try a different name, ID, or description." : "Refresh to load the public ACP Registry."}</p></div> : <div className="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{agents.map((agent) => <AgentCard key={agent.id} agent={agent} installed={installedFor(agent)} operationId={operationIds[`${agent.id}@${agent.version}`] ?? null} onInstall={(distribution) => void installAgent(agent, distribution)} onProbe={() => void probeAgent(agent)} onAuthenticate={(methodId) => void authenticateAgent(agent, methodId)} onRemove={() => void removeAgent(agent)} busy={install.isPending || remove.isPending || probe.isPending || authenticate.isPending} />)}</div>}
     {catalog.data?.snapshot && <p className="mt-7 text-xs text-muted">Snapshot {catalog.data.snapshot.version} fetched {new Date(catalog.data.snapshot.fetched_at).toLocaleString()} from <code>{catalog.data.source}</code></p>}
   </div>;
 }
 
-function AgentCard({ agent, installed, onInstall, onProbe, onAuthenticate, onRemove, busy }: { agent: RegistryAgent; installed?: { id: string; version: string; status: "installing" | "installed" | "failed"; failure: string | null; readiness_status: "unknown" | "probing" | "ready" | "authentication_required" | "failed"; readiness_error: string | null; protocol_version: number | null; capabilities: { prompt: { image: boolean } } | null; auth_methods: { id: string; type: "agent" | "terminal" | "env_var"; name: string; description: string | null }[] }; onInstall: (distribution: "npx" | "uvx" | "binary") => void; onProbe: () => void; onAuthenticate: (methodId: string) => void; onRemove: () => void; busy: boolean }): JSX.Element {
+function AgentCard({ agent, installed, operationId, onInstall, onProbe, onAuthenticate, onRemove, busy }: { agent: RegistryAgent; installed?: { id: string; version: string; status: "installing" | "installed" | "failed" | "interrupted"; failure: string | null; readiness_status: "unknown" | "probing" | "ready" | "authentication_required" | "failed"; readiness_error: string | null; protocol_version: number | null; capabilities: { prompt: { image: boolean } } | null; auth_methods: { id: string; type: "agent" | "terminal" | "env_var"; name: string; description: string | null }[] }; operationId: string | null; onInstall: (distribution: "npx" | "uvx" | "binary") => void; onProbe: () => void; onAuthenticate: (methodId: string) => void; onRemove: () => void; busy: boolean }): JSX.Element {
+  const operation = useInstallationQuery(operationId);
   const authentication = useAgentAuthenticationQuery(installed?.id ?? agent.id, installed?.version ?? agent.version, installed?.status === "installed");
   const cancel = useCancelAgentAuthenticationMutation();
   const auth = authentication.data?.authentication;
-  return <article className="flex min-h-64 flex-col rounded-xl border border-border bg-panel p-5 shadow-sm transition-colors hover:border-primary/50">
+   return <article className="flex min-h-64 flex-col rounded-xl border border-border bg-panel p-5 shadow-sm transition-colors hover:border-primary/50">
     <div className="flex items-start gap-3">{agent.icon ? <img src={agent.icon} alt="" className="size-10 rounded-lg border border-border bg-bg p-1" /> : <div className="flex size-10 items-center justify-center rounded-lg bg-secondary text-lg font-semibold text-primary">{agent.name.slice(0, 1)}</div>}<div className="min-w-0 flex-1"><h2 className="truncate font-semibold">{agent.name}</h2><p className="truncate text-xs text-muted">{agent.id}</p></div><span className="rounded-full bg-secondary px-2 py-1 text-xs font-medium">v{agent.version}</span></div>
     <p className="mt-4 line-clamp-3 text-sm leading-5 text-muted">{agent.description}</p>
     <div className="mt-4 flex flex-wrap gap-1.5">{agent.distributions.map((distribution) => <span key={distribution.kind} className="rounded-md border border-border px-2 py-1 text-[0.7rem] font-medium uppercase tracking-wide">{distribution.kind}</span>)}<span className="rounded-md border border-border px-2 py-1 text-[0.7rem] font-medium">{agent.license}</span></div>

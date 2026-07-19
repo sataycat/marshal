@@ -88,6 +88,8 @@ export interface InstallationOperation {
   started_at: string;
   finished_at: string | null;
   error: string | null;
+  error_code: string | null;
+  diagnostic: { message: string; action: string; details?: Record<string, unknown> } | null;
 }
 
 export interface AgentAuthenticationOperation {
