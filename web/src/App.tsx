@@ -9,6 +9,7 @@ import { AuthGate } from "./auth/AuthGate";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { useInstalledAgentsQuery, useRepositoriesQuery } from "./api/queries";
 import { BoardRoute } from "./routes/BoardRoute";
+import { ThemeProvider } from "./theme";
 
 const ChatRoute = lazy(() =>
   import("./routes/ChatRoute").then((m) => ({ default: m.ChatRoute })),
@@ -34,7 +35,8 @@ export function App(): JSX.Element {
   if (repositories.isError || agents.isError) return <div className="flex min-h-svh items-center justify-center bg-bg text-danger">Unable to load Marshal: {(repositories.error ?? agents.error)?.message}</div>;
   const hasReadyAgent = agents.data.some((agent) => agent.status === "installed" && agent.readiness_status === "ready");
   return (
-    <AppErrorBoundary>
+    <ThemeProvider>
+      <AppErrorBoundary>
       <AuthGate>
         <ConfirmProvider>
           <WebSocketBridge>
@@ -64,6 +66,7 @@ export function App(): JSX.Element {
           </WebSocketBridge>
         </ConfirmProvider>
       </AuthGate>
-    </AppErrorBoundary>
+      </AppErrorBoundary>
+    </ThemeProvider>
   );
 }

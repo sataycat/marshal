@@ -7,6 +7,7 @@ import { useRepositoriesQuery, useRemoveRepositoryMutation, useSelectRepositoryM
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../api/queryKeys";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
+import { ThemeSettings } from "../components/ThemeSettings";
 
 export function AppShell({ children, onboarding = false }: { children: React.ReactNode; onboarding?: boolean }): JSX.Element {
   const repositories = useRepositoriesQuery();
@@ -32,7 +33,7 @@ export function AppShell({ children, onboarding = false }: { children: React.Rea
             <PrefetchNavLink key={item.path} path={item.path} label={item.label} disabled={onboarding && item.path !== ROUTES.agents} />
           ))}
         </nav>
-        {selected && <div className="ml-auto flex items-center gap-2"><select aria-label="Selected repository" value={selected.id} onChange={(event) => void changeRepository(event.target.value)} className="max-w-56 rounded-md border border-input bg-transparent px-2 py-1 text-xs"><option value={selected.id}>{selected.name}</option>{(repositories.data?.repositories ?? []).filter((repo) => repo.id !== selected.id).map((repo) => <option key={repo.id} value={repo.id}>{repo.name}</option>)}</select><button type="button" onClick={() => void unregister()} className="text-xs text-muted hover:text-danger">Remove</button></div>}
+        <div className="ml-auto flex items-center gap-2">{selected && <><select aria-label="Selected repository" value={selected.id} onChange={(event) => void changeRepository(event.target.value)} className="max-w-56 rounded-md border border-input bg-transparent px-2 py-1 text-xs"><option value={selected.id}>{selected.name}</option>{(repositories.data?.repositories ?? []).filter((repo) => repo.id !== selected.id).map((repo) => <option key={repo.id} value={repo.id}>{repo.name}</option>)}</select><button type="button" onClick={() => void unregister()} className="text-xs text-muted hover:text-danger">Remove</button></>}<ThemeSettings /></div>
       </header>
       <main className="flex min-h-0 flex-1 flex-col">
         {children}
