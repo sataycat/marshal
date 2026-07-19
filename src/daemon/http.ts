@@ -164,6 +164,7 @@ export interface HttpServerOptions {
   bus?: EventBus;
   attachWebSockets?: boolean;
   webDir?: string;
+  webUrl?: string;
   uiPassword?: string;
   trustedOrigins?: string[];
   trustedProxy?: boolean;
@@ -194,6 +195,7 @@ export interface BuildAppOptions {
   worktreeRoot?: string;
   bus?: EventBus;
   webDir?: string;
+  webUrl?: string;
   specAgent?: Agent;
   chatAgent?: Agent;
   auth?: AuthService;
@@ -264,8 +266,8 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent, options.machineDir);
   registerChatRoutes(app, root, bus, options.chatAgent, options.machineDir);
-  registerStaticRoutes(app, webDir);
-  app.notFound((c) => spaNotFound(c, webDir));
+  registerStaticRoutes(app, webDir, options.webUrl);
+  app.notFound((c) => spaNotFound(c, webDir, options.webUrl));
   app.onError((err, c) => {
     if (err instanceof ApiError) {
       const body: { error: string; code?: string } = { error: err.message };
@@ -305,9 +307,15 @@ function mimeFor(ext: string): string {
   return MIME_TYPES[ext.toLowerCase()] ?? "application/octet-stream";
 }
 
-function registerStaticRoutes(app: Hono, webDir: string): void {
-  app.get("/", (c) => serveSpaIndex(c, webDir));
+function registerStaticRoutes(app: Hono, webDir: string, webUrl?: string): void {
+  app.get("/", (c) => (webUrl ? redirectToWebApp(c, webUrl) : serveSpaIndex(c, webDir)));
   app.get("/assets/*", (c) => serveAsset(c, webDir));
+}
+
+function redirectToWebApp(c: Context, webUrl: string): Response {
+  const target = new URL(c.req.url);
+  const destination = new URL(target.pathname + target.search, webUrl);
+  return c.redirect(destination.toString(), 307);
 }
 
 function serveSpaIndex(c: Context, webDir: string): Response {
@@ -350,11 +358,12 @@ function serveAsset(c: Context, webDir: string): Response {
   });
 }
 
-function spaNotFound(c: Context, webDir: string): Response {
+function spaNotFound(c: Context, webDir: string, webUrl?: string): Response {
   const path = c.req.path;
   if (path === "/api/health" || path.startsWith("/api/") || path.startsWith("/assets/")) {
     return c.json({ error: "Not found" }, 404);
   }
+  if (webUrl) return redirectToWebApp(c, webUrl);
   return serveSpaIndex(c, webDir);
 }
 
@@ -1909,6 +1918,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     root,
     bus,
     webDir: options.webDir,
+    webUrl: options.webUrl,
     auth,
     trustedProxy,
     machineDir: options.machineDir,

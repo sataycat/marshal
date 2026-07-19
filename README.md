@@ -113,7 +113,7 @@ The web board is a Vite + React SPA in `web/`. The daemon serves the built bundl
 pnpm dev                 # build the daemon, then run the daemon and Vite in parallel
 ```
 
-The combined development command serves the API and WebSocket at `http://127.0.0.1:7433` and the Vite web app at `http://localhost:5173`.
+The combined development command serves the API and WebSocket at `http://127.0.0.1:7433` and the Vite web app at `http://localhost:5173`. Opening the daemon URL during development redirects browser routes to Vite, so either URL reaches the hot-reloading application.
 
 To run the processes separately:
 

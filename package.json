@@ -22,7 +22,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "pnpm run build && concurrently --kill-others --names daemon,web --prefix-colors blue,green \"node ./bin/marshal start\" \"pnpm --filter marshal-web run dev\"",
+    "dev": "pnpm run build && concurrently --kill-others --names daemon,web --prefix-colors blue,green \"node ./bin/marshal start --web-url http://localhost:5173\" \"pnpm --filter marshal-web run dev\"",
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
     "build:web": "pnpm --filter marshal-web run build",
     "build:all": "pnpm run build && pnpm run build:web",

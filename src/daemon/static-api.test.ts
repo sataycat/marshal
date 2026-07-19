@@ -40,6 +40,29 @@ describe("static SPA serving", () => {
     expect(text).toContain("spa");
   });
 
+  it("redirects browser routes to the development web server when configured", async () => {
+    const app = buildApp("0.0.1", { webUrl: "http://localhost:5173" });
+    const root = await app.request("http://marshal.local/?repository=demo", { redirect: "manual" });
+    const route = await app.request("http://marshal.local/chat/thread-1?tab=files", {
+      redirect: "manual",
+    });
+
+    expect(root.status).toBe(307);
+    expect(root.headers.get("location")).toBe("http://localhost:5173/?repository=demo");
+    expect(route.status).toBe(307);
+    expect(route.headers.get("location")).toBe("http://localhost:5173/chat/thread-1?tab=files");
+  });
+
+  it("does not redirect API routes to the development web server", async () => {
+    const app = buildApp("0.0.1", { webUrl: "http://localhost:5173" });
+    const health = await app.request("/api/health");
+    const missing = await app.request("/api/nope", { redirect: "manual" });
+
+    expect(health.status).toBe(200);
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("location")).toBeNull();
+  });
+
   it("serves a built asset under /assets/* with the correct content type", async () => {
     const webDir = mkdtempSync(join(tmpdir(), "marshal-web-"));
     writeFileSync(join(webDir, "index.html"), "<!doctype html>");

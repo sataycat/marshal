@@ -39,10 +39,14 @@ program
     }
   });
 
-const task = program.command("task").description("[development/recovery] task management; use the browser Board");
+const task = program
+  .command("task")
+  .description("[development/recovery] task management; use the browser Board");
 registerTaskCommands(task);
 
-const worktree = program.command("worktree").description("[development/recovery] worktree management; use the browser workflow");
+const worktree = program
+  .command("worktree")
+  .description("[development/recovery] worktree management; use the browser workflow");
 
 worktree
   .command("create")
@@ -71,53 +75,93 @@ program
   .option("--host <addr>", "HTTP API bind address (default: 127.0.0.1)")
   .option("--lan", "Bind to all interfaces (0.0.0.0); requires a UI password")
   .option("--password <password>", "UI password required for non-loopback access")
-  .action(async (options: { interval: string; port?: string; host?: string; lan?: boolean; password?: string }) => {
-    if (options.lan && options.host) {
-      throw new Error("The --lan and --host options cannot be combined.");
-    }
-    const controller = new AbortController();
-    const stop = (): void => controller.abort();
-    process.on("SIGINT", stop);
-    process.on("SIGTERM", stop);
-    try {
-      const port = options.port !== undefined ? Number(options.port) : undefined;
-      const host = options.lan ? "0.0.0.0" : options.host;
-      const http = await startHttpServer({
-        host,
-        port,
-        uiPassword: options.password,
-        version: pkg.version,
-      });
-      try {
-        await startDaemon({
-          intervalMs: Number(options.interval),
-          signal: controller.signal,
-          bus: http.bus,
-        });
-      } finally {
-        await http.close();
+  .option("--web-url <url>", "Redirect browser routes to a development web server")
+  .action(
+    async (options: {
+      interval: string;
+      port?: string;
+      host?: string;
+      lan?: boolean;
+      password?: string;
+      webUrl?: string;
+    }) => {
+      if (options.lan && options.host) {
+        throw new Error("The --lan and --host options cannot be combined.");
       }
-    } finally {
-      process.off("SIGINT", stop);
-      process.off("SIGTERM", stop);
+      const controller = new AbortController();
+      const stop = (): void => controller.abort();
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
+      try {
+        const port = options.port !== undefined ? Number(options.port) : undefined;
+        const host = options.lan ? "0.0.0.0" : options.host;
+        const http = await startHttpServer({
+          host,
+          port,
+          uiPassword: options.password,
+          webUrl: options.webUrl,
+          version: pkg.version,
+        });
+        try {
+          await startDaemon({
+            intervalMs: Number(options.interval),
+            signal: controller.signal,
+            bus: http.bus,
+          });
+        } finally {
+          await http.close();
+        }
+      } finally {
+        process.off("SIGINT", stop);
+        process.off("SIGTERM", stop);
+      }
+    },
+  );
+
+program
+  .command("stop")
+  .description("Stop the Marshal daemon")
+  .action(() => {
+    const pidPath = resolve(GLOBAL_DIR, "daemon.pid");
+    if (!existsSync(pidPath)) {
+      console.log("Marshal daemon is not running.");
+      return;
+    }
+    const pid = Number(readFileSync(pidPath, "utf8"));
+    try {
+      process.kill(pid, "SIGTERM");
+      console.log(`Stopped Marshal daemon (pid ${pid}).`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        unlinkSync(pidPath);
+        console.log("Marshal daemon was not running.");
+        return;
+      }
+      throw error;
     }
   });
 
-program.command("stop").description("Stop the Marshal daemon").action(() => {
-  const pidPath = resolve(GLOBAL_DIR, "daemon.pid");
-  if (!existsSync(pidPath)) { console.log("Marshal daemon is not running."); return; }
-  const pid = Number(readFileSync(pidPath, "utf8"));
-  try { process.kill(pid, "SIGTERM"); console.log(`Stopped Marshal daemon (pid ${pid}).`); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") { unlinkSync(pidPath); console.log("Marshal daemon was not running."); return; } throw error; }
-});
-
-program.command("status").description("Inspect Marshal daemon status").action(async () => {
-  const portPath = resolve(GLOBAL_DIR, "daemon.port");
-  if (!existsSync(portPath)) { console.log("Marshal daemon: stopped"); return; }
-  const port = Number(readFileSync(portPath, "utf8"));
-  try { const response = await fetch(`http://127.0.0.1:${port}/api/health`); const body = await response.json() as { version?: string }; console.log(`Marshal daemon: running (port ${port}${body.version ? `, version ${body.version}` : ""})`); }
-  catch { console.log(`Marshal daemon: unavailable (stale port ${port})`); process.exitCode = 1; }
-});
+program
+  .command("status")
+  .description("Inspect Marshal daemon status")
+  .action(async () => {
+    const portPath = resolve(GLOBAL_DIR, "daemon.port");
+    if (!existsSync(portPath)) {
+      console.log("Marshal daemon: stopped");
+      return;
+    }
+    const port = Number(readFileSync(portPath, "utf8"));
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/health`);
+      const body = (await response.json()) as { version?: string };
+      console.log(
+        `Marshal daemon: running (port ${port}${body.version ? `, version ${body.version}` : ""})`,
+      );
+    } catch {
+      console.log(`Marshal daemon: unavailable (stale port ${port})`);
+      process.exitCode = 1;
+    }
+  });
 
 try {
   await program.parseAsync(process.argv);
