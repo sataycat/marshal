@@ -127,10 +127,10 @@ export async function installBinary(agent: RegistryAgent, distribution: Registry
     persistInstallationIntegrity(operationId, distribution.checksum ?? null, observed, distribution.checksum && observed !== distribution.checksum ? "mismatch" : distribution.checksum ? "verified" : "unverified", machineDir);
     if (distribution.checksum && observed !== distribution.checksum) throw new Error(`binary checksum mismatch: expected ${distribution.checksum}, observed ${observed}`);
     updateInstallationPhase(operationId, "extracting", {}, machineDir); publish();
-    const archiveFormat = distribution.archive_format as "tar.gz" | "tgz" | "zip";
+    const archiveFormat = distribution.archive_format as "tar.gz" | "tgz" | "tar.bz2" | "zip";
     if (archiveFormat === "zip") extractArchive(bytes, "zip", temp);
     else if (archiveFormat === "tgz") extractArchive(bytes, "tgz", temp);
-    else if (archiveFormat === "tar.gz") extractArchive(bytes, "tar.gz", temp);
+    else if (archiveFormat === "tar.gz" || archiveFormat === "tar.bz2") extractArchive(bytes, archiveFormat, temp);
     else throw new Error("binary distribution is incomplete");
     const launch = binaryLaunch(temp, distribution.executable, distribution.args ?? [], distribution.env); chmodSync(launch.command, 0o755);
     writeFileSync(resolve(temp, "manifest.json"), JSON.stringify({ agent_id: agent.id, version: agent.version, installation_id: operation.installation_id, archive_url: distribution.archive_url, expected_digest: distribution.checksum ?? null, observed_digest: observed, integrity_status: distribution.checksum ? "verified" : "unverified", launch: { executable: distribution.executable, args: distribution.args ?? [], env: distribution.env ?? null } }) + "\n");

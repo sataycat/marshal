@@ -60,7 +60,8 @@ export function extractZip(bytes: Uint8Array, root: string): void {
   }
 }
 
-export function extractArchive(bytes: Uint8Array, format: "tar.gz" | "tgz" | "zip", root: string): void {
+export function extractArchive(bytes: Uint8Array, format: "tar.gz" | "tgz" | "tar.bz2" | "zip", root: string): void {
   mkdirSync(root, { recursive: true });
+  if (format === "tar.bz2") throw new Error("bzip2 archives are not supported on this host");
   if (format === "zip") extractZip(bytes, root); else extractTar(gunzipSync(bytes), root, bytes.byteLength);
 }

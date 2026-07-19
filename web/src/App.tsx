@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Route, Switch, Redirect, useLocation } from "wouter";
+import { Route, Switch, Redirect } from "wouter";
 import { AppShell } from "./shell/AppShell";
 import { ToastHost } from "./toast/ToastHost";
 import { ROUTES } from "./routes/routes";
@@ -8,7 +8,6 @@ import { ConfirmProvider } from "./components/ConfirmDialog";
 import { AuthGate } from "./auth/AuthGate";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { useInstalledAgentsQuery, useRepositoriesQuery } from "./api/queries";
-import { RepositorySetup } from "./repositories/RepositorySetup";
 import { BoardRoute } from "./routes/BoardRoute";
 
 const ChatRoute = lazy(() =>
@@ -31,36 +30,33 @@ function RouteFallback(): JSX.Element {
 export function App(): JSX.Element {
   const repositories = useRepositoriesQuery();
   const agents = useInstalledAgentsQuery();
-  const [location] = useLocation();
   if (repositories.isPending || agents.isPending) return <div className="flex min-h-svh items-center justify-center bg-bg text-muted">Loading Marshal...</div>;
   if (repositories.isError || agents.isError) return <div className="flex min-h-svh items-center justify-center bg-bg text-danger">Unable to load Marshal: {(repositories.error ?? agents.error)?.message}</div>;
-  if (!agents.data.some((agent) => agent.status === "installed") && location !== ROUTES.agents) return <RepositorySetup />;
+  const hasReadyAgent = agents.data.some((agent) => agent.status === "installed" && agent.readiness_status === "ready");
   return (
     <AppErrorBoundary>
       <AuthGate>
         <ConfirmProvider>
           <WebSocketBridge>
-          <AppShell>
+          <AppShell onboarding={!hasReadyAgent}>
           <Suspense fallback={<RouteFallback />}>
             <Switch>
               <Route path={ROUTES.home}>
-                <Redirect to={ROUTES.chat} />
+                <Redirect to={hasReadyAgent ? ROUTES.chat : ROUTES.agents} />
               </Route>
               <Route path={ROUTES.chat}>
-                <ChatRoute />
+                {hasReadyAgent ? <ChatRoute /> : <Redirect to={ROUTES.agents} />}
               </Route>
               <Route path={ROUTES.agents}>
                 <AgentsRoute />
               </Route>
-              <Route path={ROUTES.workflows}><WorkflowsRoute /></Route>
-              <Route path={ROUTES.board}><BoardRoute /></Route>
-              <Route path={ROUTES.diagnostics}><DiagnosticsRoute /></Route>
+              <Route path={ROUTES.workflows}>{hasReadyAgent ? <WorkflowsRoute /> : <Redirect to={ROUTES.agents} />}</Route>
+              <Route path={ROUTES.board}>{hasReadyAgent ? <BoardRoute /> : <Redirect to={ROUTES.agents} />}</Route>
+              <Route path={ROUTES.diagnostics}>{hasReadyAgent ? <DiagnosticsRoute /> : <Redirect to={ROUTES.agents} />}</Route>
               <Route path="/chat/:threadId">
-                {(params) => <ChatThreadRoute threadId={params.threadId ?? ""} />}
+                {(params) => hasReadyAgent ? <ChatThreadRoute threadId={params.threadId ?? ""} /> : <Redirect to={ROUTES.agents} />}
               </Route>
-              <Route>
-                <NotFoundRoute />
-              </Route>
+              <Route>{hasReadyAgent ? <NotFoundRoute /> : <Redirect to={ROUTES.agents} />}</Route>
             </Switch>
           </Suspense>
           </AppShell>

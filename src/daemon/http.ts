@@ -532,7 +532,7 @@ function registerRegistryRoutes(app: Hono, machineDir?: string): void {
     const catalog = getRegistryCatalog(machineDir);
     const query = c.req.query("q")?.trim().toLowerCase() ?? "";
     const agents = (catalog.snapshot?.agents ?? []).filter((agent) => !query || [agent.id, agent.name, agent.description].some((field) => field.toLowerCase().includes(query))).map(registryAgent);
-    return c.json({ agents, snapshot: catalog.snapshot, refresh: catalog.refresh });
+    return c.json({ agents, snapshot: catalog.snapshot, refresh: catalog.refresh, source: catalog.snapshot?.source ?? PUBLIC_REGISTRY_URL });
   });
   app.get("/api/registry/agents/:id", (c) => {
     const catalog = getRegistryCatalog(machineDir);

@@ -7,7 +7,7 @@ export interface RegistryDistribution {
   platforms?: string[];
   platform?: string;
   archive_url?: string;
-  archive_format?: "tar.gz" | "tgz" | "zip";
+  archive_format?: "tar.gz" | "tgz" | "tar.bz2" | "zip";
   checksum?: string;
   executable?: string;
   env?: Record<string, string>;
