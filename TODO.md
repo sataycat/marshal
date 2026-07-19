@@ -77,7 +77,7 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 - [x] Include distribution, exact package or archive identity, integrity result, and registry provenance in historical execution records.
 - [x] Keep historical APIs readable without resolving a removed installed-agent row.
 - [x] Define migration behavior for existing records that only contain `agent_id` and `agent_version`.
-- [ ] Add tests proving thread, session, run, assignment, and artifact history remains inspectable after an installed version is removed.
+- [x] Add tests proving thread, session, run, assignment, and the closest available artifact history (chat attachment metadata) remains inspectable after an installed version is removed; this codebase has no separate agent artifact model yet.
 
 ### 9. Guard removal and clean up owned payloads
 

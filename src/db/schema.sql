@@ -182,7 +182,6 @@ CREATE TABLE IF NOT EXISTS permission_requests (
   diagnostic TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  agent_provenance TEXT NOT NULL DEFAULT '{}',
   resolved_at DATETIME,
   FOREIGN KEY (session_id) REFERENCES acp_sessions(id) ON DELETE CASCADE
 );
@@ -202,6 +201,7 @@ CREATE TABLE IF NOT EXISTS spec_author_sessions (
   acp_session_id TEXT,
   supervisor_session_id TEXT,
   status TEXT NOT NULL DEFAULT 'active',
+  agent_provenance TEXT NOT NULL DEFAULT '{}',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (task_id) REFERENCES tasks(id)
