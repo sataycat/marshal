@@ -1,7 +1,16 @@
 import { Hono, type Context } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import type { Server as HttpServer } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, statSync, unlinkSync, writeFileSync, rmSync, readdirSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+  rmSync,
+  readdirSync,
+} from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { basename, extname, resolve, sep } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -63,23 +72,82 @@ import {
   listChatThreads,
   updateChatThread,
 } from "../chat/store.js";
-import { publishThreadCreated, publishThreadDeleted, publishThreadMessage, publishThreadUpdated } from "./bus.js";
+import {
+  publishThreadCreated,
+  publishThreadDeleted,
+  publishThreadMessage,
+  publishThreadUpdated,
+} from "./bus.js";
 import { ChatAgentUnavailableError, ChatTurnBusyError, ChatTurnRunner } from "./chat-turn.js";
-import { ChatFileTooLargeError, InvalidChatPathError, listChatFiles, readChatFile } from "../chat/files.js";
-import { ChatAttachmentError, createChatAttachment, listChatAttachments, MAX_ATTACHMENT_BYTES, readChatAttachment } from "../chat/attachments.js";
+import {
+  ChatFileTooLargeError,
+  InvalidChatPathError,
+  listChatFiles,
+  readChatFile,
+} from "../chat/files.js";
+import {
+  ChatAttachmentError,
+  createChatAttachment,
+  listChatAttachments,
+  MAX_ATTACHMENT_BYTES,
+  readChatAttachment,
+} from "../chat/attachments.js";
 import { AuthService } from "./auth.js";
-import { getRepository, getSelectedRepository, listRepositories, registerRepository, removeRepository, selectRepository, repositoryRoot, RepositoryError } from "../repositories/store.js";
+import {
+  getRepository,
+  getSelectedRepository,
+  listRepositories,
+  registerRepository,
+  removeRepository,
+  selectRepository,
+  repositoryRoot,
+  RepositoryError,
+} from "../repositories/store.js";
 import { fetchRegistrySnapshot } from "../registry/fetch.js";
-import { beginRegistryRefresh, completeRegistryRefresh, failRegistryRefresh, getRegistryCatalog } from "../registry/store.js";
+import {
+  beginRegistryRefresh,
+  completeRegistryRefresh,
+  failRegistryRefresh,
+  getRegistryCatalog,
+} from "../registry/store.js";
 import { PUBLIC_REGISTRY_URL, type RegistryAgent } from "../registry/types.js";
-import { beginAgentAuthentication, finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, getLatestAgentAuthenticationOperation, interruptActiveAgentAuthentications, listInstalledAgents, listInstallationOperations, getInstallationOperation, removeInstalledAgent, executeAgentRemoval, getAgentRemovalOperation, listAgentRemovalOperations, setAgentReadiness, setDefaultInstalledAgent, getDefaultInstalledAgent } from "../agents/store.js";
-import { cancelInstallationOperation, installationOperation, installCandidate, startInstallation } from "../installations/installer.js";
+import {
+  beginAgentAuthentication,
+  finishAgentAuthentication,
+  getAgentAuthenticationOperation,
+  getInstalledAgent,
+  getLatestAgentAuthenticationOperation,
+  interruptActiveAgentAuthentications,
+  listInstalledAgents,
+  listInstallationOperations,
+  getInstallationOperation,
+  removeInstalledAgent,
+  executeAgentRemoval,
+  getAgentRemovalOperation,
+  listAgentRemovalOperations,
+  setAgentReadiness,
+  setDefaultInstalledAgent,
+  getDefaultInstalledAgent,
+} from "../agents/store.js";
+import {
+  cancelInstallationOperation,
+  installationOperation,
+  installCandidate,
+  startInstallation,
+} from "../installations/installer.js";
 import { probeAgent } from "../acp/probe.js";
 import { authenticateAgent } from "../acp/authenticate.js";
 import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
 import { randomUUID } from "node:crypto";
 import { reconcileThreadPermissions } from "../acp/permission-store.js";
-import { deleteWorkflowProfile, getWorkflowProfile, listWorkflowProfiles, saveWorkflowProfile, WorkflowValidationError, type WorkflowProfileInput } from "../workflows/store.js";
+import {
+  deleteWorkflowProfile,
+  getWorkflowProfile,
+  listWorkflowProfiles,
+  saveWorkflowProfile,
+  WorkflowValidationError,
+  type WorkflowProfileInput,
+} from "../workflows/store.js";
 import { historicalProvenance } from "../agents/provenance.js";
 import { listSpecAuthorSessions, listSpecAuthorOperations } from "../tasks/author-store.js";
 
@@ -147,32 +215,53 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   const auth = options.auth;
   if (auth) {
     app.use("/api/*", auth.middleware);
-    app.get("/api/auth/status", (c) => c.json({ enabled: auth.enabled, authenticated: auth.isAuthenticated(c.req.header("Cookie")) }));
+    app.get("/api/auth/status", (c) =>
+      c.json({
+        enabled: auth.enabled,
+        authenticated: auth.isAuthenticated(c.req.header("Cookie")),
+      }),
+    );
     app.post("/api/auth/login", async (c) => {
       const body = await readJsonObject(c, new Set(["password"]));
-      if (typeof body.password !== "string") throw new ApiError(422, "password is required", "missing_field");
+      if (typeof body.password !== "string")
+        throw new ApiError(422, "password is required", "missing_field");
       const result = auth.login(body.password, authClientKey(c, options.trustedProxy));
       if (result.retryAfter !== undefined) {
-        return new Response(JSON.stringify({ error: "Too many failed login attempts", code: "rate_limited" }), { status: 429, headers: { "Content-Type": "application/json", "Retry-After": String(result.retryAfter) } });
+        return new Response(
+          JSON.stringify({ error: "Too many failed login attempts", code: "rate_limited" }),
+          {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": String(result.retryAfter),
+            },
+          },
+        );
       }
       if (!result.token) return c.json({ authenticated: true });
       return c.json({ authenticated: true }, 200, {
-        "Set-Cookie": auth.cookie(result.token, undefined, isSecureRequest(c, options.trustedProxy)),
+        "Set-Cookie": auth.cookie(
+          result.token,
+          undefined,
+          isSecureRequest(c, options.trustedProxy),
+        ),
       });
     });
     app.post("/api/auth/logout", (c) => {
       auth.logout(c.req.header("Cookie"));
-      return c.json({ authenticated: false }, 200, { "Set-Cookie": auth.clearCookie(isSecureRequest(c, options.trustedProxy)) });
+      return c.json({ authenticated: false }, 200, {
+        "Set-Cookie": auth.clearCookie(isSecureRequest(c, options.trustedProxy)),
+      });
     });
   }
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
   registerDiagnosticsRoute(app, options.machineDir, root, version);
   registerRepositoryRoutes(app);
   registerRegistryRoutes(app, options.machineDir);
-   registerAgentRoutes(app, options.machineDir, bus);
+  registerAgentRoutes(app, options.machineDir, bus);
   registerWorkflowProfileRoutes(app, options.machineDir);
-   registerTaskRoutes(app, root, options.worktreeRoot, bus, options.machineDir);
-   registerRunRoutes(app, root);
+  registerTaskRoutes(app, root, options.worktreeRoot, bus, options.machineDir);
+  registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent, options.machineDir);
   registerChatRoutes(app, root, bus, options.chatAgent, options.machineDir);
   registerStaticRoutes(app, webDir);
@@ -416,34 +505,63 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof InvalidChatPathError) return new ApiError(422, err.message, "invalid_path");
   if (err instanceof ChatFileTooLargeError) return new ApiError(422, err.message, "file_too_large");
   if (err instanceof ChatAttachmentError) return new ApiError(422, err.message, err.code);
-  if (err instanceof RepositoryError) return new ApiError(err.code === "duplicate_path" ? 409 : 422, err.message, err.code);
-  if (err instanceof WorkflowValidationError) return new ApiError(422, err.message, "workflow_profile_invalid");
+  if (err instanceof RepositoryError)
+    return new ApiError(err.code === "duplicate_path" ? 409 : 422, err.message, err.code);
+  if (err instanceof WorkflowValidationError)
+    return new ApiError(422, err.message, "workflow_profile_invalid");
   logger.error({ err }, "Unexpected error in task HTTP handler");
   return new ApiError(500, "Internal server error", "internal_error");
 }
 
 function workflowInput(body: Record<string, unknown>): WorkflowProfileInput {
   const assignments = body.assignments;
-  if (!Array.isArray(assignments)) throw new ApiError(422, "assignments must be an array", "invalid_field");
+  if (!Array.isArray(assignments))
+    throw new ApiError(422, "assignments must be an array", "invalid_field");
   return {
     name: assertString(body.name, "name"),
-    permission_policy: assertString(body.permission_policy, "permission_policy") as WorkflowProfileInput["permission_policy"],
+    permission_policy: assertString(
+      body.permission_policy,
+      "permission_policy",
+    ) as WorkflowProfileInput["permission_policy"],
     unattended_authorized: body.unattended_authorized === true,
     timeout_ms: typeof body.timeout_ms === "number" ? body.timeout_ms : Number.NaN,
     max_retries: typeof body.max_retries === "number" ? body.max_retries : Number.NaN,
-    verification_commands: Array.isArray(body.verification_commands) ? body.verification_commands.map((value) => assertString(value, "verification_commands")) : [],
+    verification_commands: Array.isArray(body.verification_commands)
+      ? body.verification_commands.map((value) => assertString(value, "verification_commands"))
+      : [],
     require_decorrelated_builder_validator: body.require_decorrelated_builder_validator === true,
     assignments: assignments.map((value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) throw new ApiError(422, "assignments must contain objects", "invalid_field");
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new ApiError(422, "assignments must contain objects", "invalid_field");
       const item = value as Record<string, unknown>;
-      return { role: assertString(item.role, "assignment.role") as WorkflowProfileInput["assignments"][number]["role"], agent_id: assertString(item.agent_id, "assignment.agent_id"), agent_version: assertString(item.agent_version, "assignment.agent_version"), model: item.model == null ? null : assertString(item.model, "assignment.model"), mode: item.mode == null ? null : assertString(item.mode, "assignment.mode") };
+      return {
+        role: assertString(
+          item.role,
+          "assignment.role",
+        ) as WorkflowProfileInput["assignments"][number]["role"],
+        agent_id: assertString(item.agent_id, "assignment.agent_id"),
+        agent_version: assertString(item.agent_version, "assignment.agent_version"),
+        model: item.model == null ? null : assertString(item.model, "assignment.model"),
+        mode: item.mode == null ? null : assertString(item.mode, "assignment.mode"),
+      };
     }),
   };
 }
 
 function registerWorkflowProfileRoutes(app: Hono, machineDir?: string): void {
-  const fields = new Set(["name", "permission_policy", "unattended_authorized", "timeout_ms", "max_retries", "verification_commands", "require_decorrelated_builder_validator", "assignments"]);
-  app.get("/api/repositories/:repositoryId/workflow-profiles", (c) => c.json({ profiles: listWorkflowProfiles(c.req.param("repositoryId"), machineDir) }));
+  const fields = new Set([
+    "name",
+    "permission_policy",
+    "unattended_authorized",
+    "timeout_ms",
+    "max_retries",
+    "verification_commands",
+    "require_decorrelated_builder_validator",
+    "assignments",
+  ]);
+  app.get("/api/repositories/:repositoryId/workflow-profiles", (c) =>
+    c.json({ profiles: listWorkflowProfiles(c.req.param("repositoryId"), machineDir) }),
+  );
   app.get("/api/repositories/:repositoryId/workflow-profiles/:id", (c) => {
     const found = getWorkflowProfile(c.req.param("repositoryId"), c.req.param("id"), machineDir);
     if (!found) throw new ApiError(404, "Workflow profile not found", "workflow_profile_not_found");
@@ -451,29 +569,69 @@ function registerWorkflowProfileRoutes(app: Hono, machineDir?: string): void {
   });
   app.post("/api/repositories/:repositoryId/workflow-profiles", async (c) => {
     const body = await readJsonObject(c, new Set([...fields, "id"]));
-    try { return c.json({ profile: saveWorkflowProfile(c.req.param("repositoryId"), workflowInput(body), typeof body.id === "string" ? body.id as `${string}-${string}-${string}-${string}-${string}` : undefined, machineDir) }, 201); } catch (error) { throw mapDomainError(error); }
+    try {
+      return c.json(
+        {
+          profile: saveWorkflowProfile(
+            c.req.param("repositoryId"),
+            workflowInput(body),
+            typeof body.id === "string"
+              ? (body.id as `${string}-${string}-${string}-${string}-${string}`)
+              : undefined,
+            machineDir,
+          ),
+        },
+        201,
+      );
+    } catch (error) {
+      throw mapDomainError(error);
+    }
   });
   app.put("/api/repositories/:repositoryId/workflow-profiles/:id", async (c) => {
     const body = await readJsonObject(c, fields);
-    try { return c.json({ profile: saveWorkflowProfile(c.req.param("repositoryId"), workflowInput(body), c.req.param("id") as `${string}-${string}-${string}-${string}-${string}`, machineDir) }); } catch (error) { throw mapDomainError(error); }
+    try {
+      return c.json({
+        profile: saveWorkflowProfile(
+          c.req.param("repositoryId"),
+          workflowInput(body),
+          c.req.param("id") as `${string}-${string}-${string}-${string}-${string}`,
+          machineDir,
+        ),
+      });
+    } catch (error) {
+      throw mapDomainError(error);
+    }
   });
   app.delete("/api/repositories/:repositoryId/workflow-profiles/:id", (c) => {
-    if (!deleteWorkflowProfile(c.req.param("repositoryId"), c.req.param("id"), machineDir)) throw new ApiError(404, "Workflow profile not found", "workflow_profile_not_found");
+    if (!deleteWorkflowProfile(c.req.param("repositoryId"), c.req.param("id"), machineDir))
+      throw new ApiError(404, "Workflow profile not found", "workflow_profile_not_found");
     return c.json({ deleted: true });
   });
 }
 
 function registerRepositoryRoutes(app: Hono): void {
-  app.get("/api/repositories", (c) => c.json({ repositories: listRepositories(), selected_repository_id: getSelectedRepository()?.id ?? null }));
-  app.get("/api/repositories/selected", (c) => c.json({ repository: getSelectedRepository() ?? null }));
+  app.get("/api/repositories", (c) =>
+    c.json({
+      repositories: listRepositories(),
+      selected_repository_id: getSelectedRepository()?.id ?? null,
+    }),
+  );
+  app.get("/api/repositories/selected", (c) =>
+    c.json({ repository: getSelectedRepository() ?? null }),
+  );
   app.get("/api/repositories/directories", (c) => {
     const requested = c.req.query("path")?.trim() || homedir();
     const parent = resolve(requested.replace(/^~/, homedir()));
-    if (!existsSync(parent) || !statSync(parent).isDirectory()) throw new ApiError(422, "Directory does not exist", "invalid_path");
+    if (!existsSync(parent) || !statSync(parent).isDirectory())
+      throw new ApiError(422, "Directory does not exist", "invalid_path");
     const query = c.req.query("q")?.trim().toLowerCase() ?? "";
     const directories = readdirSync(parent, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-      .map((entry) => ({ name: entry.name, path: resolve(parent, entry.name), is_git: existsSync(resolve(parent, entry.name, ".git")) }))
+      .map((entry) => ({
+        name: entry.name,
+        path: resolve(parent, entry.name),
+        is_git: existsSync(resolve(parent, entry.name, ".git")),
+      }))
       .filter((entry) => !query || entry.name.toLowerCase().includes(query))
       .sort((a, b) => Number(b.is_git) - Number(a.is_git) || a.name.localeCompare(b.name))
       .slice(0, 30);
@@ -487,35 +645,101 @@ function registerRepositoryRoutes(app: Hono): void {
   app.post("/api/repositories", async (c) => {
     const body = await readJsonObject(c, new Set(["path"]));
     if (body.path === undefined) throw new ApiError(422, "path is required", "missing_field");
-    try { return c.json({ repository: registerRepository(assertString(body.path, "path")) }, 201); }
-    catch (err) { throw mapDomainError(err); }
+    try {
+      return c.json({ repository: registerRepository(assertString(body.path, "path")) }, 201);
+    } catch (err) {
+      throw mapDomainError(err);
+    }
   });
   app.post("/api/repositories/:id/select", (c) => {
-    try { return c.json({ repository: selectRepository(c.req.param("id")) }); }
-    catch (err) { if (err instanceof Error && /not found/.test(err.message)) throw new ApiError(404, err.message, "repository_not_found"); throw mapDomainError(err); }
+    try {
+      return c.json({ repository: selectRepository(c.req.param("id")) });
+    } catch (err) {
+      if (err instanceof Error && /not found/.test(err.message))
+        throw new ApiError(404, err.message, "repository_not_found");
+      throw mapDomainError(err);
+    }
   });
   app.delete("/api/repositories/:id", (c) => {
-    if (!removeRepository(c.req.param("id"))) throw new ApiError(404, "Repository not found", "repository_not_found");
+    if (!removeRepository(c.req.param("id")))
+      throw new ApiError(404, "Repository not found", "repository_not_found");
     return c.json({ deleted: true });
   });
 }
 
-function registerDiagnosticsRoute(app: Hono, machineDir: string | undefined, root: string | undefined, version: string): void {
+function registerDiagnosticsRoute(
+  app: Hono,
+  machineDir: string | undefined,
+  root: string | undefined,
+  version: string,
+): void {
   app.get("/api/diagnostics", (c) => {
     const repositories = listRepositories();
     const selected = getSelectedRepository();
     const catalog = getRegistryCatalog(machineDir);
     const agents = listInstalledAgents(machineDir);
-    const issues: Array<{ code: string; message: string; action: string; severity: "error" | "warning" }> = [];
-    if (!selected) issues.push({ code: "REPOSITORY_NOT_SELECTED", message: "No repository is selected.", action: "Register and select a git repository in the browser.", severity: "warning" });
-    if (catalog.refresh?.status === "failed") issues.push({ code: "REGISTRY_REFRESH_FAILED", message: catalog.refresh.error ?? "The registry refresh failed.", action: "Check network access and refresh the catalog; the last valid snapshot remains usable.", severity: "warning" });
-    if (!catalog.snapshot) issues.push({ code: "REGISTRY_UNAVAILABLE", message: "No validated ACP Registry snapshot is available.", action: "Open Agents and refresh the catalog.", severity: "warning" });
+    const issues: Array<{
+      code: string;
+      message: string;
+      action: string;
+      severity: "error" | "warning";
+    }> = [];
+    if (!selected)
+      issues.push({
+        code: "REPOSITORY_NOT_SELECTED",
+        message: "No repository is selected.",
+        action: "Register and select a git repository in the browser.",
+        severity: "warning",
+      });
+    if (catalog.refresh?.status === "failed")
+      issues.push({
+        code: "REGISTRY_REFRESH_FAILED",
+        message: catalog.refresh.error ?? "The registry refresh failed.",
+        action:
+          "Check network access and refresh the catalog; the last valid snapshot remains usable.",
+        severity: "warning",
+      });
+    if (!catalog.snapshot)
+      issues.push({
+        code: "REGISTRY_UNAVAILABLE",
+        message: "No validated ACP Registry snapshot is available.",
+        action: "Open Agents and refresh the catalog.",
+        severity: "warning",
+      });
     for (const agent of agents) {
-      if (agent.status === "failed") issues.push({ code: "INSTALLATION_FAILED", message: `${agent.id}@${agent.version}: ${agent.failure ?? "installation failed"}`, action: "Retry or remove the failed installation from Agents.", severity: "error" });
-      if (agent.readiness_status === "failed") issues.push({ code: "ACP_READINESS_FAILED", message: `${agent.id}@${agent.version}: ${agent.readiness_error ?? "readiness probe failed"}`, action: "Probe again after checking the installation and authentication state.", severity: "error" });
-      if (agent.readiness_status === "authentication_required") issues.push({ code: "AGENT_AUTHENTICATION_REQUIRED", message: `${agent.id}@${agent.version} requires authentication.`, action: "Complete the advertised authentication flow in Agents.", severity: "warning" });
+      if (agent.status === "failed")
+        issues.push({
+          code: "INSTALLATION_FAILED",
+          message: `${agent.id}@${agent.version}: ${agent.failure ?? "installation failed"}`,
+          action: "Retry or remove the failed installation from Agents.",
+          severity: "error",
+        });
+      if (agent.readiness_status === "failed")
+        issues.push({
+          code: "ACP_READINESS_FAILED",
+          message: `${agent.id}@${agent.version}: ${agent.readiness_error ?? "readiness probe failed"}`,
+          action: "Probe again after checking the installation and authentication state.",
+          severity: "error",
+        });
+      if (agent.readiness_status === "authentication_required")
+        issues.push({
+          code: "AGENT_AUTHENTICATION_REQUIRED",
+          message: `${agent.id}@${agent.version} requires authentication.`,
+          action: "Complete the advertised authentication flow in Agents.",
+          severity: "warning",
+        });
     }
-    return c.json({ daemon: { status: "ok", version, host: c.req.header("host") ?? null }, repository: { selected: selected ?? null, registered_count: repositories.length, root: root ?? null }, registry: { snapshot: catalog.snapshot, refresh: catalog.refresh }, agents, issues });
+    return c.json({
+      daemon: { status: "ok", version, host: c.req.header("host") ?? null },
+      repository: {
+        selected: selected ?? null,
+        registered_count: repositories.length,
+        root: root ?? null,
+      },
+      registry: { snapshot: catalog.snapshot, refresh: catalog.refresh },
+      agents,
+      issues,
+    });
   });
 }
 
@@ -531,22 +755,45 @@ function registerRegistryRoutes(app: Hono, machineDir?: string): void {
   app.get("/api/registry/agents", (c) => {
     const catalog = getRegistryCatalog(machineDir);
     const query = c.req.query("q")?.trim().toLowerCase() ?? "";
-    const agents = (catalog.snapshot?.agents ?? []).filter((agent) => !query || [agent.id, agent.name, agent.description].some((field) => field.toLowerCase().includes(query))).map(registryAgent);
-    return c.json({ agents, snapshot: catalog.snapshot, refresh: catalog.refresh, source: catalog.snapshot?.source ?? PUBLIC_REGISTRY_URL });
+    const agents = (catalog.snapshot?.agents ?? [])
+      .filter(
+        (agent) =>
+          !query ||
+          [agent.id, agent.name, agent.description].some((field) =>
+            field.toLowerCase().includes(query),
+          ),
+      )
+      .map(registryAgent);
+    return c.json({
+      agents,
+      snapshot: catalog.snapshot,
+      refresh: catalog.refresh,
+      source: catalog.snapshot?.source ?? PUBLIC_REGISTRY_URL,
+    });
   });
   app.get("/api/registry/agents/:id", (c) => {
     const catalog = getRegistryCatalog(machineDir);
     const agent = catalog.snapshot?.agents.find((entry) => entry.id === c.req.param("id"));
     if (!agent) throw new ApiError(404, "Registry agent not found", "registry_agent_not_found");
-    return c.json({ agent: registryAgent(agent), snapshot: catalog.snapshot, refresh: catalog.refresh });
+    return c.json({
+      agent: registryAgent(agent),
+      snapshot: catalog.snapshot,
+      refresh: catalog.refresh,
+    });
   });
   app.post("/api/registry/refresh", (c) => {
     const current = getRegistryCatalog(machineDir).refresh;
     if (current?.status === "running") return c.json({ refresh: current }, 202);
     const refresh = beginRegistryRefresh(machineDir);
-    void fetchRegistrySnapshot().then((snapshot) => completeRegistryRefresh(refresh.id, snapshot, machineDir)).catch((error: unknown) => {
-      failRegistryRefresh(refresh.id, error instanceof Error ? error.message : "Registry refresh failed", machineDir);
-    });
+    void fetchRegistrySnapshot()
+      .then((snapshot) => completeRegistryRefresh(refresh.id, snapshot, machineDir))
+      .catch((error: unknown) => {
+        failRegistryRefresh(
+          refresh.id,
+          error instanceof Error ? error.message : "Registry refresh failed",
+          machineDir,
+        );
+      });
     return c.json({ refresh }, 202);
   });
 }
@@ -556,8 +803,17 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
   app.post("/api/agents/:id/default", async (c) => {
     const body = await readJsonObject(c, new Set(["installation_id"]));
     const installationId = assertString(body.installation_id, "installation_id");
-    try { return c.json({ agent: setDefaultInstalledAgent(c.req.param("id"), installationId, machineDir) }); }
-    catch (error) { throw new ApiError(409, error instanceof Error ? error.message : String(error), "agent_not_installed"); }
+    try {
+      return c.json({
+        agent: setDefaultInstalledAgent(c.req.param("id"), installationId, machineDir),
+      });
+    } catch (error) {
+      throw new ApiError(
+        409,
+        error instanceof Error ? error.message : String(error),
+        "agent_not_installed",
+      );
+    }
   });
   app.get("/api/agents/:id", (c) => {
     const version = c.req.query("version");
@@ -570,13 +826,40 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
     const version = c.req.query("version");
     if (!version) throw new ApiError(422, "version is required", "missing_query");
     const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
-    if (!installed || installed.status !== "installed") throw new ApiError(409, "Only an installed agent can be probed", "agent_not_installed");
+    if (!installed || installed.status !== "installed")
+      throw new ApiError(409, "Only an installed agent can be probed", "agent_not_installed");
     const workspace = mkdtempSync(resolve(tmpdir(), "marshal-probe-"));
     const started = new Date().toISOString();
-    setAgentReadiness(installed.id, installed.version, { readiness_status: "probing", readiness_error: null, protocol_version: installed.protocol_version, capabilities: installed.capabilities, auth_methods: installed.auth_methods, raw_initialize: installed.raw_initialize, probed_at: started }, machineDir);
+    setAgentReadiness(
+      installed.id,
+      installed.version,
+      {
+        readiness_status: "probing",
+        readiness_error: null,
+        protocol_version: installed.protocol_version,
+        capabilities: installed.capabilities,
+        auth_methods: installed.auth_methods,
+        raw_initialize: installed.raw_initialize,
+        probed_at: started,
+      },
+      machineDir,
+    );
     try {
       const result = await probeAgent(workspace, installed.launch);
-      const agent = setAgentReadiness(installed.id, installed.version, { readiness_status: result.status, readiness_error: result.error, protocol_version: result.protocol_version, capabilities: result.capabilities, auth_methods: result.auth_methods, raw_initialize: result.raw_initialize, probed_at: new Date().toISOString() }, machineDir);
+      const agent = setAgentReadiness(
+        installed.id,
+        installed.version,
+        {
+          readiness_status: result.status,
+          readiness_error: result.error,
+          protocol_version: result.protocol_version,
+          capabilities: result.capabilities,
+          auth_methods: result.auth_methods,
+          raw_initialize: result.raw_initialize,
+          probed_at: new Date().toISOString(),
+        },
+        machineDir,
+      );
       return c.json({ agent });
     } finally {
       rmSync(workspace, { recursive: true, force: true });
@@ -587,7 +870,11 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
     if (!version) throw new ApiError(422, "version is required", "missing_query");
     const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
     if (!installed) throw new ApiError(404, "Installed agent not found", "agent_not_found");
-    return c.json({ agent: installed, authentication: getLatestAgentAuthenticationOperation(installed.id, installed.version, machineDir) ?? null });
+    return c.json({
+      agent: installed,
+      authentication:
+        getLatestAgentAuthenticationOperation(installed.id, installed.version, machineDir) ?? null,
+    });
   });
   app.post("/api/agents/:id/auth", async (c) => {
     const version = c.req.query("version");
@@ -595,12 +882,31 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
     const body = await readJsonObject(c, new Set(["method_id"]));
     const methodId = assertString(body.method_id, "method_id");
     const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
-    if (!installed || installed.status !== "installed") throw new ApiError(409, "Only an installed agent can authenticate", "agent_not_installed");
+    if (!installed || installed.status !== "installed")
+      throw new ApiError(409, "Only an installed agent can authenticate", "agent_not_installed");
     const method = installed.auth_methods.find((entry) => entry.id === methodId);
-    if (!method || method.type !== "agent") throw new ApiError(422, "Only an advertised agent-managed authentication method can be selected", "auth_method_invalid");
-    const current = getLatestAgentAuthenticationOperation(installed.id, installed.version, machineDir);
+    if (!method || method.type !== "agent")
+      throw new ApiError(
+        422,
+        "Only an advertised agent-managed authentication method can be selected",
+        "auth_method_invalid",
+      );
+    const current = getLatestAgentAuthenticationOperation(
+      installed.id,
+      installed.version,
+      machineDir,
+    );
     if (current?.status === "authenticating") return c.json({ authentication: current }, 202);
-    const operation = beginAgentAuthentication({ id: randomUUID(), agent_id: installed.id, version: installed.version, method_id: method.id, method_name: method.name }, machineDir);
+    const operation = beginAgentAuthentication(
+      {
+        id: randomUUID(),
+        agent_id: installed.id,
+        version: installed.version,
+        method_id: method.id,
+        method_name: method.name,
+      },
+      machineDir,
+    );
     const controller = new AbortController();
     authenticationControllers.set(operation.id, controller);
     void (async () => {
@@ -611,11 +917,33 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
         const refreshed = getInstalledAgent(installed.id, installed.version, machineDir);
         if (refreshed) {
           const result = await probeAgent(workspace, refreshed.launch);
-          setAgentReadiness(refreshed.id, refreshed.version, { readiness_status: result.status, readiness_error: result.error, protocol_version: result.protocol_version, capabilities: result.capabilities, auth_methods: result.auth_methods, raw_initialize: result.raw_initialize, probed_at: new Date().toISOString() }, machineDir);
+          setAgentReadiness(
+            refreshed.id,
+            refreshed.version,
+            {
+              readiness_status: result.status,
+              readiness_error: result.error,
+              protocol_version: result.protocol_version,
+              capabilities: result.capabilities,
+              auth_methods: result.auth_methods,
+              raw_initialize: result.raw_initialize,
+              probed_at: new Date().toISOString(),
+            },
+            machineDir,
+          );
         }
       } catch (error) {
         const cancelled = controller.signal.aborted;
-        finishAgentAuthentication(operation.id, cancelled ? "cancelled" : "failed", cancelled ? "Authentication was cancelled" : error instanceof Error ? error.message : String(error), machineDir);
+        finishAgentAuthentication(
+          operation.id,
+          cancelled ? "cancelled" : "failed",
+          cancelled
+            ? "Authentication was cancelled"
+            : error instanceof Error
+              ? error.message
+              : String(error),
+          machineDir,
+        );
       } finally {
         authenticationControllers.delete(operation.id);
         rmSync(workspace, { recursive: true, force: true });
@@ -625,118 +953,292 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
   });
   app.get("/api/agents/auth/operations/:id", (c) => {
     const operation = getAgentAuthenticationOperation(c.req.param("id"), machineDir);
-    if (!operation) throw new ApiError(404, "Authentication operation not found", "operation_not_found");
+    if (!operation)
+      throw new ApiError(404, "Authentication operation not found", "operation_not_found");
     return c.json({ authentication: operation });
   });
   app.post("/api/agents/auth/operations/:id/cancel", (c) => {
     const operation = getAgentAuthenticationOperation(c.req.param("id"), machineDir);
-    if (!operation) throw new ApiError(404, "Authentication operation not found", "operation_not_found");
+    if (!operation)
+      throw new ApiError(404, "Authentication operation not found", "operation_not_found");
     if (operation.status === "authenticating") authenticationControllers.get(operation.id)?.abort();
     return c.json({ authentication: getAgentAuthenticationOperation(operation.id, machineDir) });
   });
   app.post("/api/agents/install", async (c) => {
-     const body = await readJsonObject(c, new Set(["agent_id", "version", "distribution", "allow_unverified"]));
+    const body = await readJsonObject(
+      c,
+      new Set(["agent_id", "version", "distribution", "allow_unverified"]),
+    );
     const agentId = assertString(body.agent_id, "agent_id");
-     const version = assertString(body.version, "version");
-     const distribution = body.distribution === undefined ? undefined : assertString(body.distribution, "distribution");
-     if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution)) throw new ApiError(422, "distribution is invalid", "installation_invalid");
+    const version = assertString(body.version, "version");
+    const distribution =
+      body.distribution === undefined ? undefined : assertString(body.distribution, "distribution");
+    if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution))
+      throw new ApiError(422, "distribution is invalid", "installation_invalid");
     const catalog = getRegistryCatalog(machineDir);
-    const registryAgent = catalog.snapshot?.agents.find((agent) => agent.id === agentId && agent.version === version);
-    if (!registryAgent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
-     try {
-         if (body.allow_unverified !== undefined && typeof body.allow_unverified !== "boolean") throw new Error("allow_unverified must be a boolean");
-         return c.json({ operation: await startInstallation(registryAgent, machineDir, undefined, distribution as "npx" | "uvx" | "binary" | undefined, { allowUnverified: body.allow_unverified === true }, bus) }, 202);
+    const registryAgent = catalog.snapshot?.agents.find(
+      (agent) => agent.id === agentId && agent.version === version,
+    );
+    if (!registryAgent)
+      throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
+    try {
+      if (body.allow_unverified !== undefined && typeof body.allow_unverified !== "boolean")
+        throw new Error("allow_unverified must be a boolean");
+      return c.json(
+        {
+          operation: await startInstallation(
+            registryAgent,
+            machineDir,
+            undefined,
+            distribution as "npx" | "uvx" | "binary" | undefined,
+            { allowUnverified: body.allow_unverified === true },
+            bus,
+          ),
+        },
+        202,
+      );
     } catch (error) {
-      throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid");
+      throw new ApiError(
+        422,
+        error instanceof Error ? error.message : String(error),
+        "installation_invalid",
+      );
     }
   });
   app.post("/api/agents/:id/update", async (c) => {
-     const body = await readJsonObject(c, new Set(["version", "distribution", "allow_unverified"]));
+    const body = await readJsonObject(c, new Set(["version", "distribution", "allow_unverified"]));
     const version = assertString(body.version, "version");
-    const distribution = body.distribution === undefined ? undefined : assertString(body.distribution, "distribution");
-    if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution)) throw new ApiError(422, "distribution is invalid", "installation_invalid");
-    const registryAgent = getRegistryCatalog(machineDir).snapshot?.agents.find((agent) => agent.id === c.req.param("id") && agent.version === version);
-    if (!registryAgent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
-     try { if (body.allow_unverified !== undefined && typeof body.allow_unverified !== "boolean") throw new Error("allow_unverified must be a boolean"); return c.json({ operation: await startInstallation(registryAgent, machineDir, undefined, distribution as "npx" | "uvx" | "binary" | undefined, { allowUnverified: body.allow_unverified === true }, bus) }, 202); }
-    catch (error) { throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid"); }
+    const distribution =
+      body.distribution === undefined ? undefined : assertString(body.distribution, "distribution");
+    if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution))
+      throw new ApiError(422, "distribution is invalid", "installation_invalid");
+    const registryAgent = getRegistryCatalog(machineDir).snapshot?.agents.find(
+      (agent) => agent.id === c.req.param("id") && agent.version === version,
+    );
+    if (!registryAgent)
+      throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
+    try {
+      if (body.allow_unverified !== undefined && typeof body.allow_unverified !== "boolean")
+        throw new Error("allow_unverified must be a boolean");
+      return c.json(
+        {
+          operation: await startInstallation(
+            registryAgent,
+            machineDir,
+            undefined,
+            distribution as "npx" | "uvx" | "binary" | undefined,
+            { allowUnverified: body.allow_unverified === true },
+            bus,
+          ),
+        },
+        202,
+      );
+    } catch (error) {
+      throw new ApiError(
+        422,
+        error instanceof Error ? error.message : String(error),
+        "installation_invalid",
+      );
+    }
   });
   app.get("/api/agents/install-candidate", (c) => {
     const agentId = c.req.query("agent_id");
     const version = c.req.query("version");
-    if (!agentId || !version) throw new ApiError(422, "agent_id and version are required", "missing_query");
-    const agent = getRegistryCatalog(machineDir).snapshot?.agents.find((entry) => entry.id === agentId && entry.version === version);
-    if (!agent) throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
+    if (!agentId || !version)
+      throw new ApiError(422, "agent_id and version are required", "missing_query");
+    const agent = getRegistryCatalog(machineDir).snapshot?.agents.find(
+      (entry) => entry.id === agentId && entry.version === version,
+    );
+    if (!agent)
+      throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
     const distribution = c.req.query("distribution");
-    if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution)) throw new ApiError(422, "distribution is invalid", "installation_invalid");
-    try { return c.json({ candidate: installCandidate(agent, `${process.platform}-${process.arch}`, distribution as "npx" | "uvx" | "binary" | undefined) }); }
-    catch (error) { throw new ApiError(422, error instanceof Error ? error.message : String(error), "installation_invalid"); }
+    if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution))
+      throw new ApiError(422, "distribution is invalid", "installation_invalid");
+    try {
+      return c.json({
+        candidate: installCandidate(
+          agent,
+          `${process.platform}-${process.arch}`,
+          distribution as "npx" | "uvx" | "binary" | undefined,
+        ),
+      });
+    } catch (error) {
+      throw new ApiError(
+        422,
+        error instanceof Error ? error.message : String(error),
+        "installation_invalid",
+      );
+    }
   });
-  app.get("/api/agents/operations", (c) => c.json({ operations: listInstallationOperations(machineDir) }));
+  app.get("/api/agents/operations", (c) =>
+    c.json({ operations: listInstallationOperations(machineDir) }),
+  );
   app.get("/api/agents/operations/:id", (c) => {
-    try { return c.json({ operation: installationOperation(c.req.param("id"), machineDir) }); }
-    catch { throw new ApiError(404, "Installation operation not found", "operation_not_found"); }
+    try {
+      return c.json({ operation: installationOperation(c.req.param("id"), machineDir) });
+    } catch {
+      throw new ApiError(404, "Installation operation not found", "operation_not_found");
+    }
   });
   app.post("/api/agents/operations/:id/cancel", (c) => {
-    try { return c.json({ operation: cancelInstallationOperation(c.req.param("id"), machineDir, bus) }); }
-    catch (error) { throw new ApiError(409, error instanceof Error ? error.message : String(error), "installation_cancel_failed"); }
+    try {
+      return c.json({ operation: cancelInstallationOperation(c.req.param("id"), machineDir, bus) });
+    } catch (error) {
+      throw new ApiError(
+        409,
+        error instanceof Error ? error.message : String(error),
+        "installation_cancel_failed",
+      );
+    }
   });
   app.post("/api/agents/operations/:id/retry", async (c) => {
     const prior = getInstallationOperation(c.req.param("id"), machineDir);
     if (!prior) throw new ApiError(404, "Installation operation not found", "operation_not_found");
-    if (prior.status !== "failed" && prior.status !== "interrupted") throw new ApiError(409, "Only failed or interrupted installations can be retried", "installation_not_retryable");
-    const agent = getRegistryCatalog(machineDir).snapshot?.agents.find((entry) => entry.id === prior.agent_id && entry.version === prior.version);
-    if (!agent) throw new ApiError(409, "The registry no longer contains this agent version", "registry_agent_not_found");
+    if (prior.status !== "failed" && prior.status !== "interrupted")
+      throw new ApiError(
+        409,
+        "Only failed or interrupted installations can be retried",
+        "installation_not_retryable",
+      );
+    const agent = getRegistryCatalog(machineDir).snapshot?.agents.find(
+      (entry) => entry.id === prior.agent_id && entry.version === prior.version,
+    );
+    if (!agent)
+      throw new ApiError(
+        409,
+        "The registry no longer contains this agent version",
+        "registry_agent_not_found",
+      );
     const body = await readJsonObject(c, new Set(["allow_unverified"]));
-    if (body.allow_unverified !== undefined && typeof body.allow_unverified !== "boolean") throw new ApiError(422, "allow_unverified must be a boolean", "invalid_field");
-    return c.json({ operation: await startInstallation(agent, machineDir, undefined, prior.distribution, { retry: true, allowUnverified: body.allow_unverified === true }, bus) }, 202);
+    if (body.allow_unverified !== undefined && typeof body.allow_unverified !== "boolean")
+      throw new ApiError(422, "allow_unverified must be a boolean", "invalid_field");
+    return c.json(
+      {
+        operation: await startInstallation(
+          agent,
+          machineDir,
+          undefined,
+          prior.distribution,
+          { retry: true, allowUnverified: body.allow_unverified === true },
+          bus,
+        ),
+      },
+      202,
+    );
   });
-  app.get("/api/agents/removal-operations", (c) => c.json({ operations: listAgentRemovalOperations(machineDir) }));
+  app.get("/api/agents/removal-operations", (c) =>
+    c.json({ operations: listAgentRemovalOperations(machineDir) }),
+  );
   app.get("/api/agents/removal-operations/:operationId", (c) => {
     const operation = getAgentRemovalOperation(c.req.param("operationId"), machineDir);
-    if (!operation) throw new ApiError(404, "Agent removal operation not found", "operation_not_found");
+    if (!operation)
+      throw new ApiError(404, "Agent removal operation not found", "operation_not_found");
     return c.json({ operation });
   });
   app.post("/api/agents/removal-operations/:operationId/retry", (c) => {
     const operation = getAgentRemovalOperation(c.req.param("operationId"), machineDir);
-    if (!operation) throw new ApiError(404, "Agent removal operation not found", "operation_not_found");
+    if (!operation)
+      throw new ApiError(404, "Agent removal operation not found", "operation_not_found");
     return c.json({ operation: executeAgentRemoval(operation.id, machineDir) }, 202);
   });
   app.delete("/api/agents/:id", (c) => {
     const version = c.req.query("version");
     if (!version) throw new ApiError(422, "version is required", "missing_query");
-    try { const operation = removeInstalledAgent(c.req.param("id"), version, machineDir, c.req.query("installation_id")); return c.json({ operation }, operation.status === "blocked" ? 409 : 202); }
-    catch (error) { const code = error instanceof Error && "code" in error ? String((error as Error & { code?: string }).code) : "agent_removal_failed"; throw new ApiError(code === "agent_not_found" ? 404 : 409, error instanceof Error ? error.message : String(error), code); }
+    try {
+      const operation = removeInstalledAgent(
+        c.req.param("id"),
+        version,
+        machineDir,
+        c.req.query("installation_id"),
+      );
+      return c.json({ operation }, operation.status === "blocked" ? 409 : 202);
+    } catch (error) {
+      const code =
+        error instanceof Error && "code" in error
+          ? String((error as Error & { code?: string }).code)
+          : "agent_removal_failed";
+      throw new ApiError(
+        code === "agent_not_found" ? 404 : 409,
+        error instanceof Error ? error.message : String(error),
+        code,
+      );
+    }
   });
 }
 
-function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus | undefined, chatAgent?: Agent, machineDir?: string): void {
+function registerChatRoutes(
+  app: Hono,
+  root: string | undefined,
+  bus: EventBus | undefined,
+  chatAgent?: Agent,
+  machineDir?: string,
+): void {
   const turns = new ChatTurnRunner({ root, bus, agent: chatAgent, machineDir });
-  app.get("/api/threads", (c) => c.json({ threads: listChatThreads(root, c.req.query("archived") === "true") }));
+  app.get("/api/threads", (c) => {
+    const selectedRoot = root ?? repositoryRoot(machineDir);
+    return c.json({
+      threads: selectedRoot
+        ? listChatThreads(selectedRoot, c.req.query("archived") === "true")
+        : [],
+    });
+  });
   app.post("/api/threads", async (c) => {
-    const body = await readJsonObject(c, new Set(["agent_id", "agent_version", "cwd", "title", "task_slug"]));
-    if (body.agent_id === undefined) throw new ApiError(422, "agent_id is required", "missing_field");
+    const body = await readJsonObject(
+      c,
+      new Set(["agent_id", "agent_version", "cwd", "title", "task_slug"]),
+    );
+    if (body.agent_id === undefined)
+      throw new ApiError(422, "agent_id is required", "missing_field");
     const agentId = assertString(body.agent_id, "agent_id");
-    const agentVersion = body.agent_version === undefined ? getDefaultInstalledAgent(agentId, machineDir)?.version : assertString(body.agent_version, "agent_version");
-    if (!agentVersion) throw new ApiError(422, "agent_version is required when no default is selected", "missing_field");
+    const agentVersion =
+      body.agent_version === undefined
+        ? getDefaultInstalledAgent(agentId, machineDir)?.version
+        : assertString(body.agent_version, "agent_version");
+    if (!agentVersion)
+      throw new ApiError(
+        422,
+        "agent_version is required when no default is selected",
+        "missing_field",
+      );
     if (!agentId.trim()) throw new ApiError(422, "agent_id must not be empty", "invalid_field");
     const installed = getInstalledAgent(agentId, agentVersion, machineDir);
-    if (!chatAgent && (!installed || installed.status !== "installed")) throw new ApiError(409, "Only an installed agent can be selected for a thread", "agent_not_installed");
-    if (!chatAgent && installed?.readiness_status !== "ready") throw new ApiError(409, `Agent ${agentId}@${agentVersion} is not ready`, "agent_not_ready");
-    const thread = createChatThread({
-      agentId,
-      agentVersion,
-      cwd: body.cwd === undefined ? undefined : assertString(body.cwd, "cwd"),
-      title: body.title === undefined ? undefined : assertString(body.title, "title"),
-      taskSlug: body.task_slug === undefined ? undefined : assertString(body.task_slug, "task_slug"),
-      agentProvenance: historicalProvenance(agentId, agentVersion, installed?.provenance, installed?.installation_id),
-    }, root);
+    if (!chatAgent && (!installed || installed.status !== "installed"))
+      throw new ApiError(
+        409,
+        "Only an installed agent can be selected for a thread",
+        "agent_not_installed",
+      );
+    if (!chatAgent && installed?.readiness_status !== "ready")
+      throw new ApiError(409, `Agent ${agentId}@${agentVersion} is not ready`, "agent_not_ready");
+    const thread = createChatThread(
+      {
+        agentId,
+        agentVersion,
+        cwd: body.cwd === undefined ? undefined : assertString(body.cwd, "cwd"),
+        title: body.title === undefined ? undefined : assertString(body.title, "title"),
+        taskSlug:
+          body.task_slug === undefined ? undefined : assertString(body.task_slug, "task_slug"),
+        agentProvenance: historicalProvenance(
+          agentId,
+          agentVersion,
+          installed?.provenance,
+          installed?.installation_id,
+        ),
+      },
+      root,
+    );
     if (bus) publishThreadCreated(bus, thread);
     return c.json({ thread }, 201);
   });
   app.get("/api/threads/:id", (c) => {
     try {
       const thread = getChatThread(c.req.param("id"), root);
-      return c.json({ thread, messages: listChatMessages(thread.id, root), attachments: listChatAttachments(thread.id, root), events: listSessionEventsForThread(thread.id, root) });
+      return c.json({
+        thread,
+        messages: listChatMessages(thread.id, root),
+        attachments: listChatAttachments(thread.id, root),
+        events: listSessionEventsForThread(thread.id, root),
+      });
     } catch (err) {
       throw mapDomainError(err);
     }
@@ -746,25 +1248,41 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
       getChatThread(c.req.param("id"), root);
       const sessions = listSessionEventsForThread(c.req.param("id"), root);
       return c.json({ events: sessions });
-    } catch (err) { throw mapDomainError(err); }
+    } catch (err) {
+      throw mapDomainError(err);
+    }
   });
   app.patch("/api/threads/:id", async (c) => {
-    const body = await readJsonObject(c, new Set(["title", "status", "archived", "pinned", "scratch_markdown"]));
-    if (body.title !== undefined && typeof body.title !== "string") throw new ApiError(422, "title must be a string", "invalid_field");
-    if (body.status !== undefined && (typeof body.status !== "string" || !isChatThreadStatus(body.status))) throw new ApiError(422, "status is invalid", "invalid_field");
+    const body = await readJsonObject(
+      c,
+      new Set(["title", "status", "archived", "pinned", "scratch_markdown"]),
+    );
+    if (body.title !== undefined && typeof body.title !== "string")
+      throw new ApiError(422, "title must be a string", "invalid_field");
+    if (
+      body.status !== undefined &&
+      (typeof body.status !== "string" || !isChatThreadStatus(body.status))
+    )
+      throw new ApiError(422, "status is invalid", "invalid_field");
     for (const field of ["archived", "pinned"] as const) {
-      if (body[field] !== undefined && typeof body[field] !== "boolean") throw new ApiError(422, `${field} must be a boolean`, "invalid_field");
+      if (body[field] !== undefined && typeof body[field] !== "boolean")
+        throw new ApiError(422, `${field} must be a boolean`, "invalid_field");
     }
-    if (body.scratch_markdown !== undefined && typeof body.scratch_markdown !== "string") throw new ApiError(422, "scratch_markdown must be a string", "invalid_field");
+    if (body.scratch_markdown !== undefined && typeof body.scratch_markdown !== "string")
+      throw new ApiError(422, "scratch_markdown must be a string", "invalid_field");
     try {
       if (body.status === "closed") await turns.closeThread(c.req.param("id"));
-      const thread = updateChatThread(c.req.param("id"), {
-        title: body.title as string | undefined,
-        status: body.status as "draft" | "active" | "closed" | "error" | undefined,
-        archived: body.archived as boolean | undefined,
-        pinned: body.pinned as boolean | undefined,
-        scratchMarkdown: body.scratch_markdown as string | undefined,
-      }, root);
+      const thread = updateChatThread(
+        c.req.param("id"),
+        {
+          title: body.title as string | undefined,
+          status: body.status as "draft" | "active" | "closed" | "error" | undefined,
+          archived: body.archived as boolean | undefined,
+          pinned: body.pinned as boolean | undefined,
+          scratchMarkdown: body.scratch_markdown as string | undefined,
+        },
+        root,
+      );
       if (bus) publishThreadUpdated(bus, thread);
       return c.json({ thread });
     } catch (err) {
@@ -792,7 +1310,9 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
   app.get("/api/threads/:id/files", (c) => {
     try {
       const thread = getChatThread(c.req.param("id"), root);
-      return c.json({ files: listChatFiles(thread.repo_root, thread.cwd, turns.touchedFiles(thread.id)) });
+      return c.json({
+        files: listChatFiles(thread.repo_root, thread.cwd, turns.touchedFiles(thread.id)),
+      });
     } catch (err) {
       throw mapDomainError(err);
     }
@@ -807,12 +1327,21 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
   });
   app.post("/api/threads/:id/permissions/:requestId", async (c) => {
     const body = await readJsonObject(c, new Set(["action"]));
-    if (body.action !== "approve" && body.action !== "deny") throw new ApiError(422, "action must be approve or deny", "invalid_field");
+    if (body.action !== "approve" && body.action !== "deny")
+      throw new ApiError(422, "action must be approve or deny", "invalid_field");
     try {
-      const request = turns.decidePermission(c.req.param("id"), c.req.param("requestId"), body.action);
+      const request = turns.decidePermission(
+        c.req.param("id"),
+        c.req.param("requestId"),
+        body.action,
+      );
       return c.json({ requestId: request.requestId, action: body.action });
     } catch (err) {
-      if (err instanceof Error && (err.name === "PermissionDecisionError" || err.message.includes("Permission request"))) throw new ApiError(409, err.message, "permission_stale");
+      if (
+        err instanceof Error &&
+        (err.name === "PermissionDecisionError" || err.message.includes("Permission request"))
+      )
+        throw new ApiError(409, err.message, "permission_stale");
       throw mapDomainError(err);
     }
   });
@@ -827,31 +1356,59 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
     }
   });
   app.get("/api/threads/:id/attachments", (c) => {
-    try { return c.json({ attachments: listChatAttachments(c.req.param("id"), root) }); }
-    catch (err) { throw mapDomainError(err); }
+    try {
+      return c.json({ attachments: listChatAttachments(c.req.param("id"), root) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
   });
   app.get("/api/threads/:id/attachments/:attachmentId", (c) => {
     try {
-      const { attachment, bytes } = readChatAttachment(c.req.param("id"), c.req.param("attachmentId"), root);
-      return new Response(bytes, { headers: { "Content-Type": attachment.mime_type, "Content-Length": String(bytes.byteLength), "Cache-Control": "private, max-age=31536000, immutable" } });
-    } catch (err) { throw mapDomainError(err); }
+      const { attachment, bytes } = readChatAttachment(
+        c.req.param("id"),
+        c.req.param("attachmentId"),
+        root,
+      );
+      return new Response(bytes, {
+        headers: {
+          "Content-Type": attachment.mime_type,
+          "Content-Length": String(bytes.byteLength),
+          "Cache-Control": "private, max-age=31536000, immutable",
+        },
+      });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
   });
   app.post("/api/threads/:id/attachments", async (c) => {
     const contentLength = Number(c.req.header("content-length") ?? "0");
-    if (contentLength > MAX_ATTACHMENT_BYTES + 256 * 1024) throw new ApiError(422, "Upload exceeds the 10 MiB image limit", "attachment_too_large");
+    if (contentLength > MAX_ATTACHMENT_BYTES + 256 * 1024)
+      throw new ApiError(422, "Upload exceeds the 10 MiB image limit", "attachment_too_large");
     try {
       const body = await c.req.parseBody({ all: false });
       const file = body.file;
-      if (!(file instanceof File)) throw new ApiError(422, "A multipart image field named file is required", "missing_file");
-      if (file.size > MAX_ATTACHMENT_BYTES) throw new ChatAttachmentError("Image must be between 1 byte and 10 MiB.", "attachment_too_large");
+      if (!(file instanceof File))
+        throw new ApiError(422, "A multipart image field named file is required", "missing_file");
+      if (file.size > MAX_ATTACHMENT_BYTES)
+        throw new ChatAttachmentError(
+          "Image must be between 1 byte and 10 MiB.",
+          "attachment_too_large",
+        );
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const attachment = createChatAttachment(c.req.param("id"), { type: file.type, name: file.name, size: file.size, bytes }, root);
+      const attachment = createChatAttachment(
+        c.req.param("id"),
+        { type: file.type, name: file.name, size: file.size, bytes },
+        root,
+      );
       return c.json({ attachment }, 201);
-    } catch (err) { throw mapDomainError(err); }
+    } catch (err) {
+      throw mapDomainError(err);
+    }
   });
   app.post("/api/threads/:id/messages", async (c) => {
     const body = await readJsonObject(c, new Set(["role", "content"]));
-    if (body.role !== "user" && body.role !== "assistant") throw new ApiError(422, "role must be user or assistant", "invalid_field");
+    if (body.role !== "user" && body.role !== "assistant")
+      throw new ApiError(422, "role must be user or assistant", "invalid_field");
     if (body.content === undefined) throw new ApiError(422, "content is required", "missing_field");
     const content = assertString(body.content, "content");
     if (!content.trim()) throw new ApiError(422, "content must not be empty", "invalid_field");
@@ -872,9 +1429,18 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
     if (body.content === undefined) throw new ApiError(422, "content is required", "missing_field");
     const content = assertString(body.content, "content");
     if (!content.trim()) throw new ApiError(422, "content must not be empty", "invalid_field");
-    if (body.attachment_ids !== undefined && (!Array.isArray(body.attachment_ids) || body.attachment_ids.some((id) => typeof id !== "string"))) throw new ApiError(422, "attachment_ids must be an array of strings", "invalid_field");
+    if (
+      body.attachment_ids !== undefined &&
+      (!Array.isArray(body.attachment_ids) ||
+        body.attachment_ids.some((id) => typeof id !== "string"))
+    )
+      throw new ApiError(422, "attachment_ids must be an array of strings", "invalid_field");
     try {
-      const result = await turns.send(c.req.param("id"), content, body.attachment_ids as string[] | undefined);
+      const result = await turns.send(
+        c.req.param("id"),
+        content,
+        body.attachment_ids as string[] | undefined,
+      );
       return c.json(result, 201);
     } catch (err) {
       throw mapDomainError(err);
@@ -891,7 +1457,9 @@ function registerChatRoutes(app: Hono, root: string | undefined, bus: EventBus |
 }
 
 function listSessionEventsForThread(threadId: string, root?: string) {
-  return listSessionsForOwner("thread", threadId, root).flatMap((session) => listSessionEvents(session.id, root));
+  return listSessionsForOwner("thread", threadId, root).flatMap((session) =>
+    listSessionEvents(session.id, root),
+  );
 }
 
 function registerTaskRoutes(
@@ -904,7 +1472,12 @@ function registerTaskRoutes(
   const makeManager = (): WorktreeManager =>
     (() => {
       const selectedRoot = root ?? repositoryRoot();
-      if (!selectedRoot) throw new ApiError(409, "Select a repository before using tasks", "repository_not_selected");
+      if (!selectedRoot)
+        throw new ApiError(
+          409,
+          "Select a repository before using tasks",
+          "repository_not_selected",
+        );
       return worktreeRoot !== undefined
         ? new WorktreeManager(selectedRoot, { worktreeRoot })
         : new WorktreeManager(selectedRoot);
@@ -925,7 +1498,10 @@ function registerTaskRoutes(
   });
 
   app.post("/api/tasks", async (c) => {
-    const body = await readJsonObject(c, new Set(["title", "spec_markdown", "workflow_profile_id", "repository_id"]));
+    const body = await readJsonObject(
+      c,
+      new Set(["title", "spec_markdown", "workflow_profile_id", "repository_id"]),
+    );
     const title = body.title;
     if (title === undefined) {
       throw new ApiError(422, "title is required", "missing_field");
@@ -941,10 +1517,20 @@ function registerTaskRoutes(
     try {
       const slug = generateUniqueSlug(titleStr, root);
       const repository = getSelectedRepository(machineDir);
-      const repositoryId = typeof body.repository_id === "string" ? body.repository_id : repository?.id;
-      const profileId = typeof body.workflow_profile_id === "string" ? body.workflow_profile_id : undefined;
-      if (profileId && (!repositoryId || !getWorkflowProfile(repositoryId, profileId, machineDir))) throw new ApiError(422, "workflow profile is not owned by the selected repository", "workflow_profile_invalid");
-      const task = createTask({ slug, title: titleStr, specMarkdown, repositoryId, workflowProfileId: profileId }, root);
+      const repositoryId =
+        typeof body.repository_id === "string" ? body.repository_id : repository?.id;
+      const profileId =
+        typeof body.workflow_profile_id === "string" ? body.workflow_profile_id : undefined;
+      if (profileId && (!repositoryId || !getWorkflowProfile(repositoryId, profileId, machineDir)))
+        throw new ApiError(
+          422,
+          "workflow profile is not owned by the selected repository",
+          "workflow_profile_invalid",
+        );
+      const task = createTask(
+        { slug, title: titleStr, specMarkdown, repositoryId, workflowProfileId: profileId },
+        root,
+      );
       if (bus) publishTaskCreated(bus, taskPayload(task));
       return c.json({ task: taskDetail(task) }, 201);
     } catch (err) {
@@ -1241,8 +1827,17 @@ function registerSpecRoutes(
   });
 
   app.get("/api/tasks/:slug/spec-author-sessions", (c) => {
-    try { const task = getTask(c.req.param("slug"), root); return c.json({ sessions: listSpecAuthorSessions(task.id, root).map((session) => ({ ...session, operations: listSpecAuthorOperations(session.id, root) })) }); }
-    catch (err) { throw mapDomainError(err); }
+    try {
+      const task = getTask(c.req.param("slug"), root);
+      return c.json({
+        sessions: listSpecAuthorSessions(task.id, root).map((session) => ({
+          ...session,
+          operations: listSpecAuthorOperations(session.id, root),
+        })),
+      });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
   });
 
   app.post("/api/tasks/:slug/spec", async (c) => {
@@ -1297,7 +1892,8 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     { host: options.host, port: options.port },
     options.config,
   );
-  const password = options.uiPassword ?? options.config?.daemon?.uiPassword ?? process.env.MARSHAL_UI_PASSWORD;
+  const password =
+    options.uiPassword ?? options.config?.daemon?.uiPassword ?? process.env.MARSHAL_UI_PASSWORD;
   if (!isLoopbackHost(host) && !password) {
     throw new Error(
       "LAN access requires a UI password.\n\nProvide one when starting Marshal:\n  marshal start --lan --password <password>\n\nAlternatively, set MARSHAL_UI_PASSWORD or configure daemon.uiPassword.\nFor local-only access, run:\n  marshal start",
@@ -1309,7 +1905,14 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const attachWs = options.attachWebSockets ?? true;
 
   const trustedProxy = options.trustedProxy ?? options.config?.daemon?.trustedProxy ?? false;
-  const app = buildApp(version, { root, bus, webDir: options.webDir, auth, trustedProxy, machineDir: options.machineDir });
+  const app = buildApp(version, {
+    root,
+    bus,
+    webDir: options.webDir,
+    auth,
+    trustedProxy,
+    machineDir: options.machineDir,
+  });
   const server = serve({ fetch: app.fetch, hostname: host, port });
 
   let bound: { host: string; port: number };
@@ -1326,14 +1929,19 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
 
   let wsHandle: WebSocketBridgeHandle | undefined;
   if (attachWs) {
-    wsHandle = attachWebSocket(server as HttpServer, bus, () => ({
-       tasks: (root ?? repositoryRoot()) ? listTasks(root ?? repositoryRoot()).map(taskCard) : [],
-       threads: (root ?? repositoryRoot()) ? listChatThreads(root ?? repositoryRoot()) : [],
-    }), {
-      path: "/ws",
-      authenticate: (req) => auth.isAuthenticated(req.headers.cookie),
-      allowedOrigins: options.trustedOrigins ?? options.config?.daemon?.trustedOrigins,
-    });
+    wsHandle = attachWebSocket(
+      server as HttpServer,
+      bus,
+      () => ({
+        tasks: (root ?? repositoryRoot()) ? listTasks(root ?? repositoryRoot()).map(taskCard) : [],
+        threads: (root ?? repositoryRoot()) ? listChatThreads(root ?? repositoryRoot()) : [],
+      }),
+      {
+        path: "/ws",
+        authenticate: (req) => auth.isAuthenticated(req.headers.cookie),
+        allowedOrigins: options.trustedOrigins ?? options.config?.daemon?.trustedOrigins,
+      },
+    );
   }
 
   const portFile = portFilePath();
@@ -1396,6 +2004,18 @@ async function closeServer(
   } catch (err) {
     logger.warn({ err, portFile }, "Failed to remove daemon.port file");
   }
-  if (pidFile) { try { if (existsSync(pidFile)) unlinkSync(pidFile); } catch (err) { logger.warn({ err, pidFile }, "Failed to remove daemon pid file"); } }
-  if (globalPortFile) { try { if (existsSync(globalPortFile)) unlinkSync(globalPortFile); } catch (err) { logger.warn({ err, globalPortFile }, "Failed to remove global daemon port file"); } }
+  if (pidFile) {
+    try {
+      if (existsSync(pidFile)) unlinkSync(pidFile);
+    } catch (err) {
+      logger.warn({ err, pidFile }, "Failed to remove daemon pid file");
+    }
+  }
+  if (globalPortFile) {
+    try {
+      if (existsSync(globalPortFile)) unlinkSync(globalPortFile);
+    } catch (err) {
+      logger.warn({ err, globalPortFile }, "Failed to remove global daemon port file");
+    }
+  }
 }
