@@ -1,15 +1,19 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync, mkdtempSync, rmSync, readFileSync, chmodSync } from "node:fs";
+import { randomUUID, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { extractArchive } from "./archive.js";
 import { GLOBAL_DIR } from "../daemon/config.js";
 import { getRegistryCatalog } from "../registry/store.js";
 import type { RegistryAgent } from "../registry/types.js";
 import type { RegistryDistribution } from "../registry/types.js";
-import { createInstallation, finishInstallation, getInstalledAgent, getInstallationOperation, getLatestInstallationOperation } from "../agents/store.js";
+import { createInstallation, finishInstallation, getInstalledAgent, getInstallationOperation, getLatestInstallationOperation, persistInstallationIntegrity } from "../agents/store.js";
 import type { AgentLaunchSpec, InstallationOperation } from "../agents/types.js";
 
 export const INSTALL_TIMEOUT_MS = 120_000;
+export const BINARY_MAX_BYTES = 256 * 1024 * 1024;
+export const BINARY_MAX_REDIRECTS = 3;
 
 export interface InstallCandidate {
   agent_id: string;
@@ -69,6 +73,44 @@ export function runNpx(packageSpecifier: string, cwd: string): Promise<void> {
 
 export interface UvxRunner { (packageSpecifier: string, cwd: string): Promise<void>; }
 
+export interface BinaryInstallOptions { allowUnverified?: boolean; fetch?: typeof fetch; }
+
+async function downloadBinary(url: string, fetchImpl: typeof fetch, redirects = 0): Promise<Uint8Array> {
+  if (redirects > BINARY_MAX_REDIRECTS) throw new Error("binary redirect limit exceeded");
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), INSTALL_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(url, { redirect: "manual", signal: controller.signal });
+    if (response.status >= 300 && response.status < 400) { const location = response.headers.get("location"); if (!location) throw new Error("binary redirect has no location"); return downloadBinary(new URL(location, url).toString(), fetchImpl, redirects + 1); }
+    if (!response.ok) throw new Error(`binary download failed with HTTP ${response.status}`);
+    const length = Number(response.headers.get("content-length") ?? "0"); if (length > BINARY_MAX_BYTES) throw new Error("binary download exceeds the 256 MiB limit");
+    if (!response.body) throw new Error("binary download had no body"); const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
+    while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.byteLength; if (size > BINARY_MAX_BYTES) { await reader.cancel(); throw new Error("binary download exceeds the 256 MiB limit"); } chunks.push(chunk.value); }
+    const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; } return bytes;
+  } catch (error) { if (error instanceof DOMException && error.name === "AbortError") throw new Error("binary download timed out"); throw error; } finally { clearTimeout(timer); }
+}
+
+function digest(bytes: Uint8Array): string { return createHash("sha256").update(bytes).digest("hex"); }
+function binaryLaunch(root: string, executable: string, args: string[], env?: Record<string, string>): AgentLaunchSpec {
+  const command = resolve(root, executable); const relative = command.slice(resolve(root).length); if (relative.startsWith("..") || relative.includes("\0")) throw new Error("binary executable escapes installation root");
+  return { command, args, ...(env ? { env } : {}) };
+}
+
+export async function installBinary(agent: RegistryAgent, distribution: RegistryDistribution, machineDir: string, operationId: string, allowUnverified = false, fetchImpl: typeof fetch = fetch): Promise<void> {
+  if (distribution.kind !== "binary") throw new Error("not a binary distribution");
+  if (!distribution.archive_url || !distribution.archive_format || !distribution.executable) throw new Error("binary distribution is incomplete");
+  if (!distribution.checksum && !allowUnverified) throw new Error("checksumless binary requires explicit confirmation");
+  const bytes = await downloadBinary(distribution.archive_url, fetchImpl); const observed = digest(bytes);
+  persistInstallationIntegrity(operationId, distribution.checksum ?? null, observed, distribution.checksum && observed !== distribution.checksum ? "mismatch" : distribution.checksum ? "verified" : "unverified", machineDir);
+  if (distribution.checksum && observed !== distribution.checksum) throw new Error(`binary checksum mismatch: expected ${distribution.checksum}, observed ${observed}`);
+  const root = resolve(machineDir, "agents", agent.id, agent.version); const temp = mkdtempSync(resolve(tmpdir(), "marshal-binary-"));
+  try { const format: "tar.gz" | "tgz" | "zip" = (distribution.archive_format as any) as "tar.gz" | "tgz" | "zip"; (extractArchive as any)(bytes, temp, format); const launch = binaryLaunch(temp, distribution.executable, distribution.args ?? [], distribution.env); const target = resolve(root); mkdirSync(target, { recursive: true });
+    const finalCommand = binaryLaunch(target, distribution.executable, distribution.args ?? [], distribution.env); chmodSync(launch.command, 0o755); chmodSync(finalCommand.command, 0o755); writeFileSync(resolve(target, "manifest.json"), JSON.stringify({ agent_id: agent.id, version: agent.version, archive_url: distribution.archive_url, expected_digest: distribution.checksum ?? null, observed_digest: observed, integrity_status: distribution.checksum ? "verified" : "unverified" }) + "\n");
+    // Copying through the validated entry path keeps the persisted command rooted in the installation.
+    const source = readFileSync(launch.command); writeFileSync(finalCommand.command, source, { mode: 0o755 });
+    finishInstallation(operationId, "installed", null, machineDir);
+  } catch (error) { finishInstallation(operationId, "failed", error instanceof Error ? error.message : String(error), machineDir); } finally { rmSync(temp, { recursive: true, force: true }); }
+}
+
 export function runUvx(packageSpecifier: string, cwd: string): Promise<void> {
   const command = packageSpecifier.slice(0, packageSpecifier.indexOf("=="));
   return new Promise((resolvePromise, reject) => {
@@ -81,9 +123,13 @@ export function runUvx(packageSpecifier: string, cwd: string): Promise<void> {
   });
 }
 
-export async function startInstallation(agent: RegistryAgent, machineDir = GLOBAL_DIR, runner?: NpxRunner | UvxRunner, preferred?: RegistryDistribution["kind"]): Promise<InstallationOperation> {
+export async function startInstallation(agent: RegistryAgent, machineDir = GLOBAL_DIR, runner?: NpxRunner | UvxRunner, preferred?: RegistryDistribution["kind"], options: BinaryInstallOptions = {}): Promise<InstallationOperation> {
   const distribution = selectDistribution(agent, `${process.platform}-${process.arch}`, preferred);
-  if (distribution.kind !== "npx" && distribution.kind !== "uvx") throw new Error("binary installation is not implemented in this slice");
+  if (distribution.kind === "binary") {
+    const operationId = randomUUID(); const root = resolve(machineDir, "agents", agent.id, agent.version); const integrity = distribution.checksum ? "unknown" : "unverified";
+    const operation = createInstallation({ id: agent.id, version: agent.version, source: "registry", license: agent.license, distribution: "binary", package_specifier: null, launch: { command: resolve(root, distribution.executable ?? "") , args: distribution.args ?? [], env: distribution.env }, provenance: { exact_version: agent.version, distribution: "binary", source: "registry", package_specifier: null, archive_identity: distribution.archive_url ?? null, registry_snapshot_fetched_at: getRegistryCatalog(machineDir).snapshot?.fetched_at ?? "unknown", installation_root: root, integrity_status: integrity, expected_digest: distribution.checksum ?? null, observed_digest: null }, installation_id: `${agent.id}@${agent.version}`, installation_root: root, registry_snapshot_fetched_at: getRegistryCatalog(machineDir).snapshot?.fetched_at ?? "unknown", integrity_status: integrity, status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, operationId, machineDir);
+    void installBinary(agent, distribution, machineDir, operationId, options.allowUnverified, options.fetch).catch(() => undefined); return operation;
+  }
   if (!distribution.package) throw new Error(`agent does not provide a ${distribution.kind} distribution`);
   const packageSpecifier = distribution.kind === "npx" ? exactNpxPackage(distribution.package) : exactUvxPackage(distribution.package);
   const installRunner = runner ?? (distribution.kind === "npx" ? runNpx : runUvx);

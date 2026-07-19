@@ -33,13 +33,13 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 
 ### 4. Secure binary installation
 
-- [ ] Download compatible binary archives into daemon-owned temporary directories with bounded size, timeout, and redirect handling.
-- [ ] Verify declared SHA-256 checksums and persist expected and observed digests.
-- [ ] Define and enforce the checksumless-binary policy; require explicit confirmation if unverified binaries are allowed to execute.
-- [ ] Extract archives only after validating entry count, expanded size, and compression ratio limits.
-- [ ] Reject absolute paths, traversal paths, symlinks, hard links, device files, and unsupported archive entries.
-- [ ] Resolve the declared executable strictly within the installation root and launch it through the existing no-shell ACP path.
-- [ ] Add archive fixtures and tests for successful installation, checksum mismatch, unsafe paths and links, extraction limits, executable containment, and probe startup.
+- [x] Download compatible binary archives into daemon-owned temporary directories with bounded size, timeout, and redirect handling.
+- [x] Verify declared SHA-256 checksums and persist expected and observed digests.
+- [x] Define and enforce the checksumless-binary policy; require explicit confirmation if unverified binaries are allowed to execute.
+- [x] Extract archives only after validating entry count, expanded size, and compression ratio limits.
+- [x] Reject absolute paths, traversal paths, symlinks, hard links, device files, and unsupported archive entries.
+- [x] Resolve the declared executable strictly within the installation root and launch it through the existing no-shell ACP path.
+- [x] Add archive fixtures and tests for successful installation, checksum mismatch, unsafe paths and links, extraction limits, executable containment, and probe startup.
 
 ### 5. Publish and recover installations atomically
 

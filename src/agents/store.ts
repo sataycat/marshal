@@ -14,6 +14,8 @@ function tables(machineDir?: string) {
       launch TEXT NOT NULL,
       registry_snapshot_fetched_at TEXT NOT NULL,
       integrity_status TEXT NOT NULL,
+      expected_digest TEXT,
+      observed_digest TEXT,
       installation_id TEXT,
       provenance TEXT,
       installation_root TEXT,
@@ -56,6 +58,8 @@ function tables(machineDir?: string) {
     "ALTER TABLE installed_agents ADD COLUMN auth_methods TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE installed_agents ADD COLUMN raw_initialize TEXT",
     "ALTER TABLE installed_agents ADD COLUMN probed_at TEXT",
+    "ALTER TABLE installed_agents ADD COLUMN expected_digest TEXT",
+    "ALTER TABLE installed_agents ADD COLUMN observed_digest TEXT",
   ]) { try { db.exec(statement); } catch (error) { if (!(error instanceof Error) || !error.message.includes("duplicate column name")) throw error; } }
   return db;
 }
@@ -72,6 +76,7 @@ function agent(row: Record<string, unknown>): InstalledAgent {
   const provenance = row.provenance ? JSON.parse(String(row.provenance)) : {
     exact_version: String(row.version), distribution, source: "registry", package_specifier: row.package_specifier == null ? null : String(row.package_specifier), archive_identity: null,
     registry_snapshot_fetched_at: row.registry_snapshot_fetched_at == null ? null : String(row.registry_snapshot_fetched_at), installation_root: installationRoot, integrity_status: String(row.integrity_status),
+    expected_digest: row.expected_digest == null ? null : String(row.expected_digest), observed_digest: row.observed_digest == null ? null : String(row.observed_digest),
   };
   return {
     id: String(row.id), version: String(row.version), source: provenance.source, license: String(row.license),
@@ -119,7 +124,7 @@ export function createInstallation(input: Omit<InstalledAgent, "created_at" | "u
   const provenance = input.provenance ?? { exact_version: input.version, distribution: input.distribution, source: input.source, package_specifier: input.package_specifier, archive_identity: null, registry_snapshot_fetched_at: input.registry_snapshot_fetched_at, installation_root: installationRoot, integrity_status: input.integrity_status };
   const op: InstallationOperation = { id: operationId, agent_id: input.id, version: input.version, package_specifier: input.package_specifier, status: "installing", started_at: now, finished_at: null, error: null };
   db.transaction(() => {
-     db.prepare("INSERT INTO installed_agents (id, version, source, license, distribution, package_specifier, launch, registry_snapshot_fetched_at, integrity_status, installation_id, provenance, installation_root, status, created_at, updated_at, failure) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(id, version) DO UPDATE SET package_specifier = excluded.package_specifier, launch = excluded.launch, registry_snapshot_fetched_at = excluded.registry_snapshot_fetched_at, integrity_status = excluded.integrity_status, provenance = excluded.provenance, installation_root = excluded.installation_root, license = excluded.license, status = 'installing', updated_at = excluded.updated_at, failure = NULL").run(input.id, input.version, input.source, input.license, input.distribution, input.package_specifier, JSON.stringify(input.launch), input.registry_snapshot_fetched_at ?? "unknown", input.integrity_status, installationId, JSON.stringify(provenance), installationRoot, "installing", now, now);
+     db.prepare("INSERT INTO installed_agents (id, version, source, license, distribution, package_specifier, launch, registry_snapshot_fetched_at, integrity_status, expected_digest, observed_digest, installation_id, provenance, installation_root, status, created_at, updated_at, failure) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(id, version) DO UPDATE SET package_specifier = excluded.package_specifier, launch = excluded.launch, registry_snapshot_fetched_at = excluded.registry_snapshot_fetched_at, integrity_status = excluded.integrity_status, expected_digest = excluded.expected_digest, observed_digest = excluded.observed_digest, provenance = excluded.provenance, installation_root = excluded.installation_root, license = excluded.license, status = 'installing', updated_at = excluded.updated_at, failure = NULL").run(input.id, input.version, input.source, input.license, input.distribution, input.package_specifier, JSON.stringify(input.launch), input.registry_snapshot_fetched_at ?? "unknown", input.integrity_status, (input.provenance as { expected_digest?: string | null } | undefined)?.expected_digest ?? null, (input.provenance as { observed_digest?: string | null } | undefined)?.observed_digest ?? null, installationId, JSON.stringify(provenance), installationRoot, "installing", now, now);
     db.prepare("INSERT INTO installation_operations (id, agent_id, version, package_specifier, status, started_at) VALUES (?, ?, ?, ?, 'installing', ?)").run(op.id, op.agent_id, op.version, op.package_specifier, op.started_at);
   })();
   return op;
@@ -139,6 +144,11 @@ export function finishInstallation(operationId: string, status: "installed" | "f
     db.prepare("UPDATE installed_agents SET status = ?, updated_at = ?, failure = ? WHERE id = (SELECT agent_id FROM installation_operations WHERE id = ?) AND version = (SELECT version FROM installation_operations WHERE id = ?)").run(status, now, error, operationId, operationId);
   })();
   return getInstallationOperation(operationId, machineDir)!;
+}
+
+export function persistInstallationIntegrity(operationId: string, expected: string | null, observed: string, status: "verified" | "unverified" | "mismatch", machineDir?: string): void {
+  const db = tables(machineDir);
+  db.prepare("UPDATE installed_agents SET expected_digest = ?, observed_digest = ?, integrity_status = ?, provenance = json_set(COALESCE(provenance, '{}'), '$.expected_digest', json(?), '$.observed_digest', json(?), '$.integrity_status', ?) WHERE id = (SELECT agent_id FROM installation_operations WHERE id = ?) AND version = (SELECT version FROM installation_operations WHERE id = ?)").run(expected, observed, status, JSON.stringify(expected), JSON.stringify(observed), status, operationId, operationId);
 }
 
 export function getInstallationOperation(id: string, machineDir?: string): InstallationOperation | undefined {

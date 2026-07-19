@@ -33,6 +33,8 @@ export interface AgentProvenance {
   registry_snapshot_fetched_at: string | null;
   installation_root: string;
   integrity_status: AgentIntegrityStatus;
+  expected_digest?: string | null;
+  observed_digest?: string | null;
 }
 export function validateAgentLaunchSpec(value: unknown): AgentLaunchSpec {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("Installed agent launch specification is invalid");
@@ -55,6 +57,8 @@ export interface InstalledAgent {
   installation_root: string;
   registry_snapshot_fetched_at: string | null;
   integrity_status: AgentIntegrityStatus;
+  expected_digest?: string | null;
+  observed_digest?: string | null;
   status: InstalledAgentStatus;
   created_at: string;
   updated_at: string;
