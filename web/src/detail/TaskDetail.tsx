@@ -9,13 +9,13 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { useTaskDetailQuery, useTaskDiffQuery } from "../api/queries";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
 import { useTaskStore } from "../state/taskStore";
 import { queryKeys } from "../api/queryKeys";
 import { useFreezeTaskMutation, useMergeTaskMutation, useTransitionTaskMutation } from "../api/queries";
 import { useConfirmContext } from "../components/ConfirmDialog";
+import { TaskStatusBadge } from "../components/status";
 import { actionsForStatus, confirmMessage, type BoardAction } from "../board/actions";
 import type { TaskDetail } from "../types";
 import { DiffView } from "../diff/DiffView";
@@ -47,8 +47,9 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
     if (effectiveDetail === null || busy) return;
     if (action.confirm) {
       const ok = await confirm({
-        title: "Are you sure?",
+        title: action.label,
         message: confirmMessage(action),
+        confirmLabel: action.label,
       });
       if (!ok) return;
     }
@@ -78,6 +79,8 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
   };
 
   const actions = effectiveDetail ? actionsForStatus(effectiveDetail.status) : [];
+  const primaryActions = actions.filter((action) => action.kind === "merge" || action.kind === "freeze");
+  const secondaryActions = actions.filter((action) => action.kind !== "merge" && action.kind !== "freeze");
 
   return (
     <Sheet open onOpenChange={(open) => !open && onClose()}>
@@ -88,11 +91,14 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
         <SheetHeader className="border-b border-border p-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <SheetTitle className="truncate text-base">
+              <div className="flex items-center gap-2">
+                {effectiveDetail && <TaskStatusBadge status={effectiveDetail.status} />}
+              </div>
+              <SheetTitle className="mt-2 truncate text-base">
                 {effectiveDetail?.title ?? "Task Detail"}
               </SheetTitle>
               <SheetDescription className="font-mono text-xs">
-                 {effectiveDetail?.slug ?? slug}
+                {effectiveDetail?.slug ?? slug}
               </SheetDescription>
             </div>
             <Button
@@ -107,88 +113,88 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
         </SheetHeader>
         <div className="flex-1 overflow-y-auto p-4">
           {detailQuery.error && (
-            <p className="mb-3 text-sm text-[var(--color-error)]">{detailQuery.error.message}</p>
+            <p className="mb-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-sm text-error">{detailQuery.error.message}</p>
           )}
-          {detailQuery.isPending && <p className="text-sm text-muted">Loading…</p>}
+          {detailQuery.isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
           {effectiveDetail && (
-            <div className="flex flex-col gap-3 text-sm">
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-muted">
-                <span>
-                  Status:{" "}
-                  <strong className="font-semibold text-text">
-                    {effectiveDetail.status}
-                  </strong>
-                </span>
-                <span>Retries: {effectiveDetail.retry_count}</span>
-              </div>
-                {effectiveDetail.last_failure && (
-                <details className="rounded-md border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-2 text-xs">
-                  <summary className="cursor-pointer font-medium text-[var(--color-error)]">
+            <div className="flex flex-col gap-4 text-sm">
+              <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+                <div className="flex gap-1.5"><dt>Retries</dt><dd className="font-medium text-text">{effectiveDetail.retry_count}</dd></div>
+                <div className="flex gap-1.5"><dt>Updated</dt><dd className="font-medium text-text">{new Date(effectiveDetail.updated_at).toLocaleString()}</dd></div>
+              </dl>
+              {effectiveDetail.last_failure && (
+                <details className="rounded-lg border border-error-border bg-error-bg p-3 text-xs">
+                  <summary className="cursor-pointer font-semibold text-error">
                     Last failure
                   </summary>
-                  <pre className="mt-2 whitespace-pre-wrap font-mono text-xs text-text">
-                     {effectiveDetail.last_failure}
+                  <pre className="mt-2 overflow-x-auto font-mono text-xs whitespace-pre-wrap text-text">
+                    {effectiveDetail.last_failure}
                   </pre>
                 </details>
               )}
-              <Separator />
-              <h3 className="text-sm font-semibold">Spec</h3>
-               <MarkdownWithCode className="spec leading-relaxed" src={effectiveDetail.spec_markdown} />
-               {effectiveDetail.status === "backlog" && (
+              <section>
+                <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Spec</h3>
+                <MarkdownWithCode className="spec" src={effectiveDetail.spec_markdown} />
+              </section>
+              {effectiveDetail.status === "backlog" && (
                 <SpecChatPanel
                   slug={slug}
-                    onSpecUpdated={(updated) => setLocalDetail(updated)}
+                  onSpecUpdated={(updated) => setLocalDetail(updated)}
                   onFrozen={(frozen) => {
                     if (frozen) setLocalDetail(frozen);
                   }}
                 />
               )}
-               {effectiveDetail.status === "review" && (
-                <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
-                  <h3 className="flex items-baseline gap-2 text-sm font-semibold">
+              {effectiveDetail.status === "review" && (
+                <section className="border-t border-border pt-4">
+                  <h3 className="mb-2 flex items-baseline gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                     Diff
                     {diffStats && (
-                      <span className="text-xs font-normal text-muted">
-                        {" "}· {diffStats.files} file
-                        {diffStats.files === 1 ? "" : "s"}, +
-                        {diffStats.insertions}, -{diffStats.deletions}
+                      <span className="font-mono font-normal normal-case">
+                        {diffStats.files} file{diffStats.files === 1 ? "" : "s"} · <span className="text-success">+{diffStats.insertions}</span> <span className="text-error">-{diffStats.deletions}</span>
                       </span>
                     )}
                   </h3>
-                   {diffQuery.error && (
-                    <p className="text-sm text-[var(--color-error)]">
-                       {diffQuery.error.message}
+                  {diffQuery.error && (
+                    <p className="rounded-lg border border-error-border bg-error-bg px-3 py-2 text-sm text-error">
+                      {diffQuery.error.message}
                     </p>
                   )}
-                   {diffQuery.isPending && (
-                    <p className="text-sm text-muted">Loading diff…</p>
+                  {diffQuery.isPending && (
+                    <p className="text-sm text-muted-foreground">Loading diff…</p>
                   )}
                   {diff !== null && <DiffView files={parseUnifiedDiff(diff)} />}
-                </div>
+                </section>
               )}
             </div>
           )}
         </div>
         {actions.length > 0 && (
-          <div className="flex flex-wrap gap-2 border-t border-border bg-muted/30 p-3">
-            {actions.map((action) => {
-              const isWarn = action.confirm;
-              const isPrimary = action.kind === "merge" || action.kind === "freeze";
-              return (
-                <Button
-                  key={action.key}
-                  type="button"
-                  variant={
-                    isPrimary ? "default" : isWarn ? "destructive" : "outline"
-                  }
-                  onClick={() => void runAction(action)}
-                  disabled={busy}
-                  size="sm"
-                >
-                  {action.label}
-                </Button>
-              );
-            })}
+          <div className="flex flex-wrap items-center gap-2 border-t border-border bg-panel p-3">
+            {secondaryActions.map((action) => (
+              <Button
+                key={action.key}
+                type="button"
+                variant="outline"
+                onClick={() => void runAction(action)}
+                disabled={busy}
+                size="sm"
+              >
+                {action.label}
+              </Button>
+            ))}
+            <div className="flex-1" />
+            {primaryActions.map((action) => (
+              <Button
+                key={action.key}
+                type="button"
+                onClick={() => void runAction(action)}
+                disabled={busy}
+                size="sm"
+              >
+                {action.label}
+              </Button>
+            ))}
           </div>
         )}
       </SheetContent>

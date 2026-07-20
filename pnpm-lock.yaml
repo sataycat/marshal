@@ -87,6 +87,9 @@ importers:
       '@codemirror/view':
         specifier: ^6.43.0
         version: 6.43.6
+      '@lezer/highlight':
+        specifier: ^1.2.3
+        version: 1.2.3
       '@tailwindcss/vite':
         specifier: ^4.3.2
         version: 4.3.2(vite@6.4.3(@types/node@26.1.0)(jiti@2.7.0)(lightningcss@1.32.0))

@@ -64,7 +64,8 @@ Expected:
 - The public catalog lists agent ID, name, version, description, source, license, links, and distribution kinds.
 - Searching matches ID, name, and description without another network request.
 - Registry launch arguments are not shown as editable product configuration.
-- Clicking **Refresh catalog** shows a durable refreshing state. Refreshing the browser during the request does not lose that state.
+- Installed inventory appears before the registry catalog, with readiness, default-version, distribution, integrity, protocol, and capability state separated from discovery metadata.
+- Clicking **Update catalog** shows a durable refreshing state. Refreshing the browser during the request does not lose that state.
 
 To test stale recovery, temporarily block access to `cdn.agentclientprotocol.com` and refresh again.
 
@@ -106,7 +107,7 @@ Refresh the browser after probing and reopen **Agents**. The readiness state, fa
 
 In **Agents**, distinguish the catalog card from the installed-version rows and the durable operation history. For an agent with multiple supported distributions, choose each distribution in turn and confirm the daemon rejects an unsupported or unavailable override.
 
-Before confirming installation or update, verify the confirmation describes the exact version, registry source, selected distribution, license, package/archive identity, checksum (or that a binary is unverified), integrity policy, and the requested trust transition: downloading and permitting third-party ACP code to run. Launch commands and installation roots must not appear as editable ordinary configuration.
+Before confirming installation or update, verify the in-app trust dialog describes the exact version, registry source, selected distribution, license, package/archive identity, checksum (or that a binary is unverified), integrity policy, and the requested trust transition: downloading and permitting third-party ACP code to run. Launch commands and installation roots must not appear as editable ordinary configuration. Cancelling or dismissing the dialog must not begin an installation.
 
 Expected lifecycle states include **Installing**, **Installed**, **Ready**, **Authentication required**, **Failed**, and **Interrupted**. Binary installs additionally show **Verified**, **Unverified**, or **Mismatch** integrity. A mismatch must never become launchable; an unverified binary requires explicit confirmation. Probe binary, `npx`, and `uvx` installations and confirm ACP capability controls (for example image prompts) reflect the negotiated readiness result.
 
@@ -134,7 +135,9 @@ Expected:
 - The new-thread selector lists only installed, ready agents and shows each exact `id@version`.
 - Unready, failed, or removed installations cannot create a new thread and show an actionable readiness or installation error.
 - The thread header and switcher retain the selected agent version after browser refresh.
+- The thread list shows project grouping, agent identity, relative activity time, pinned state, and status without requiring the thread to be opened.
 - Sending a prompt streams ACP events and persists the user and assistant transcript across refresh.
+- Markdown paragraphs, lists, inline code, fenced code, links, and block quotes remain readable in both light and dark themes. Dark-theme syntax punctuation must remain visible.
 - Installing another version creates a separate selectable identity; it does not rewrite existing thread provenance.
 - Image attachment controls are available only for an agent whose negotiated capabilities advertise image prompts.
 
@@ -168,11 +171,13 @@ Review the proposed markdown, explicitly update the task spec, then click **Free
 
 ### 3.13 Build, validate, review, and merge
 
-Open **Tasks** (`/board`) and freeze a profile-backed task. Start the daemon and observe the task move through **Building**, **Validating**, and **Review**. Each attempt must show the independently resolved builder/validator identity, exact version, supervisor session, operation, capabilities, streamed events, commit, and deterministic verification result in the run APIs. A validator narrative cannot pass a task when a configured verification command fails. Failed validation preserves the worktree and retry evidence; after review, inspect the diff and merge from the browser. A successful merge cleans up the task worktree only after the merge completes, while merge conflicts and cleanup failures leave the task inspectable for recovery.
+Open **Tasks** (`/board`) and freeze a profile-backed task. Start the daemon and observe the task move through **Building**, **Validating**, and **Review**. Column headers, task accent colors, retry state, and elapsed state time should remain legible at desktop and mobile widths. Each attempt must show the independently resolved builder/validator identity, exact version, supervisor session, operation, capabilities, streamed events, commit, and deterministic verification result in the run APIs. A validator narrative cannot pass a task when a configured verification command fails. Failed validation preserves the worktree and retry evidence; after review, inspect the diff and merge from the browser. A successful merge cleans up the task worktree only after the merge completes, while merge conflicts and cleanup failures leave the task inspectable for recovery.
 
 ## 3. Browser-first setup and diagnostics
 
 Open the daemon URL after `marshal start`. On a clean machine, register a temporary git repository, refresh the ACP Registry, install an exact pinned npx distribution, probe readiness, authenticate if required, create a chat thread, create a workflow profile, author and freeze a task, then run it through build, validation, review, and merge. No JSON editing, `marshal init`, or executable command knowledge is required.
+
+Use the repository control in the top bar to switch repositories. Its menu must show the selected path and place **Remove …** behind an explicit confirmation; removal must unregister Marshal state without deleting the checkout.
 
 Open **Diagnostics** at any point. It should show daemon state, selected repository, registry freshness, installation/authentication/readiness failures, and stable machine codes with a concrete next action.
 

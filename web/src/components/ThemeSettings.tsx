@@ -34,7 +34,7 @@ export function ThemeSettings(): JSX.Element {
           <DialogDescription>Choose how Marshal should look. System follows your device automatically.</DialogDescription>
         </DialogHeader>
         <fieldset className="space-y-2">
-          <legend className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted">Appearance</legend>
+          <legend className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Appearance</legend>
           {options.map(({ mode: optionMode, label, description, icon: Icon }) => (
             <label
               key={optionMode}
@@ -51,7 +51,7 @@ export function ThemeSettings(): JSX.Element {
               <Icon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
               <span className="min-w-0">
                 <span className="block text-sm font-medium">{label}</span>
-                <span className="mt-0.5 block text-xs text-muted">{description}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>
               </span>
             </label>
           ))}

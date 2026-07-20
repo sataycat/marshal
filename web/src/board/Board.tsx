@@ -8,14 +8,16 @@ import { NewTaskModal } from "./NewTaskModal";
 import { useTaskStore, selectTasks } from "../state/taskStore";
 import { useNow } from "../hooks/useNow";
 import { Button } from "@/components/ui/button";
+import { StatusDot } from "../components/status";
+import { cn } from "@/lib/utils";
 
-const COLUMNS: { status: TaskStatus; title: string }[] = [
-  { status: "backlog", title: "Backlog" },
-  { status: "ready", title: "Ready" },
-  { status: "building", title: "Building" },
-  { status: "validating", title: "Validating" },
-  { status: "review", title: "Review" },
-  { status: "done", title: "Done" },
+const COLUMNS: { status: TaskStatus; title: string; tone: "neutral" | "accent" | "warn" | "success" }[] = [
+  { status: "backlog", title: "Backlog", tone: "neutral" },
+  { status: "ready", title: "Ready", tone: "accent" },
+  { status: "building", title: "Building", tone: "warn" },
+  { status: "validating", title: "Validating", tone: "warn" },
+  { status: "review", title: "Review", tone: "accent" },
+  { status: "done", title: "Done", tone: "success" },
 ];
 
 export function Board() {
@@ -25,41 +27,35 @@ export function Board() {
   const now = useNow(5000);
 
   return (
-    <div className="@container flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-3 border-b border-border bg-panel px-4 py-3 md:px-6">
-        <div><p className="font-mono text-[0.6rem] font-semibold uppercase tracking-[0.16em] text-primary">Software factory</p><h1 className="mt-0.5 text-sm font-semibold tracking-tight">Execution board</h1></div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 py-3 md:px-6">
+        <div className="min-w-0">
+          <p className="eyebrow">Software factory</p>
+          <h1 className="mt-0.5 text-sm font-semibold tracking-tight">Execution board</h1>
+        </div>
         <div className="flex-1" />
         <Button onClick={() => setShowNewTask(true)} size="sm">
           <Plus aria-hidden />
-          New Task
+          New task
         </Button>
       </div>
-      <div className="grid auto-rows-min gap-px overflow-auto bg-border p-px sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid min-h-0 flex-1 auto-rows-min gap-3 overflow-auto p-3 sm:grid-cols-2 md:grid-cols-3 md:p-4 lg:grid-cols-6">
         {COLUMNS.map((col) => {
           const items = tasks.filter((t) => t.status === col.status);
           return (
-            <section
-              className="flex min-h-40 flex-col gap-2 bg-bg p-3"
-              key={col.status}
-            >
-              <h2 className="mb-1 flex items-center justify-between text-xs font-semibold tracking-wider text-muted uppercase">
-                <span>{col.title}</span>
-                <span className="rounded-md bg-secondary px-2 py-0.5 text-[0.65rem] text-text">
-                  {items.length}
-                </span>
+            <section key={col.status} className="flex min-h-32 flex-col" aria-label={`${col.title} tasks`}>
+              <h2 className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold text-text">
+                <StatusDot tone={col.tone} className={cn((col.status === "building" || col.status === "validating") && "animate-pulse")} />
+                {col.title}
+                <span className="ml-auto rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[0.6875rem] font-medium text-muted-foreground">{items.length}</span>
               </h2>
               <div className="flex flex-col gap-2">
                 {items.map((t) => (
-                  <TaskCardView
-                    key={t.id}
-                    task={t}
-                    now={now}
-                    onClick={() => setSelected(t)}
-                  />
+                  <TaskCardView key={t.id} task={t} now={now} tone={col.tone} onClick={() => setSelected(t)} />
                 ))}
                 {items.length === 0 && (
-                  <p className="px-1 py-3 text-center text-xs text-muted">
-                    No tasks.
+                  <p className="rounded-lg border border-dashed border-border px-2 py-4 text-center text-xs text-muted-foreground">
+                    No tasks
                   </p>
                 )}
               </div>

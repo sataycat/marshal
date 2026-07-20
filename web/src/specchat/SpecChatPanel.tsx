@@ -8,7 +8,6 @@ import { useTaskStore, selectSpecMessages } from "../state/taskStore";
 import { useToastStore } from "../state/toastStore";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { SpecMessage, TaskDetail } from "../types";
 
@@ -32,6 +31,7 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
   const [sending, setSending] = useState(false);
   const [applying, setApplying] = useState(false);
   const [freezing, setFreezing] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const messages = useMemo<SpecMessage[]>(() => {
@@ -52,6 +52,10 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
   }, [messages]);
 
   useEffect(() => {
+    setDismissed(false);
+  }, [proposedSpec]);
+
+  useEffect(() => {
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
@@ -66,10 +70,10 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
       const res = await sendSpecMessage.mutateAsync({ slug, content: text });
       applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.userMessage }, timestamp: new Date().toISOString() });
       applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.assistantMessage }, timestamp: new Date().toISOString() });
-      } catch (err) {
-        pushError(err instanceof Error ? err.message : String(err));
-        setDraft(text);
-      } finally {
+    } catch (err) {
+      pushError(err instanceof Error ? err.message : String(err));
+      setDraft(text);
+    } finally {
       setSending(false);
     }
   };
@@ -104,39 +108,33 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
   };
 
   return (
-    <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
-      <h3 className="text-sm font-semibold">Spec Authoring Chat</h3>
-      {evidenceQuery.data?.map((session) => <div key={session.id} className="rounded-md border border-border bg-secondary/30 p-2 text-xs text-muted"><strong className="text-text">Author evidence:</strong> {session.agent_id}@{session.agent_version} · {session.status} · supervisor session {session.supervisor_session_id ?? "not recorded"}</div>)}
-      {messagesQuery.isPending && <p className="text-sm text-muted">Loading chat…</p>}
-      {messagesQuery.error && <p className="text-sm text-[var(--color-error)]">{messagesQuery.error.message}</p>}
-      <ScrollArea className="h-72 rounded-md border border-border bg-bg/30 p-2">
-        <div ref={listRef}>
+    <section className="border-t border-border pt-4">
+      <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Discussion with spec author</h3>
+      {evidenceQuery.data?.map((session) => (
+        <div key={session.id} className="mt-2 rounded-lg border border-border bg-inset px-3 py-2 text-xs text-muted-foreground">
+          <strong className="font-medium text-text">Author evidence:</strong> {session.agent_id}@{session.agent_version} · {session.status} · supervisor session {session.supervisor_session_id ?? "not recorded"}
+        </div>
+      ))}
+      {messagesQuery.isPending && <p className="mt-2 text-sm text-muted-foreground">Loading chat…</p>}
+      {messagesQuery.error && <p className="mt-2 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-sm text-error">{messagesQuery.error.message}</p>}
+      <ScrollArea className="mt-3 h-72 rounded-lg border border-border bg-inset">
+        <div ref={listRef} className="space-y-3 p-3">
           {messages.length === 0 && !messagesQuery.isPending && (
-            <p className="my-1 text-sm text-muted">
+            <p className="py-1 text-sm text-muted-foreground">
               Describe the task and let the agent ask clarifying questions.
             </p>
           )}
           {messages.map((m) => (
-            <div
-              key={m.id}
-              className="mb-2"
-              data-role={m.role}
-            >
-              <span
-                className={
-                  m.role === "assistant"
-                    ? "text-[0.7rem] font-bold tracking-wider text-[var(--color-success)] uppercase"
-                    : "text-[0.7rem] font-bold tracking-wider text-muted uppercase"
-                }
-              >
-                {m.role}
+            <div key={m.id} data-role={m.role}>
+              <span className={m.role === "assistant" ? "text-[0.6875rem] font-semibold tracking-wide text-primary uppercase" : "text-[0.6875rem] font-semibold tracking-wide text-muted-foreground uppercase"}>
+                {m.role === "assistant" ? "Spec author" : "You"}
               </span>
               <MarkdownWithCode className="text-sm" src={m.content} />
             </div>
           ))}
         </div>
       </ScrollArea>
-      <div className="flex items-end gap-2">
+      <div className="mt-3 flex items-end gap-2">
         <Textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -160,12 +158,12 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
           {sending ? "Thinking…" : "Send"}
         </Button>
       </div>
-      {proposedSpec !== null && (
-        <div className="rounded-md border border-dashed border-border bg-yellow-50/40 p-2">
-          <p className="mb-1.5 text-xs text-muted">
-            Latest proposed spec (from a <code className="rounded bg-secondary px-1 py-0.5 font-mono text-[0.7rem]">{MARSHAL_SPEC_FENCE}</code> block):
+      {proposedSpec !== null && !dismissed && (
+        <div className="mt-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
+          <p className="mb-1.5 text-xs text-muted-foreground">
+            Latest proposed spec (from a <code className="rounded bg-secondary px-1 py-0.5 font-mono text-[0.6875rem]">{MARSHAL_SPEC_FENCE}</code> block):
           </p>
-          <pre className="max-h-56 overflow-y-auto rounded-sm border border-border bg-panel p-1.5 font-mono text-xs whitespace-pre-wrap">
+          <pre className="max-h-56 overflow-y-auto rounded-md border border-border bg-panel p-2 font-mono text-xs whitespace-pre-wrap">
             {proposedSpec}
           </pre>
           <div className="mt-2 flex gap-2">
@@ -175,16 +173,15 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
               onClick={() => void applySpec()}
               disabled={applying}
             >
-              {applying ? "Updating…" : "Update Spec"}
+              {applying ? "Updating…" : "Update spec"}
             </Button>
-            <Button type="button" size="sm" variant="outline" disabled={applying}>
+            <Button type="button" size="sm" variant="outline" onClick={() => setDismissed(true)} disabled={applying}>
               Dismiss
             </Button>
           </div>
         </div>
       )}
-      <Separator />
-      <div>
+      <div className="mt-4 border-t border-border pt-4">
         <Button
           type="button"
           onClick={() => void freeze()}
@@ -195,6 +192,6 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
           {freezing ? "Freezing…" : "Freeze to Ready"}
         </Button>
       </div>
-    </div>
+    </section>
   );
 }

@@ -27,7 +27,7 @@ export class AppErrorBoundary extends Component<Props, State> {
       <main className="flex min-h-[50vh] items-center justify-center p-6">
         <section className="max-w-lg rounded-lg border border-error/30 bg-panel p-6 shadow-sm">
           <h1 className="text-lg font-semibold">This page could not be rendered</h1>
-          <p className="mt-2 text-sm text-muted">
+          <p className="mt-2 text-sm text-muted-foreground">
             Reload the page to try again. If the problem persists, send this detail to the operator:
           </p>
           <pre className="mt-4 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">

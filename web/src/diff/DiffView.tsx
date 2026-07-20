@@ -18,7 +18,7 @@ function hunkToText(hunk: DiffFile["hunks"][number]): string {
 
 export function DiffView({ files }: Props) {
   if (files.length === 0) {
-    return <p className="text-sm text-muted">No changes.</p>;
+    return <p className="text-sm text-muted-foreground">No changes.</p>;
   }
   return (
     <div className="flex flex-col gap-3">
@@ -27,7 +27,7 @@ export function DiffView({ files }: Props) {
           key={`${file.newPath}-${fi}`}
           className="overflow-hidden rounded-md border border-border"
         >
-          <header className="border-b border-border bg-muted px-2.5 py-1.5 font-mono text-xs">
+          <header className="border-b border-border bg-inset px-2.5 py-1.5 font-mono text-xs">
             {file.newPath}
           </header>
           <div className="font-mono text-xs leading-relaxed">
@@ -36,7 +36,7 @@ export function DiffView({ files }: Props) {
                 key={hi}
                 className={hi === 0 ? "" : "border-t border-border"}
               >
-                <div className="bg-secondary px-2.5 py-0.5 text-muted">
+                <div className="bg-secondary px-2.5 py-0.5 text-muted-foreground">
                   {`@@ -${hunk.oldStart},${hunk.oldLen} +${hunk.newStart},${hunk.newLen} @@`}
                 </div>
                 <CodeBlock
@@ -45,8 +45,8 @@ export function DiffView({ files }: Props) {
                   editable={false}
                   minHeight="0"
                   className={cn(
-                    "!rounded-none !border-0 !bg-muted",
-                    "[&_.cm-editor]:!bg-muted [&_.cm-editor]:!shadow-none",
+                    "!rounded-none !border-0 !bg-inset",
+                    "[&_.cm-editor]:!bg-inset [&_.cm-editor]:!shadow-none",
                     "[&_.cm-scroller]:!overflow-x-auto [&_.cm-content]:!py-1",
                   )}
                 />

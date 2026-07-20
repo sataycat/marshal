@@ -5,37 +5,46 @@
 @custom-variant md (@media (width >= 48rem));
 @custom-variant sm (@media (width >= 30rem));
 
+/*
+ * Marshal design language — "command desk".
+ *
+ * A calm instrument panel: ink-dark or paper-light neutrals, one iris
+ * accent reserved for primary action and focus, semantic color only for
+ * status. Mono type is data (paths, versions, slugs); sans is interface.
+ */
+
 :root {
-  --background: #f4f5f2;
-  --foreground: #171917;
+  --background: #f4f4f0;
+  --foreground: #1c2030;
 
-  --card: #ffffff;
-  --card-foreground: #171917;
+  --card: #fdfdfc;
+  --card-foreground: #1c2030;
 
-  --popover: #ffffff;
-  --popover-foreground: #171917;
+  --popover: #fdfdfc;
+  --popover-foreground: #1c2030;
 
-  --primary: #5a50e5;
+  --primary: #4a53c4;
   --primary-foreground: #ffffff;
 
-  --secondary: #e9ebe7;
-  --secondary-foreground: #171917;
+  --secondary: #e9e8e1;
+  --secondary-foreground: #1c2030;
 
-  --muted: #e9ebe7;
-  --muted-foreground: #686d68;
+  --muted: #ecebe5;
+  --muted-foreground: #676d80;
 
-  --accent: #e4e3fb;
-  --accent-foreground: #25205f;
+  --accent: #e4e5f7;
+  --accent-foreground: #2b3170;
 
-  --destructive: #cb3a2a;
+  --destructive: #c23a2b;
 
-  --border: #d9dcd7;
-  --input: #cdd1cb;
-  --ring: #5a50e5;
-  --success: #168353;
-  --warn: #a85d0a;
+  --border: #dddcd3;
+  --input: #cfcec4;
+  --ring: #4a53c4;
+  --success: #177a52;
+  --warn: #96600a;
+  --inset: #efeee8;
 
-  --chart-1: #644ac9;
+  --chart-1: #5b51c9;
   --chart-2: #14710a;
   --chart-3: #a34d14;
   --chart-4: #036a96;
@@ -43,68 +52,101 @@
 
   --radius: 0.65rem;
 
-  --sidebar: #111311;
-  --sidebar-foreground: #f3f5f2;
-  --sidebar-primary: #8d86ff;
-  --sidebar-primary-foreground: #111311;
-  --sidebar-accent: #242724;
+  --sidebar: #10121a;
+  --sidebar-foreground: #e8eaf3;
+  --sidebar-primary: #9aa3ff;
+  --sidebar-primary-foreground: #10121a;
+  --sidebar-accent: #1d212e;
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #2d302d;
-  --sidebar-ring: #8d86ff;
+  --sidebar-border: #262b3a;
+  --sidebar-ring: #9aa3ff;
 }
 
 [data-theme="dracula"] {
-  --background: #0d0f0e;
-  --foreground: #e8ebe7;
-  --card: #151816;
-  --card-foreground: #e8ebe7;
-  --popover: #191c1a;
-  --popover-foreground: #e8ebe7;
-  --primary: #8d86ff;
-  --primary-foreground: #10110f;
-  --secondary: #202421;
-  --secondary-foreground: #e8ebe7;
-  --muted: #202421;
-  --muted-foreground: #929992;
-  --accent: #28254c;
-  --accent-foreground: #dedcff;
-  --destructive: #ff6b6b;
-  --border: #292d2a;
-  --input: #363b37;
-  --ring: #8d86ff;
-  --success: #55d695;
-  --warn: #f2aa63;
-  --sidebar: #090b0a;
-  --sidebar-foreground: #e8ebe7;
-  --sidebar-primary: #8d86ff;
-  --sidebar-primary-foreground: #10110f;
-  --sidebar-accent: #1b1e1c;
+  --background: #0b0d13;
+  --foreground: #e3e6ef;
+  --card: #12151e;
+  --card-foreground: #e3e6ef;
+  --popover: #141824;
+  --popover-foreground: #e3e6ef;
+  --primary: #97a0ff;
+  --primary-foreground: #12142a;
+  --secondary: #1c2130;
+  --secondary-foreground: #e3e6ef;
+  --muted: #1a1e2b;
+  --muted-foreground: #8b93ab;
+  --accent: #262c4d;
+  --accent-foreground: #ccd2ff;
+  --destructive: #f0705f;
+  --border: #232939;
+  --input: #2e3547;
+  --ring: #97a0ff;
+  --success: #4cc790;
+  --warn: #e0a94f;
+  --inset: #0f1219;
+  --sidebar: #080a10;
+  --sidebar-foreground: #e3e6ef;
+  --sidebar-primary: #97a0ff;
+  --sidebar-primary-foreground: #12142a;
+  --sidebar-accent: #181c29;
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #242724;
-  --sidebar-ring: #8d86ff;
+  --sidebar-border: #1f2432;
+  --sidebar-ring: #97a0ff;
 }
 
 @theme inline {
+  /* shadcn semantic tokens */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Marshal aliases and status system */
   --color-bg: var(--background);
   --color-panel: var(--card);
   --color-text: var(--foreground);
-  --color-muted: var(--muted-foreground);
-  --color-accent: var(--primary);
-  --color-accent-foreground: var(--primary-foreground);
-   --color-success: var(--success);
-   --color-warn: var(--warn);
-   --color-error: var(--destructive);
-   --color-danger: var(--destructive);
-   --color-error-bg: color-mix(in oklch, var(--destructive) 12%, var(--background));
-   --color-error-border: color-mix(in oklch, var(--destructive) 35%, var(--border));
-   --color-diff-add-bg: color-mix(in oklch, var(--color-success) 14%, var(--background));
-   --color-diff-add-fg: var(--color-success);
-   --color-diff-del-bg: color-mix(in oklch, var(--destructive) 14%, var(--background));
-   --color-diff-del-fg: var(--destructive);
-   --color-shimmer: color-mix(in oklch, var(--muted) 70%, var(--background));
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-error: var(--destructive);
+  --color-danger: var(--destructive);
+  --color-info: var(--primary);
+  --color-error-bg: color-mix(in oklch, var(--destructive) 11%, var(--background));
+  --color-error-border: color-mix(in oklch, var(--destructive) 38%, var(--border));
+  --color-warn-bg: color-mix(in oklch, var(--warn) 12%, var(--background));
+  --color-warn-border: color-mix(in oklch, var(--warn) 38%, var(--border));
+  --color-success-bg: color-mix(in oklch, var(--success) 12%, var(--background));
+  --color-success-border: color-mix(in oklch, var(--success) 38%, var(--border));
+  --color-inset: var(--inset);
+  --color-diff-add-bg: color-mix(in oklch, var(--success) 14%, var(--background));
+  --color-diff-add-fg: var(--success);
+  --color-diff-del-bg: color-mix(in oklch, var(--destructive) 14%, var(--background));
+  --color-diff-del-fg: var(--destructive);
+  --color-shimmer: color-mix(in oklch, var(--muted) 70%, var(--background));
 
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Code", "Roboto Mono", Consolas, monospace;
 }
 
 @theme {
@@ -121,15 +163,18 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
   background: var(--background);
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   transition: background-color 160ms ease, color 160ms ease;
 }
 
 ::selection {
-  background: color-mix(in oklch, var(--primary) 35%, transparent);
+  background: color-mix(in oklch, var(--primary) 30%, transparent);
 }
 
 button,
@@ -152,6 +197,11 @@ input {
   background-clip: padding-box;
 }
 
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
+  background-clip: padding-box;
+}
+
 *,
 *::before,
 *::after {
@@ -167,4 +217,140 @@ input {
     background-color: var(--background);
     color: var(--foreground);
   }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Page-level eyebrow label — used at most once per view. */
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  /* Muted single-line data value (paths, versions, slugs). */
+  .data-value {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+  }
+
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.3rem;
+    border-radius: 0.3rem;
+    border: 1px solid var(--border);
+    background: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--muted-foreground);
+  }
+
+  /*
+   * Prose — the only markdown styling in the app. Chat messages, specs,
+   * and spec-chat all render through MarkdownWithCode with .markdown.
+   */
+  .markdown {
+    font-size: 0.875rem;
+    line-height: 1.65;
+    color: var(--foreground);
+    overflow-wrap: break-word;
+  }
+  .markdown > :first-child { margin-top: 0; }
+  .markdown > :last-child { margin-bottom: 0; }
+  .markdown p { margin: 0.55em 0; }
+  .markdown h1,
+  .markdown h2,
+  .markdown h3,
+  .markdown h4 {
+    margin: 1.1em 0 0.45em;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+  }
+  .markdown h1 { font-size: 1.15rem; }
+  .markdown h2 { font-size: 1.05rem; }
+  .markdown h3 { font-size: 0.95rem; }
+  .markdown h4 { font-size: 0.875rem; }
+  .markdown ul,
+  .markdown ol {
+    margin: 0.55em 0;
+    padding-left: 1.4em;
+  }
+  .markdown ul { list-style: disc; }
+  .markdown ol { list-style: decimal; }
+  .markdown li { margin: 0.25em 0; }
+  .markdown li::marker { color: var(--muted-foreground); }
+  .markdown a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: color-mix(in oklch, var(--primary) 45%, transparent);
+  }
+  .markdown a:hover { text-decoration-color: var(--primary); }
+  .markdown code {
+    font-family: var(--font-mono);
+    font-size: 0.8125em;
+    padding: 0.1em 0.35em;
+    border-radius: 0.3rem;
+    background: color-mix(in oklch, var(--muted) 80%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  }
+  .markdown pre {
+    margin: 0.7em 0;
+    padding: 0.75rem 0.9rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border);
+    background: var(--color-inset);
+    overflow-x: auto;
+  }
+  .markdown pre code {
+    padding: 0;
+    border: none;
+    background: transparent;
+    font-size: 0.78rem;
+    line-height: 1.6;
+  }
+  .markdown blockquote {
+    margin: 0.7em 0;
+    padding: 0.1em 0 0.1em 0.9em;
+    border-left: 2px solid color-mix(in oklch, var(--primary) 45%, var(--border));
+    color: var(--muted-foreground);
+  }
+  .markdown hr {
+    margin: 1.2em 0;
+    border: none;
+    border-top: 1px solid var(--border);
+  }
+  .markdown table {
+    margin: 0.7em 0;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+  }
+  .markdown th,
+  .markdown td {
+    padding: 0.35em 0.8em;
+    border: 1px solid var(--border);
+    text-align: left;
+  }
+  .markdown th {
+    background: var(--muted);
+    font-weight: 600;
+  }
+  .markdown strong { font-weight: 600; }
+  .markdown img { max-width: 100%; border-radius: 0.5rem; }
 }

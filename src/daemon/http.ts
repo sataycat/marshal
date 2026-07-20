@@ -824,6 +824,43 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
       );
     }
   });
+  // Static agent routes must register before "/api/agents/:id" so the
+  // parameter route cannot shadow them.
+  app.get("/api/agents/operations", (c) =>
+    c.json({ operations: listInstallationOperations(machineDir) }),
+  );
+  app.get("/api/agents/removal-operations", (c) =>
+    c.json({ operations: listAgentRemovalOperations(machineDir) }),
+  );
+  app.get("/api/agents/install-candidate", (c) => {
+    const agentId = c.req.query("agent_id");
+    const version = c.req.query("version");
+    if (!agentId || !version)
+      throw new ApiError(422, "agent_id and version are required", "missing_query");
+    const agent = getRegistryCatalog(machineDir).snapshot?.agents.find(
+      (entry) => entry.id === agentId && entry.version === version,
+    );
+    if (!agent)
+      throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
+    const distribution = c.req.query("distribution");
+    if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution))
+      throw new ApiError(422, "distribution is invalid", "installation_invalid");
+    try {
+      return c.json({
+        candidate: installCandidate(
+          agent,
+          `${process.platform}-${process.arch}`,
+          distribution as "npx" | "uvx" | "binary" | undefined,
+        ),
+      });
+    } catch (error) {
+      throw new ApiError(
+        422,
+        error instanceof Error ? error.message : String(error),
+        "installation_invalid",
+      );
+    }
+  });
   app.get("/api/agents/:id", (c) => {
     const version = c.req.query("version");
     if (!version) throw new ApiError(422, "version is required", "missing_query");
@@ -1050,38 +1087,6 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
       );
     }
   });
-  app.get("/api/agents/install-candidate", (c) => {
-    const agentId = c.req.query("agent_id");
-    const version = c.req.query("version");
-    if (!agentId || !version)
-      throw new ApiError(422, "agent_id and version are required", "missing_query");
-    const agent = getRegistryCatalog(machineDir).snapshot?.agents.find(
-      (entry) => entry.id === agentId && entry.version === version,
-    );
-    if (!agent)
-      throw new ApiError(404, "Registry agent version not found", "registry_agent_not_found");
-    const distribution = c.req.query("distribution");
-    if (distribution !== undefined && !["npx", "uvx", "binary"].includes(distribution))
-      throw new ApiError(422, "distribution is invalid", "installation_invalid");
-    try {
-      return c.json({
-        candidate: installCandidate(
-          agent,
-          `${process.platform}-${process.arch}`,
-          distribution as "npx" | "uvx" | "binary" | undefined,
-        ),
-      });
-    } catch (error) {
-      throw new ApiError(
-        422,
-        error instanceof Error ? error.message : String(error),
-        "installation_invalid",
-      );
-    }
-  });
-  app.get("/api/agents/operations", (c) =>
-    c.json({ operations: listInstallationOperations(machineDir) }),
-  );
   app.get("/api/agents/operations/:id", (c) => {
     try {
       return c.json({ operation: installationOperation(c.req.param("id"), machineDir) });
@@ -1135,9 +1140,6 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
       202,
     );
   });
-  app.get("/api/agents/removal-operations", (c) =>
-    c.json({ operations: listAgentRemovalOperations(machineDir) }),
-  );
   app.get("/api/agents/removal-operations/:operationId", (c) => {
     const operation = getAgentRemovalOperation(c.req.param("operationId"), machineDir);
     if (!operation)

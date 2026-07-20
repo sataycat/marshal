@@ -38,7 +38,7 @@ function HydratedStub({
       {!isEditing && (
         <button
           type="button"
-          className="absolute top-1 right-1 z-10 rounded-md border border-border bg-panel/90 px-1.5 py-0.5 text-[0.65rem] text-muted opacity-0 transition-opacity hover:text-text group-hover/cm:opacity-100"
+          className="absolute top-1 right-1 z-10 rounded-md border border-border bg-panel/90 px-1.5 py-0.5 text-[0.65rem] text-muted-foreground opacity-0 transition-opacity hover:text-text group-hover/cm:opacity-100"
           onClick={onEditToggle}
           aria-label="Edit this code block"
         >

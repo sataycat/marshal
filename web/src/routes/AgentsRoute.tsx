@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Download, ExternalLink, RefreshCw, Search } from "lucide-react";
+import { Check, Download, ExternalLink, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { Badge } from "../components/ui/badge";
+import { PageHeader } from "../components/PageHeader";
+import { ReadinessBadge } from "../components/status";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { useConfirmContext } from "../components/ConfirmDialog";
 import { queryKeys } from "../api/queryKeys";
 import {
   useAgentAuthenticationQuery,
@@ -19,16 +24,25 @@ import {
   useSetDefaultInstalledAgentMutation,
   useUpdateRegistryAgentMutation,
 } from "../api/queries";
-import { fetchInstallCandidate } from "../api/client";
+import { fetchInstallCandidate, type InstallCandidate } from "../api/client";
 import type { InstalledAgent, RegistryAgent, RegistryDistribution } from "../types";
 
 type DistributionKind = "npx" | "uvx" | "binary";
 
 const featuredAgentNames = ["claude", "codex", "opencode", "gemini", "amp", "zed"];
 
+interface PendingTrust {
+  agent: RegistryAgent;
+  distribution: DistributionKind;
+  candidate: InstallCandidate;
+  mode: "install" | "update";
+}
+
 export function AgentsRoute(): JSX.Element {
   const [search, setSearch] = useState("");
   const [operationIds, setOperationIds] = useState<Record<string, string>>({});
+  const [pendingTrust, setPendingTrust] = useState<PendingTrust | null>(null);
+  const [preparingId, setPreparingId] = useState<string | null>(null);
   const catalog = useRegistryQuery();
   const installed = useInstalledAgentsQuery();
   const operations = useInstallationOperationsQuery();
@@ -40,6 +54,7 @@ export function AgentsRoute(): JSX.Element {
   const probe = useProbeInstalledAgentMutation();
   const authenticate = useAuthenticateInstalledAgentMutation();
   const client = useQueryClient();
+  const { confirm } = useConfirmContext();
   const initialRefreshStarted = useRef(false);
 
   const runRefresh = async (): Promise<void> => {
@@ -62,47 +77,206 @@ export function AgentsRoute(): JSX.Element {
   }, [catalog.data?.agents, search]);
 
   const stale = catalog.data?.snapshot && catalog.data.refresh?.status === "failed";
-  const installedFor = (agent: RegistryAgent): InstalledAgent[] => installed.data?.filter((entry) => entry.id === agent.id && entry.version === agent.version) ?? [];
-  const orphaned = (installed.data ?? []).filter((entry) => !(catalog.data?.agents ?? []).some((agent) => agent.id === entry.id && agent.version === entry.version));
+  const inventory = installed.data ?? [];
+  const registryMatchFor = (entry: InstalledAgent): RegistryAgent | undefined =>
+    (catalog.data?.agents ?? []).find((agent) => agent.id === entry.id);
+  const isInstalled = (agent: RegistryAgent): boolean =>
+    inventory.some((entry) => entry.id === agent.id && entry.version === agent.version && entry.status === "installed");
 
-  const installAgent = async (agent: RegistryAgent, distribution: DistributionKind): Promise<void> => {
-    const candidate = await client.fetchQuery({ queryKey: [...queryKeys.registry, "candidate", agent.id, agent.version, distribution], queryFn: () => fetchInstallCandidate(agent.id, agent.version, distribution) });
-    const identity = candidate.distribution.kind === "binary" ? candidate.distribution.archive_url : candidate.distribution.package;
-    if (!window.confirm(`Trust transition: install and allow third-party ACP code to run.\n\n${agent.name} ${candidate.version}\nSource: ${candidate.source}\nDistribution: ${candidate.distribution.kind}\nLicense: ${candidate.license}\nIdentity: ${identity ?? "n/a"}\nChecksum: ${candidate.checksum ?? "none (unverified binary)"}\nIntegrity policy: ${candidate.integrity_policy}`)) return;
-    const operation = await install.mutateAsync({ agentId: agent.id, version: agent.version, distribution });
+  const requestInstall = async (agent: RegistryAgent, distribution: DistributionKind, mode: "install" | "update"): Promise<void> => {
+    const key = `${agent.id}@${agent.version}:${mode}`;
+    setPreparingId(key);
+    try {
+      const candidate = await client.fetchQuery({
+        queryKey: [...queryKeys.registry, "candidate", agent.id, agent.version, distribution],
+        queryFn: () => fetchInstallCandidate(agent.id, agent.version, distribution),
+      });
+      setPendingTrust({ agent, distribution, candidate, mode });
+    } finally {
+      setPreparingId(null);
+    }
+  };
+
+  const confirmInstall = async (): Promise<void> => {
+    if (!pendingTrust) return;
+    const { agent, distribution, mode } = pendingTrust;
+    const mutation = mode === "update" ? update : install;
+    const operation = await mutation.mutateAsync({ agentId: agent.id, version: agent.version, distribution });
     setOperationIds((current) => ({ ...current, [`${agent.id}@${agent.version}`]: operation.id }));
+    setPendingTrust(null);
     await client.invalidateQueries({ queryKey: queryKeys.installedAgents });
   };
 
-  const removeAgent = async (agent: RegistryAgent): Promise<void> => {
-    if (!window.confirm(`Remove the Marshal installation of ${agent.name} ${agent.version}?`)) return;
-    await remove.mutateAsync({ agentId: agent.id, version: agent.version });
+  const removeAgent = async (entry: InstalledAgent): Promise<void> => {
+    const ok = await confirm({
+      title: "Remove agent",
+      message: `Remove the Marshal installation of ${entry.id} ${entry.version}?`,
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
+    await remove.mutateAsync({ agentId: entry.id, version: entry.version });
     await client.invalidateQueries({ queryKey: queryKeys.installedAgents });
   };
-  const probeAgent = async (agent: RegistryAgent): Promise<void> => { await probe.mutateAsync({ agentId: agent.id, version: agent.version }); await client.invalidateQueries({ queryKey: queryKeys.installedAgents }); };
-  const updateAgent = async (agent: RegistryAgent): Promise<void> => {
-    const current = installedFor(agent)[0];
-    const candidate = await fetchInstallCandidate(agent.id, agent.version, current?.distribution as DistributionKind | undefined);
-    if (!window.confirm(`Trust transition: install and allow the updated third-party ACP code to run.\n\n${agent.name} ${candidate.version}\nSource: ${candidate.source}\nDistribution: ${candidate.distribution.kind}\nLicense: ${candidate.license}\nChecksum: ${candidate.checksum ?? "none (unverified binary)"}`)) return;
-    const operation = await update.mutateAsync({ agentId: agent.id, version: agent.version, distribution: candidate.distribution.kind });
-    setOperationIds((currentIds) => ({ ...currentIds, [`${agent.id}@${agent.version}`]: operation.id }));
-  };
+  const probeAgent = async (entry: InstalledAgent): Promise<void> => { await probe.mutateAsync({ agentId: entry.id, version: entry.version }); await client.invalidateQueries({ queryKey: queryKeys.installedAgents }); };
 
   const busy = install.isPending || update.isPending || setDefault.isPending || remove.isPending || probe.isPending || authenticate.isPending;
+  const refreshing = refresh.isPending || catalog.data?.refresh?.status === "running";
 
-  return <div className="mx-auto w-full max-w-[88rem] px-4 py-7 md:px-8 lg:px-10">
-    <div className="flex flex-col gap-5 border-b border-border pb-7 md:flex-row md:items-end md:justify-between">
-      <div><p className="font-mono text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-primary">ACP registry / local inventory</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] md:text-4xl">Agent runtime</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-muted">Install a protocol-compatible coding agent, authenticate it, and bring it online for repository sessions.</p></div>
-      <Button variant="outline" onClick={() => void runRefresh()} disabled={refresh.isPending || catalog.data?.refresh?.status === "running"}><RefreshCw className={catalog.data?.refresh?.status === "running" ? "animate-spin" : ""} />{catalog.data?.refresh?.status === "running" ? "Updating agents" : "Update agent list"}</Button>
+  return (
+    <div className="mx-auto w-full max-w-6xl overflow-y-auto px-4 py-6 md:px-8">
+      <PageHeader
+        eyebrow="ACP registry"
+        title="Agents"
+        description="Install a protocol-compatible coding agent, authenticate it, and bring it online for repository sessions."
+        actions={
+          <Button variant="outline" onClick={() => void runRefresh()} disabled={refreshing}>
+            <RefreshCw className={refreshing ? "animate-spin" : ""} />
+            {refreshing ? "Updating catalog…" : "Update catalog"}
+          </Button>
+        }
+      />
+
+      {stale && (
+        <div className="mt-5 rounded-lg border border-warn-border bg-warn-bg px-4 py-3 text-sm text-warn">
+          <strong>Showing a stale catalog.</strong> The last refresh failed: {catalog.data?.refresh?.error ?? "unknown error"}. The previous valid snapshot remains available.
+        </div>
+      )}
+      {!catalog.data?.snapshot && catalog.data?.refresh?.status === "failed" && (
+        <div className="mt-5 rounded-lg border border-border bg-panel px-4 py-3 text-sm text-muted-foreground">
+          We couldn't load the agent catalog. Check that Marshal can reach the internet, then try again.
+        </div>
+      )}
+
+      <section className="mt-8" aria-labelledby="installed-heading">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 id="installed-heading" className="text-sm font-semibold">Installed</h2>
+          <span className="text-xs text-muted-foreground">{inventory.length === 0 ? "None yet" : `${inventory.length} installation${inventory.length === 1 ? "" : "s"}`}</span>
+        </div>
+        {inventory.length === 0 ? (
+          <div className="mt-3 rounded-xl border border-dashed border-border px-6 py-8 text-center">
+            <p className="text-sm font-medium">No agents installed</p>
+            <p className="mt-1 text-sm text-muted-foreground">Choose an agent from the catalog below. Installation pins an exact version you can audit.</p>
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            {inventory.map((entry) => (
+              <InstalledCard
+                key={entry.installation_id}
+                entry={entry}
+                registryAgent={registryMatchFor(entry)}
+                onProbe={() => void probeAgent(entry)}
+                onRemove={() => void removeAgent(entry)}
+                onUpdate={registryMatchFor(entry) && registryMatchFor(entry)!.version !== entry.version
+                  ? (distribution) => void requestInstall(registryMatchFor(entry)!, distribution, "update")
+                  : null}
+                onDefault={(installationId) => void setDefault.mutateAsync({ agentId: entry.id, installationId })}
+                onAuthenticate={(methodId) => void authenticate.mutateAsync({ agentId: entry.id, version: entry.version, methodId })}
+                busy={busy}
+                preparing={preparingId !== null}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="mt-10" aria-labelledby="catalog-heading">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 id="catalog-heading" className="text-sm font-semibold">Catalog</h2>
+          <label className="relative block sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input className="bg-panel pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name or capability…" />
+          </label>
+        </div>
+        {catalog.isPending || refreshing ? (
+          <p className="mt-6 text-sm text-muted-foreground">Fetching registry snapshot…</p>
+        ) : agents.length === 0 ? (
+          <div className="mt-6 rounded-xl border border-dashed border-border px-6 py-12 text-center">
+            <p className="text-sm font-medium">{catalog.data?.snapshot ? "No agents match this search" : "No agents are available yet"}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{catalog.data?.snapshot ? "Try a different name or description." : "Try updating the catalog."}</p>
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {agents.map((agent) => (
+              <CatalogCard
+                key={agent.id}
+                agent={agent}
+                installed={isInstalled(agent)}
+                operationId={operationIds[`${agent.id}@${agent.version}`] ?? null}
+                onInstall={(distribution) => void requestInstall(agent, distribution, "install")}
+                busy={busy}
+                preparing={preparingId === `${agent.id}@${agent.version}:install`}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="mt-10" aria-labelledby="activity-heading">
+        <h2 id="activity-heading" className="text-sm font-semibold">Recent activity</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Installations and updates keep running if you leave this page.</p>
+        <div className="mt-3 space-y-1.5">
+          {(operations.data ?? []).slice(0, 8).map((operation) => (
+            <div key={operation.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-panel px-3 py-2 text-xs">
+              <span className="font-mono font-medium">{operation.agent_id}@{operation.version}</span>
+              <span className="text-muted-foreground">{operation.distribution}</span>
+              <span className={operation.status === "failed" ? "ml-auto text-error" : operation.status === "installed" ? "ml-auto text-success" : "ml-auto text-primary"}>
+                {operation.status === "installing" ? `Installing · ${operation.phase}` : operation.status}
+              </span>
+              {operation.error && <span className="basis-full text-error">{operation.error_code ?? "failed"}: {operation.error}</span>}
+            </div>
+          ))}
+          {operations.data?.length === 0 && <p className="text-xs text-muted-foreground">Nothing installed yet.</p>}
+        </div>
+      </section>
+
+      {catalog.data?.snapshot && (
+        <p className="mt-8 text-xs text-muted-foreground">
+          Snapshot {catalog.data.snapshot.version} fetched {new Date(catalog.data.snapshot.fetched_at).toLocaleString()} from <code className="font-mono">{catalog.data.source}</code>
+        </p>
+      )}
+
+      <TrustDialog
+        pending={pendingTrust}
+        busy={install.isPending || update.isPending}
+        onCancel={() => setPendingTrust(null)}
+        onConfirm={() => void confirmInstall()}
+      />
     </div>
-    {stale && <div className="mt-5 rounded-lg border border-error-border bg-error-bg px-4 py-3 text-sm text-error"><strong>Showing a stale catalog.</strong> The last refresh failed: {catalog.data?.refresh?.error ?? "unknown error"}. The previous valid snapshot remains available.</div>}
-    {!catalog.data?.snapshot && catalog.data?.refresh?.status === "failed" && <div className="mt-5 rounded-lg border border-border bg-panel px-4 py-3 text-sm text-muted">We couldn't load the agents right now. Check that Marshal can reach the internet, then try again.</div>}
-    <label className="relative mt-6 block max-w-xl"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" /><Input className="h-10 bg-panel pl-9 font-mono text-xs" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search registry by name or capability..." /></label>
-    {catalog.isPending || catalog.data?.refresh?.status === "running" ? <p className="mt-10 font-mono text-xs text-muted">fetching registry snapshot...</p> : agents.length === 0 ? <div className="mt-10 rounded-xl border border-dashed border-border px-6 py-12 text-center"><p className="font-medium">{catalog.data?.snapshot ? "No agents match this search" : "No agents are available yet"}</p><p className="mt-2 text-sm text-muted">{catalog.data?.snapshot ? "Try a different name or description." : "Try updating the agent list."}</p></div> : <div className="mt-6 grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-2 xl:grid-cols-3">{agents.map((agent) => <AgentCard key={agent.id} agent={agent} installed={installedFor(agent)} operationId={operationIds[`${agent.id}@${agent.version}`] ?? null} onInstall={(distribution) => void installAgent(agent, distribution)} onProbe={() => void probeAgent(agent)} onAuthenticate={(methodId) => void authenticate.mutateAsync({ agentId: agent.id, version: agent.version, methodId })} onRemove={() => void removeAgent(agent)} onUpdate={() => void updateAgent(agent)} onDefault={(installationId) => void setDefault.mutateAsync({ agentId: agent.id, installationId })} busy={busy} />)}</div>}
-    {orphaned.length > 0 && <section className="mt-8 rounded-xl border border-border bg-panel p-5"><h2 className="font-semibold">Previously installed agents</h2><p className="mt-1 text-sm text-muted">These installed versions are still available even though they are not in the current agent list.</p><div className="mt-4 grid gap-2 md:grid-cols-2">{orphaned.map((entry) => <div key={entry.installation_id} className="rounded-md border border-border bg-bg px-3 py-2 text-xs"><strong>{entry.id}@{entry.version}</strong><p className="mt-1 text-muted">{entry.distribution} · {entry.integrity_status} · {entry.readiness_status}</p></div>)}</div></section>}
-    <section className="mt-8 rounded-xl border border-border bg-panel p-5"><h2 className="font-semibold">Recent activity</h2><p className="mt-1 text-sm text-muted">Installations and updates keep running if you leave this page.</p><div className="mt-4 space-y-2">{(operations.data ?? []).slice(0, 8).map((operation) => <div key={operation.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-2 text-xs"><span><strong>{operation.agent_id}@{operation.version}</strong> · {operation.distribution}</span><span className={operation.status === "failed" ? "text-danger" : operation.status === "installed" ? "text-success" : "text-primary"}>{operation.status === "installing" ? `Installing · ${operation.phase}` : operation.status}</span>{operation.error && <span className="basis-full text-danger">{operation.error_code ?? "failed"}: {operation.error}</span>}</div>)}{operations.data?.length === 0 && <p className="text-xs text-muted">Nothing installed yet.</p>}</div></section>
-    {catalog.data?.snapshot && <p className="mt-7 text-xs text-muted">Snapshot {catalog.data.snapshot.version} fetched {new Date(catalog.data.snapshot.fetched_at).toLocaleString()} from <code>{catalog.data.source}</code></p>}
-  </div>;
+  );
+}
+
+function TrustDialog({ pending, busy, onCancel, onConfirm }: { pending: PendingTrust | null; busy: boolean; onCancel: () => void; onConfirm: () => void }): JSX.Element {
+  const identity = pending?.candidate.distribution.kind === "binary" ? pending.candidate.distribution.archive_url : pending?.candidate.distribution.package;
+  return (
+    <Dialog open={pending !== null} onOpenChange={(open) => { if (!open) onCancel(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><ShieldCheck aria-hidden className="size-4 text-primary" />{pending?.mode === "update" ? "Update agent" : "Install agent"}</DialogTitle>
+          <DialogDescription>
+            This runs third-party code on your machine. Review exactly what will be installed before continuing.
+          </DialogDescription>
+        </DialogHeader>
+        {pending && (
+          <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-2 rounded-lg border border-border bg-inset px-3.5 py-3 text-sm">
+            <dt className="text-muted-foreground">Agent</dt><dd className="font-medium">{pending.agent.name} <span className="font-mono text-xs text-muted-foreground">v{pending.candidate.version}</span></dd>
+            <dt className="text-muted-foreground">Source</dt><dd className="font-mono text-xs break-all">{pending.candidate.source}</dd>
+            <dt className="text-muted-foreground">Distribution</dt><dd>{pending.candidate.distribution.kind}</dd>
+            <dt className="text-muted-foreground">License</dt><dd>{pending.candidate.license}</dd>
+            <dt className="text-muted-foreground">Identity</dt><dd className="font-mono text-xs break-all">{identity ?? "n/a"}</dd>
+            <dt className="text-muted-foreground">Checksum</dt><dd className="font-mono text-xs break-all">{pending.candidate.checksum ?? "none — unverified binary"}</dd>
+            <dt className="text-muted-foreground">Integrity</dt><dd className="text-xs">{pending.candidate.integrity_policy}</dd>
+          </dl>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel} disabled={busy}>Cancel</Button>
+          <Button onClick={onConfirm} disabled={busy}>
+            <Download aria-hidden />
+            {busy ? "Starting…" : pending?.mode === "update" ? "Install update" : "Install and run"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function popularityScore(agent: RegistryAgent): number {
@@ -115,24 +289,130 @@ function preferredDistribution(agent: RegistryAgent): RegistryDistribution | und
   return agent.distributions.find((distribution) => distribution.kind === "binary") ?? agent.distributions.find((distribution) => distribution.kind === "npx") ?? agent.distributions.find((distribution) => distribution.kind === "uvx");
 }
 
-function AgentCard({ agent, installed, operationId, onInstall, onProbe, onAuthenticate, onRemove, onUpdate, onDefault, busy }: { agent: RegistryAgent; installed: InstalledAgent[]; operationId: string | null; onInstall: (distribution: DistributionKind) => void; onProbe: () => void; onAuthenticate: (methodId: string) => void; onRemove: () => void; onUpdate: () => void; onDefault: (installationId: string) => void; busy: boolean }): JSX.Element {
-  const current = installed.find((entry) => entry.is_default) ?? installed[0];
-  const operation = useInstallationQuery(operationId);
-  const authentication = useAgentAuthenticationQuery(current?.id ?? agent.id, current?.version ?? agent.version, current?.status === "installed");
+function AgentIcon({ agent, className }: { agent: RegistryAgent; className?: string }): JSX.Element {
+  if (agent.icon) return <img src={agent.icon} alt="" className={className} />;
+  return (
+    <div className={className} aria-hidden>
+      <span className="flex size-full items-center justify-center rounded-[inherit] bg-accent font-mono text-sm font-semibold text-primary">{agent.name.slice(0, 1)}</span>
+    </div>
+  );
+}
+
+function InstalledCard({ entry, registryAgent, onProbe, onRemove, onUpdate, onDefault, onAuthenticate, busy, preparing }: {
+  entry: InstalledAgent;
+  registryAgent: RegistryAgent | undefined;
+  onProbe: () => void;
+  onRemove: () => void;
+  onUpdate: ((distribution: DistributionKind) => void) | null;
+  onDefault: (installationId: string) => void;
+  onAuthenticate: (methodId: string) => void;
+  busy: boolean;
+  preparing: boolean;
+}): JSX.Element {
+  const authentication = useAgentAuthenticationQuery(entry.id, entry.version, entry.status === "installed");
   const cancel = useCancelAgentAuthenticationMutation();
   const auth = authentication.data?.authentication;
+  const name = registryAgent?.name ?? entry.id;
+  const updateDistribution = registryAgent ? preferredDistribution(registryAgent)?.kind : undefined;
+
+  return (
+    <article className="flex flex-col rounded-xl border border-border bg-panel p-4">
+      <div className="flex items-start gap-3">
+        {registryAgent && <AgentIcon agent={registryAgent} className="size-10 shrink-0 rounded-lg border border-border bg-bg object-cover p-1" />}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h3 className="font-semibold tracking-tight">{name}</h3>
+            {entry.is_default && <Badge tone="accent">Default</Badge>}
+          </div>
+          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{entry.id}@{entry.version}</p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <ReadinessBadge status={entry.readiness_status} />
+        </div>
+      </div>
+
+      <dl className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <div className="flex gap-1.5"><dt>Distribution</dt><dd className="font-medium text-text">{entry.distribution}</dd></div>
+        <div className="flex gap-1.5"><dt>Integrity</dt><dd className={entry.integrity_status === "verified" ? "font-medium text-success" : entry.integrity_status === "mismatch" ? "font-medium text-error" : "font-medium text-text"}>{entry.integrity_status.replaceAll("_", " ")}</dd></div>
+        {entry.protocol_version !== null && <div className="flex gap-1.5"><dt>ACP</dt><dd className="font-medium text-text">v{entry.protocol_version}</dd></div>}
+        {entry.capabilities && <div className="flex gap-1.5"><dt>Images</dt><dd className="font-medium text-text">{entry.capabilities.prompt.image ? "supported" : "no"}</dd></div>}
+      </dl>
+
+      {entry.status === "failed" && <p className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">Installation failed: {entry.failure ?? "unknown error"}</p>}
+      {entry.readiness_status === "failed" && entry.readiness_error && <p className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">Readiness failed: {entry.readiness_error}</p>}
+      {auth && auth.status !== "succeeded" && (
+        <div className="mt-3 rounded-lg border border-border bg-inset px-3 py-2 text-xs">
+          <div className="flex items-center justify-between gap-2">
+            <span>Authentication {auth.status}</span>
+            {auth.status === "authenticating" && <Button variant="ghost" size="xs" onClick={() => void cancel.mutateAsync(auth.id)} disabled={cancel.isPending}>Cancel</Button>}
+          </div>
+          {auth.error && <p className="mt-1 text-error">{auth.error}</p>}
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+        {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "agent").map((method) => (
+          <Button key={method.id} size="sm" onClick={() => onAuthenticate(method.id)} disabled={busy}>Authenticate</Button>
+        ))}
+        {onUpdate && updateDistribution && <Button variant="outline" size="sm" onClick={() => onUpdate(updateDistribution)} disabled={busy || preparing}><Download aria-hidden />Update available</Button>}
+        {entry.status === "installed" && !entry.is_default && <Button variant="outline" size="sm" onClick={() => onDefault(entry.installation_id)} disabled={busy}>Use by default</Button>}
+        <Button variant="outline" size="sm" onClick={onProbe} disabled={busy}>Probe</Button>
+        <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground hover:text-error" onClick={onRemove} disabled={busy}>Remove</Button>
+      </div>
+    </article>
+  );
+}
+
+function CatalogCard({ agent, installed, operationId, onInstall, busy, preparing }: {
+  agent: RegistryAgent;
+  installed: boolean;
+  operationId: string | null;
+  onInstall: (distribution: DistributionKind) => void;
+  busy: boolean;
+  preparing: boolean;
+}): JSX.Element {
+  const operation = useInstallationQuery(operationId);
   const preferred = preferredDistribution(agent);
   const installing = operation.data && !["completed", "failed", "interrupted"].includes(operation.data.phase);
 
-  return <article className="flex min-h-0 flex-col bg-panel p-5 transition-colors hover:bg-[color-mix(in_oklch,var(--card),var(--primary)_3%)]">
-    <div className="flex items-start gap-3">{agent.icon ? <img src={agent.icon} alt="" className="size-10 rounded-lg border border-border bg-bg p-1.5" /> : <div className="flex size-10 items-center justify-center rounded-lg bg-accent font-mono text-base font-semibold text-primary">{agent.name.slice(0, 1)}</div>}<div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h2 className="truncate font-semibold tracking-tight">{agent.name}</h2>{popularityScore(agent) > 0 && <span className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[0.58rem] font-semibold uppercase tracking-wider text-primary">featured</span>}</div><p className="truncate font-mono text-[0.65rem] text-muted">{agent.id}</p></div><span className="font-mono text-[0.65rem] text-muted">v{agent.version}</span></div>
-    <p className="mt-4 line-clamp-2 min-h-10 text-sm leading-5 text-muted">{agent.description}</p>
-    {installed.map((entry) => <div key={entry.installation_id} className="mt-3 rounded-md border border-border bg-bg px-2.5 py-2 text-xs"><div className="flex items-center justify-between"><strong>{entry.distribution} · {entry.version}</strong>{entry.is_default && <span className="text-success">Default</span>}</div><p className="mt-1 text-muted">{entry.integrity_status} · {entry.readiness_status === "ready" ? "Ready" : entry.readiness_status === "authentication_required" ? "Authentication required" : entry.status === "installed" ? "Installed" : entry.status}</p>{entry.status === "installed" && !entry.is_default && <Button variant="ghost" size="xs" onClick={() => onDefault(entry.installation_id)} disabled={busy}>Use by default</Button>}</div>)}
-    {current?.status === "failed" && <p className="mt-3 rounded-md border border-error-border bg-error-bg px-2.5 py-2 text-xs text-error">Installation failed: {current.failure ?? "unknown error"}</p>}
-    <div className="mt-auto flex items-center gap-3 border-t border-border pt-4 text-xs">{agent.repository && <a className="inline-flex items-center gap-1 text-primary hover:underline" href={agent.repository} target="_blank" rel="noreferrer">Source <ExternalLink className="size-3" /></a>}{agent.website && <a className="inline-flex items-center gap-1 text-primary hover:underline" href={agent.website} target="_blank" rel="noreferrer">Website <ExternalLink className="size-3" /></a>}<span className="ml-auto truncate text-muted">{agent.authors[0] ?? "Unknown author"}</span></div>
-    <div className="mt-3 flex items-center justify-between gap-2">{current?.status === "installed" ? <><div className="flex flex-wrap items-center gap-2 text-xs"><span className="inline-flex items-center gap-1 font-medium text-success"><Check className="size-3.5" />Installed</span>{current.readiness_status === "ready" ? <span className="rounded-full bg-success/10 px-2 py-1 font-medium text-success">Ready</span> : current.readiness_status === "authentication_required" ? <span className="rounded-full bg-warn/10 px-2 py-1 font-medium text-warn">Auth needed</span> : current.readiness_status === "probing" ? <span className="text-primary">Probing...</span> : current.readiness_status === "failed" ? <span className="text-danger">Probe failed</span> : null}</div><div className="flex gap-1">{current.readiness_status === "authentication_required" && current.auth_methods.filter((method) => method.type === "agent").map((method) => <Button key={method.id} variant="outline" size="sm" onClick={() => onAuthenticate(method.id)} disabled={busy}>Authenticate</Button>)}<Button variant="outline" size="sm" onClick={onUpdate} disabled={busy}>Update</Button><Button variant="outline" size="sm" onClick={onProbe} disabled={busy}>Probe</Button><Button variant="outline" size="sm" onClick={onRemove} disabled={busy}>Remove</Button></div></> : <Button className="h-10 w-full border border-primary/20 bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/85 hover:shadow-md" size="lg" onClick={() => preferred && onInstall(preferred.kind)} disabled={busy || !preferred || Boolean(installing)}><Download className="size-4" />{installing ? "Installing agent..." : "Install agent"}</Button>}</div>
-    {current?.readiness_status === "failed" && current.readiness_error && <p className="mt-2 rounded-md border border-error-border bg-error-bg px-2.5 py-2 text-xs text-error">Readiness failed: {current.readiness_error}</p>}
-    {current?.readiness_status === "ready" && current.protocol_version !== null && <p className="mt-2 text-xs text-muted">ACP {current.protocol_version} · Images {current.capabilities?.prompt.image ? "supported" : "not supported"}</p>}
-    {auth && auth.status !== "succeeded" && <div className="mt-2 rounded-md border border-border bg-bg px-2.5 py-2 text-xs"><div className="flex items-center justify-between gap-2"><span>Authentication {auth.status}</span>{auth.status === "authenticating" && <Button variant="ghost" size="xs" onClick={() => void cancel.mutateAsync(auth.id)} disabled={cancel.isPending}>Cancel</Button>}</div>{auth.error && <p className="mt-1 text-error">{auth.error}</p>}</div>}
-  </article>;
+  return (
+    <article className="flex min-h-0 flex-col rounded-xl border border-border bg-panel p-4 transition-colors hover:border-input">
+      <div className="flex items-start gap-3">
+        <AgentIcon agent={agent} className="size-10 shrink-0 rounded-lg border border-border bg-bg object-cover p-1" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="truncate font-semibold tracking-tight">{agent.name}</h3>
+            {popularityScore(agent) > 0 && <Badge tone="accent">Featured</Badge>}
+          </div>
+          <p className="truncate font-mono text-[0.6875rem] text-muted-foreground">{agent.id}</p>
+        </div>
+        <span className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground">v{agent.version}</span>
+      </div>
+      <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">{agent.description}</p>
+      <div className="mt-3 flex items-center gap-3 text-xs">
+        {agent.repository && <a className="inline-flex items-center gap-1 text-primary hover:underline" href={agent.repository} target="_blank" rel="noreferrer">Source <ExternalLink className="size-3" /></a>}
+        {agent.website && <a className="inline-flex items-center gap-1 text-primary hover:underline" href={agent.website} target="_blank" rel="noreferrer">Website <ExternalLink className="size-3" /></a>}
+        <span className="ml-auto truncate text-muted-foreground">{agent.authors[0] ?? "Unknown author"}</span>
+      </div>
+      <div className="mt-3 border-t border-border pt-3">
+        {installed ? (
+          <p className="flex h-8 items-center gap-1.5 text-sm font-medium text-success"><Check className="size-4" />Installed</p>
+        ) : (
+          <Button className="w-full" onClick={() => preferred && onInstall(preferred.kind)} disabled={busy || !preferred || Boolean(installing) || preparing}>
+            {installing || preparing ? <LoaderCircleSpin /> : <Download aria-hidden />}
+            {installing ? "Installing…" : preparing ? "Preparing…" : "Install"}
+          </Button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function LoaderCircleSpin(): JSX.Element {
+  return (
+    <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2.5" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
 }

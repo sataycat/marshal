@@ -25,14 +25,18 @@ const WorkflowsRoute = lazy(() => import("./routes/WorkflowsRoute").then((m) => 
 const DiagnosticsRoute = lazy(() => import("./routes/DiagnosticsRoute").then((m) => ({ default: m.DiagnosticsRoute })));
 
 function RouteFallback(): JSX.Element {
-  return <div className="route-loading">Loading…</div>;
+  return (
+    <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground" role="status">
+      Loading…
+    </div>
+  );
 }
 
 export function App(): JSX.Element {
   const repositories = useRepositoriesQuery();
   const agents = useInstalledAgentsQuery();
-  if (repositories.isPending || agents.isPending) return <div className="flex min-h-svh items-center justify-center bg-bg text-muted">Loading Marshal...</div>;
-  if (repositories.isError || agents.isError) return <div className="flex min-h-svh items-center justify-center bg-bg text-danger">Unable to load Marshal: {(repositories.error ?? agents.error)?.message}</div>;
+  if (repositories.isPending || agents.isPending) return <div className="flex min-h-svh items-center justify-center bg-bg text-sm text-muted-foreground">Loading Marshal…</div>;
+  if (repositories.isError || agents.isError) return <div className="flex min-h-svh items-center justify-center bg-bg px-6 text-center text-sm text-error">Unable to load Marshal: {(repositories.error ?? agents.error)?.message}</div>;
   const hasReadyAgent = agents.data.some((agent) => agent.status === "installed" && agent.readiness_status === "ready");
   return (
     <ThemeProvider>

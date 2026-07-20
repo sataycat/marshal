@@ -64,11 +64,11 @@ export function NewTaskModal({ onClose }: Props) {
         <div className="flex flex-col gap-4">
           <Field>
             <FieldLabel htmlFor="new-task-profile">Workflow profile</FieldLabel>
-            <select id="new-task-profile" className="h-10 w-full rounded-md border border-input bg-transparent px-2" value={profileId} onChange={(e) => setProfileId(e.target.value)} required>
+            <select id="new-task-profile" className="h-9 w-full rounded-lg border border-input bg-transparent px-2 text-sm text-text outline-none focus-visible:border-ring" value={profileId} onChange={(e) => setProfileId(e.target.value)} required>
               <option value="">Select a profile</option>
               {(profiles.data ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
             </select>
-            <FieldDescription>Authoring uses this profile's spec-author assignment. The task remains backlog until you review and freeze it.</FieldDescription>
+            <FieldDescription>Authoring uses this profile's spec-author assignment. The task stays in backlog until you freeze the spec.</FieldDescription>
           </Field>
           <Field>
             <FieldLabel htmlFor="new-task-title">Title</FieldLabel>
@@ -84,7 +84,7 @@ export function NewTaskModal({ onClose }: Props) {
           <Field>
             <FieldLabel htmlFor="new-task-spec">Spec markdown (optional)</FieldLabel>
             <FieldDescription>
-              Initial spec. Editable in chat; frozen before build.
+              Refined with the spec author in the task detail, then frozen before build.
             </FieldDescription>
             <Textarea
               id="new-task-spec"
@@ -92,7 +92,7 @@ export function NewTaskModal({ onClose }: Props) {
               onChange={(e) => setSpec(e.target.value)}
               rows={10}
               placeholder={"## Goal\nDescribe what this task should accomplish."}
-              className="font-mono text-sm"
+              className="font-mono text-xs"
             />
           </Field>
         </div>

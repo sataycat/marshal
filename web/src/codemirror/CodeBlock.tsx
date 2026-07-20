@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Extension } from "@codemirror/state";
 import { loadLanguage } from "./languages";
+import { useTheme } from "../theme";
 import { cn } from "@/lib/utils";
 
 type CodeMirrorComponent = typeof import("@uiw/react-codemirror").default;
@@ -30,13 +31,13 @@ function loadTheme(): Promise<Extension> {
       const ext = EditorView.theme(
         {
           "&": {
-            backgroundColor: "var(--background)",
+            backgroundColor: "transparent",
             color: "var(--foreground)",
             fontSize: "12px",
             fontFamily: "var(--font-mono)",
           },
           ".cm-gutters": {
-            backgroundColor: "var(--background)",
+            backgroundColor: "transparent",
             color: "var(--muted-foreground)",
             border: "none",
           },
@@ -54,6 +55,40 @@ function loadTheme(): Promise<Extension> {
     });
   }
   return themePromise;
+}
+
+let darkHighlightPromise: Promise<Extension> | null = null;
+let darkHighlightCached: Extension | null = null;
+
+/** Dark-theme token colors; the light theme keeps the default highlight style. */
+function loadDarkHighlight(): Promise<Extension> {
+  if (darkHighlightCached !== null) return Promise.resolve(darkHighlightCached);
+  if (darkHighlightPromise === null) {
+    darkHighlightPromise = Promise.all([
+      import("@codemirror/language"),
+      import("@lezer/highlight"),
+    ]).then(([{ HighlightStyle, syntaxHighlighting }, { tags }]) => {
+      const style = HighlightStyle.define([
+        { tag: [tags.comment, tags.meta], color: "#6b7390" },
+        { tag: [tags.keyword, tags.modifier, tags.controlKeyword], color: "#a8b0ff" },
+        { tag: [tags.string, tags.special(tags.string), tags.regexp], color: "#7fd6a4" },
+        { tag: [tags.number, tags.bool, tags.null, tags.atom], color: "#e0a94f" },
+        { tag: [tags.typeName, tags.className, tags.tagName, tags.namespace], color: "#6fc3df" },
+        { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "#c5a3ff" },
+        { tag: [tags.propertyName, tags.attributeName], color: "#8fd0ea" },
+        { tag: [tags.variableName, tags.name], color: "#e3e6ef" },
+        { tag: [tags.punctuation, tags.operator, tags.separator], color: "#8b93ab" },
+        { tag: tags.heading, color: "#c5a3ff", fontWeight: "600" },
+        { tag: tags.link, color: "#a8b0ff", textDecoration: "underline" },
+        { tag: tags.deleted, color: "#f0705f" },
+        { tag: tags.inserted, color: "#4cc790" },
+      ]);
+      const ext = syntaxHighlighting(style);
+      darkHighlightCached = ext;
+      return ext;
+    });
+  }
+  return darkHighlightPromise;
 }
 
 export interface CodeBlockProps {
@@ -93,9 +128,11 @@ export function CodeBlock({
   onChange,
   onKeyDown,
 }: CodeBlockProps): JSX.Element {
+  const { resolvedTheme } = useTheme();
   const [Component, setComponent] = useState<CodeMirrorComponent | null>(codeMirrorCached);
   const [extension, setExtension] = useState<Extension | null>(null);
   const [theme, setTheme] = useState<Extension | null>(themeCached);
+  const [darkHighlight, setDarkHighlight] = useState<Extension | null>(darkHighlightCached);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,16 +145,21 @@ export function CodeBlock({
     loadTheme().then((ext) => {
       if (!cancelled) setTheme(ext);
     });
+    if (resolvedTheme === "dracula") {
+      loadDarkHighlight().then((ext) => {
+        if (!cancelled) setDarkHighlight(ext);
+      });
+    }
     return () => {
       cancelled = true;
     };
-  }, [lang]);
+  }, [lang, resolvedTheme]);
 
   if (Component === null) {
     return (
       <pre
         className={cn(
-          "overflow-x-auto rounded-md border border-border bg-muted p-2 font-mono text-xs whitespace-pre",
+          "overflow-x-auto rounded-md border border-border bg-inset p-2 font-mono text-xs whitespace-pre",
           className,
         )}
       >
@@ -129,6 +171,7 @@ export function CodeBlock({
   const extensions: Extension[] = [];
   if (theme !== null) extensions.push(theme);
   if (extension !== null) extensions.push(extension);
+  if (resolvedTheme === "dracula" && darkHighlight !== null) extensions.push(darkHighlight);
   const basicSetup: CodeMirrorProps["basicSetup"] = editable
     ? true
     : { lineNumbers: false, highlightActiveLine: false, highlightActiveLineGutter: false };
@@ -136,7 +179,7 @@ export function CodeBlock({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-md border border-border bg-muted [&_.cm-editor]:rounded-md [&_.cm-editor]:bg-muted [&_.cm-scroller]:font-mono",
+        "overflow-hidden rounded-md border border-border bg-inset [&_.cm-editor]:rounded-md [&_.cm-editor]:bg-inset [&_.cm-scroller]:font-mono",
         className,
       )}
     >
@@ -144,7 +187,7 @@ export function CodeBlock({
         value={value}
         editable={editable}
         readOnly={!editable}
-        theme="light"
+        theme={resolvedTheme === "dracula" ? "dark" : "light"}
         basicSetup={basicSetup}
         extensions={extensions}
         minHeight={minHeight}

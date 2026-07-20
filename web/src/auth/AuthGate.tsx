@@ -1,5 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ApiError, fetchAuthStatus, login } from "../api/client";
+import { MarshalMark } from "../components/MarshalMark";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 
 export function AuthGate({ children }: { children: ReactNode }): JSX.Element {
   const [status, setStatus] = useState<"loading" | "login" | "ready">("loading");
@@ -11,7 +14,7 @@ export function AuthGate({ children }: { children: ReactNode }): JSX.Element {
   }, []);
 
   if (status === "loading") {
-    return <div className="flex min-h-svh items-center justify-center bg-bg text-sm text-muted">Checking authentication…</div>;
+    return <div className="flex min-h-svh items-center justify-center bg-bg text-sm text-muted-foreground">Checking authentication…</div>;
   }
   if (status === "login") return <LoginForm onSuccess={() => setStatus("ready")} />;
   return <>{children}</>;
@@ -39,23 +42,29 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }): JSX.Element {
 
   return (
     <main className="flex min-h-svh items-center justify-center bg-bg px-5 text-text">
-      <form onSubmit={submit} className="w-full max-w-sm rounded-xl border border-border bg-panel p-6 shadow-sm">
-        <p className="mb-1 text-lg font-semibold">Sign in to Marshal</p>
-        <p className="mb-6 text-sm text-muted">This server requires a UI password.</p>
-        <label className="mb-2 block text-sm font-medium" htmlFor="marshal-password">Password</label>
-        <input
-          id="marshal-password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className="mb-4 w-full rounded-md border border-border bg-bg px-3 py-2 outline-none focus:border-primary"
-          autoFocus
-        />
-        {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
-        <button type="submit" disabled={busy || password.length === 0} className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
-          {busy ? "Signing in…" : "Sign in"}
-        </button>
+      <form onSubmit={submit} className="w-full max-w-sm">
+        <div className="flex flex-col items-center text-center">
+          <span className="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+            <MarshalMark className="size-6" />
+          </span>
+          <h1 className="mt-4 text-xl font-semibold tracking-tight">Sign in to Marshal</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">This server requires a UI password.</p>
+        </div>
+        <div className="mt-6 rounded-xl border border-border bg-panel p-5 shadow-sm">
+          <label className="mb-1.5 block text-sm font-medium" htmlFor="marshal-password">Password</label>
+          <Input
+            id="marshal-password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoFocus
+          />
+          {error && <p className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-sm text-error">{error}</p>}
+          <Button type="submit" className="mt-4 w-full" disabled={busy || password.length === 0}>
+            {busy ? "Signing in…" : "Sign in"}
+          </Button>
+        </div>
       </form>
     </main>
   );

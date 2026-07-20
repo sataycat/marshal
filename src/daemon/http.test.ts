@@ -1,13 +1,25 @@
 import { ChildProcess, spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp, portFilePath, startHttpServer } from "./http.js";
 import { loadGlobalConfig } from "../worktree/config.js";
 import { EventBus } from "./bus.js";
-import { createInstallation, finishInstallation, getInstallationOperation, updateInstallationPhase } from "../agents/store.js";
+import {
+  createInstallation,
+  finishInstallation,
+  getInstallationOperation,
+  updateInstallationPhase,
+} from "../agents/store.js";
 import { completeRegistryRefresh, beginRegistryRefresh } from "../registry/store.js";
 
 function fetchJson(url: string): Promise<{ status: number; body: unknown }> {
@@ -32,60 +44,284 @@ describe("buildApp /api/health", () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-registry-http-"));
     const { beginRegistryRefresh, completeRegistryRefresh } = await import("../registry/store.js");
     const refresh = beginRegistryRefresh(machineDir);
-    completeRegistryRefresh(refresh.id, { version: "1.0.0", source: "fixture://registry", fetched_at: new Date().toISOString(), agents: [{ id: "demo", name: "Demo Agent", version: "1.0.0", description: "Searchable coding helper", license: "MIT", authors: [], distributions: [{ kind: "npx", package: "demo@1.0.0" }] }] }, machineDir);
+    completeRegistryRefresh(
+      refresh.id,
+      {
+        version: "1.0.0",
+        source: "fixture://registry",
+        fetched_at: new Date().toISOString(),
+        agents: [
+          {
+            id: "demo",
+            name: "Demo Agent",
+            version: "1.0.0",
+            description: "Searchable coding helper",
+            license: "MIT",
+            authors: [],
+            distributions: [{ kind: "npx", package: "demo@1.0.0" }],
+          },
+        ],
+      },
+      machineDir,
+    );
     const app = buildApp("0.0.1", { machineDir });
     const res = await app.request("/api/registry/agents?q=searchable");
     expect(res.status).toBe(200);
-    const body = await res.json() as { agents: unknown[] };
+    const body = (await res.json()) as { agents: unknown[] };
     expect(body.agents).toHaveLength(1);
+  });
+
+  it("serves static /api/agents/* routes without :id shadowing", async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-agents-static-"));
+    const { beginRegistryRefresh, completeRegistryRefresh } = await import("../registry/store.js");
+    const refresh = beginRegistryRefresh(machineDir);
+    completeRegistryRefresh(
+      refresh.id,
+      {
+        version: "1.0.0",
+        source: "fixture://registry",
+        fetched_at: new Date().toISOString(),
+        agents: [
+          {
+            id: "demo",
+            name: "Demo Agent",
+            version: "1.0.0",
+            description: "Searchable coding helper",
+            license: "MIT",
+            authors: [],
+            distributions: [{ kind: "npx", package: "demo@1.0.0" }],
+          },
+        ],
+      },
+      machineDir,
+    );
+    const app = buildApp("0.0.1", { machineDir });
+
+    const candidate = await app.request(
+      "/api/agents/install-candidate?agent_id=demo&version=1.0.0&distribution=npx",
+    );
+    expect(candidate.status).toBe(200);
+    const candidateBody = (await candidate.json()) as {
+      candidate: { agent_id: string; distribution: { kind: string } };
+    };
+    expect(candidateBody.candidate).toMatchObject({
+      agent_id: "demo",
+      distribution: { kind: "npx" },
+    });
+
+    const operations = await app.request("/api/agents/operations");
+    expect(operations.status).toBe(200);
+    expect(await operations.json()).toEqual({ operations: [] });
+
+    const removals = await app.request("/api/agents/removal-operations");
+    expect(removals.status).toBe(200);
+    expect(await removals.json()).toEqual({ operations: [] });
   });
 });
 
 describe("installation operation API durability", () => {
   it("retries a failed durable operation using the cached registry version", async () => {
-    const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-retry-")); const refresh = beginRegistryRefresh(machineDir);
-    completeRegistryRefresh(refresh.id, { version: "1.0.0", source: "fixture", fetched_at: "fixture", agents: [{ id: "retry-agent", name: "Retry", version: "1.0.0", description: "fixture", license: "MIT", authors: [], distributions: [{ kind: "npx", package: "retry-agent@1.0.0" }] }] }, machineDir);
-    const operation = createInstallation({ id: "retry-agent", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "retry-agent@1.0.0", launch: { command: "npx", args: ["retry-agent@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "retry-op", machineDir);
-    finishInstallation(operation.id, "failed", "failed", machineDir, { code: "installation_failed", diagnostic: { message: "failed", action: "Retry" } });
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-retry-"));
+    const refresh = beginRegistryRefresh(machineDir);
+    completeRegistryRefresh(
+      refresh.id,
+      {
+        version: "1.0.0",
+        source: "fixture",
+        fetched_at: "fixture",
+        agents: [
+          {
+            id: "retry-agent",
+            name: "Retry",
+            version: "1.0.0",
+            description: "fixture",
+            license: "MIT",
+            authors: [],
+            distributions: [{ kind: "npx", package: "retry-agent@1.0.0" }],
+          },
+        ],
+      },
+      machineDir,
+    );
+    const operation = createInstallation(
+      {
+        id: "retry-agent",
+        version: "1.0.0",
+        source: "registry",
+        license: "MIT",
+        distribution: "npx",
+        package_specifier: "retry-agent@1.0.0",
+        launch: { command: "npx", args: ["retry-agent@1.0.0"] },
+        registry_snapshot_fetched_at: "fixture",
+        integrity_status: "not_applicable",
+        status: "installing",
+        readiness_status: "unknown",
+        readiness_error: null,
+        protocol_version: null,
+        capabilities: null,
+        auth_methods: [],
+        raw_initialize: null,
+        probed_at: null,
+      },
+      "retry-op",
+      machineDir,
+    );
+    finishInstallation(operation.id, "failed", "failed", machineDir, {
+      code: "installation_failed",
+      diagnostic: { message: "failed", action: "Retry" },
+    });
     const app = buildApp("0.0.1", { machineDir });
-    const response = await app.request(`/api/agents/operations/${operation.id}/retry`, { method: "POST", body: "{}", headers: { "content-type": "application/json" } });
+    const response = await app.request(`/api/agents/operations/${operation.id}/retry`, {
+      method: "POST",
+      body: "{}",
+      headers: { "content-type": "application/json" },
+    });
     expect(response.status).toBe(202);
-    expect((await response.json() as { operation: { agent_id: string; status: string } }).operation).toMatchObject({ agent_id: "retry-agent", status: "installing" });
+    expect(
+      ((await response.json()) as { operation: { agent_id: string; status: string } }).operation,
+    ).toMatchObject({ agent_id: "retry-agent", status: "installing" });
   });
 
   it("cancels an installation through the durable API", async () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-cancel-api-"));
-    const operation = createInstallation({ id: "cancel-agent", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "cancel-agent@1.0.0", launch: { command: "npx", args: ["cancel-agent@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "cancel-op", machineDir);
-    const app = buildApp("0.0.1", { machineDir }); const response = await app.request(`/api/agents/operations/${operation.id}/cancel`, { method: "POST" });
-    expect(response.status).toBe(200); expect((await response.json() as { operation: { status: string; error_code: string } }).operation).toMatchObject({ status: "interrupted", error_code: "installation_cancelled" });
+    const operation = createInstallation(
+      {
+        id: "cancel-agent",
+        version: "1.0.0",
+        source: "registry",
+        license: "MIT",
+        distribution: "npx",
+        package_specifier: "cancel-agent@1.0.0",
+        launch: { command: "npx", args: ["cancel-agent@1.0.0"] },
+        registry_snapshot_fetched_at: "fixture",
+        integrity_status: "not_applicable",
+        status: "installing",
+        readiness_status: "unknown",
+        readiness_error: null,
+        protocol_version: null,
+        capabilities: null,
+        auth_methods: [],
+        raw_initialize: null,
+        probed_at: null,
+      },
+      "cancel-op",
+      machineDir,
+    );
+    const app = buildApp("0.0.1", { machineDir });
+    const response = await app.request(`/api/agents/operations/${operation.id}/cancel`, {
+      method: "POST",
+    });
+    expect(response.status).toBe(200);
+    expect(
+      ((await response.json()) as { operation: { status: string; error_code: string } }).operation,
+    ).toMatchObject({ status: "interrupted", error_code: "installation_cancelled" });
   });
   it("hydrates progress and terminal diagnostics from durable storage", async () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-api-"));
-    const operation = createInstallation({ id: "demo", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "demo@1.0.0", launch: { command: "npx", args: ["demo@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "op-api", machineDir);
+    const operation = createInstallation(
+      {
+        id: "demo",
+        version: "1.0.0",
+        source: "registry",
+        license: "MIT",
+        distribution: "npx",
+        package_specifier: "demo@1.0.0",
+        launch: { command: "npx", args: ["demo@1.0.0"] },
+        registry_snapshot_fetched_at: "fixture",
+        integrity_status: "not_applicable",
+        status: "installing",
+        readiness_status: "unknown",
+        readiness_error: null,
+        protocol_version: null,
+        capabilities: null,
+        auth_methods: [],
+        raw_initialize: null,
+        probed_at: null,
+      },
+      "op-api",
+      machineDir,
+    );
     updateInstallationPhase(operation.id, "downloading", {}, machineDir);
     const app = buildApp("0.0.1", { machineDir, bus: new EventBus() });
     expect((await app.request(`/api/agents/operations/${operation.id}`)).status).toBe(200);
-    expect((await (await app.request(`/api/agents/operations/${operation.id}`)).json() as { operation: { phase: string } }).operation.phase).toBe("downloading");
-    finishInstallation(operation.id, "failed", "download timed out", machineDir, { code: "download_timeout", diagnostic: { message: "download timed out", action: "Retry the installation." } });
-    const hydrated = (await (await app.request(`/api/agents/operations/${operation.id}`)).json() as { operation: ReturnType<typeof getInstallationOperation> }).operation!;
-    expect(hydrated).toMatchObject({ phase: "failed", status: "failed", error_code: "download_timeout", diagnostic: { action: "Retry the installation." } });
+    expect(
+      (
+        (await (await app.request(`/api/agents/operations/${operation.id}`)).json()) as {
+          operation: { phase: string };
+        }
+      ).operation.phase,
+    ).toBe("downloading");
+    finishInstallation(operation.id, "failed", "download timed out", machineDir, {
+      code: "download_timeout",
+      diagnostic: { message: "download timed out", action: "Retry the installation." },
+    });
+    const hydrated = (
+      (await (await app.request(`/api/agents/operations/${operation.id}`)).json()) as {
+        operation: ReturnType<typeof getInstallationOperation>;
+      }
+    ).operation!;
+    expect(hydrated).toMatchObject({
+      phase: "failed",
+      status: "failed",
+      error_code: "download_timeout",
+      diagnostic: { action: "Retry the installation." },
+    });
   });
 
   it("recovers an interrupted operation from durable storage across a new app instance", async () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-restart-"));
-    const operation = createInstallation({ id: "restart-agent", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "restart-agent@1.0.0", launch: { command: "npx", args: ["restart-agent@1.0.0"] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "restart-op", machineDir, { temporary_root: join(machineDir, "agents", ".tmp-restart"), published_root: join(machineDir, "agents", "restart-agent", "1.0.0", "published") });
+    const operation = createInstallation(
+      {
+        id: "restart-agent",
+        version: "1.0.0",
+        source: "registry",
+        license: "MIT",
+        distribution: "npx",
+        package_specifier: "restart-agent@1.0.0",
+        launch: { command: "npx", args: ["restart-agent@1.0.0"] },
+        registry_snapshot_fetched_at: "fixture",
+        integrity_status: "not_applicable",
+        status: "installing",
+        readiness_status: "unknown",
+        readiness_error: null,
+        protocol_version: null,
+        capabilities: null,
+        auth_methods: [],
+        raw_initialize: null,
+        probed_at: null,
+      },
+      "restart-op",
+      machineDir,
+      {
+        temporary_root: join(machineDir, "agents", ".tmp-restart"),
+        published_root: join(machineDir, "agents", "restart-agent", "1.0.0", "published"),
+      },
+    );
     const first = buildApp("0.0.1", { machineDir });
     expect((await first.request(`/api/agents/operations/${operation.id}`)).status).toBe(200);
-    const { reconcileInstallationOperations } = await import("../agents/store.js"); reconcileInstallationOperations(machineDir);
+    const { reconcileInstallationOperations } = await import("../agents/store.js");
+    reconcileInstallationOperations(machineDir);
     const afterRestart = buildApp("0.0.1", { machineDir });
-    expect((await (await afterRestart.request(`/api/agents/operations/${operation.id}`)).json() as { operation: { status: string; phase: string } }).operation).toMatchObject({ status: "interrupted", phase: "interrupted" });
+    expect(
+      (
+        (await (await afterRestart.request(`/api/agents/operations/${operation.id}`)).json()) as {
+          operation: { status: string; phase: string };
+        }
+      ).operation,
+    ).toMatchObject({ status: "interrupted", phase: "interrupted" });
   });
 });
 
 describe("authenticated HTTP server", () => {
   it("protects API routes and supports login/logout", async () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-auth-"));
-    const handle = await startHttpServer({ root, host: "127.0.0.1", port: 0, version: "0.0.1", uiPassword: "secret" });
+    const handle = await startHttpServer({
+      root,
+      host: "127.0.0.1",
+      port: 0,
+      version: "0.0.1",
+      uiPassword: "secret",
+    });
     try {
       const base = `http://127.0.0.1:${handle.port}`;
       expect((await fetch(`${base}/api/tasks`)).status).toBe(401);
@@ -97,13 +333,19 @@ describe("authenticated HTTP server", () => {
       expect(login.status).toBe(200);
       const cookie = login.headers.get("set-cookie");
       expect(cookie).toContain("HttpOnly");
-      expect((await fetch(`${base}/api/tasks`, { headers: { Cookie: cookie?.split(";")[0] ?? "" } })).status).toBe(200);
+      expect(
+        (await fetch(`${base}/api/tasks`, { headers: { Cookie: cookie?.split(";")[0] ?? "" } }))
+          .status,
+      ).toBe(200);
       const logout = await fetch(`${base}/api/auth/logout`, {
         method: "POST",
         headers: { Cookie: cookie?.split(";")[0] ?? "" },
       });
       expect(logout.status).toBe(200);
-      expect((await fetch(`${base}/api/tasks`, { headers: { Cookie: cookie?.split(";")[0] ?? "" } })).status).toBe(401);
+      expect(
+        (await fetch(`${base}/api/tasks`, { headers: { Cookie: cookie?.split(";")[0] ?? "" } }))
+          .status,
+      ).toBe(401);
     } finally {
       await handle.close();
     }
@@ -111,7 +353,14 @@ describe("authenticated HTTP server", () => {
 
   it("rate-limits failed passwords per direct client and honors secure proxy cookies", async () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-auth-rate-"));
-    const handle = await startHttpServer({ root, host: "127.0.0.1", port: 0, version: "0.0.1", uiPassword: "secret", trustedProxy: true });
+    const handle = await startHttpServer({
+      root,
+      host: "127.0.0.1",
+      port: 0,
+      version: "0.0.1",
+      uiPassword: "secret",
+      trustedProxy: true,
+    });
     try {
       const base = `http://127.0.0.1:${handle.port}`;
       for (let i = 0; i < 5; i += 1) {
@@ -130,7 +379,11 @@ describe("authenticated HTTP server", () => {
 
       const login = await fetch(`${base}/api/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Forwarded-For": "192.0.2.11", "X-Forwarded-Proto": "https" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": "192.0.2.11",
+          "X-Forwarded-Proto": "https",
+        },
         body: JSON.stringify({ password: "secret" }),
       });
       expect(login.status).toBe(200);
@@ -148,7 +401,9 @@ describe("authenticated HTTP server", () => {
 
   it("rejects non-loopback startup without a password", async () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-auth-bind-"));
-    await expect(startHttpServer({ root, host: "0.0.0.0", port: 0, version: "0.0.1" })).rejects.toThrow("LAN access requires a UI password");
+    await expect(
+      startHttpServer({ root, host: "0.0.0.0", port: 0, version: "0.0.1" }),
+    ).rejects.toThrow("LAN access requires a UI password");
   });
 });
 
@@ -270,7 +525,10 @@ describe("marshal start end-to-end", () => {
   it("serves /api/health on the discovered port and removes daemon.port on SIGTERM", async () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-cli-http-"));
     execFileSync("git", ["init", "-b", "main"], { cwd: root, stdio: "ignore" });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+      stdio: "ignore",
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root, stdio: "ignore" });
     writeFileSync(join(root, "README.md"), "# test\n");
     execFileSync("git", ["add", "README.md"], { cwd: root, stdio: "ignore" });
