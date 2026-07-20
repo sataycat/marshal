@@ -26,22 +26,20 @@ export function Board() {
 
   return (
     <div className="@container flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-3 border-b border-border bg-panel px-4 py-3 md:px-5">
-        <h1 className="text-sm font-semibold tracking-wide uppercase text-muted">
-          Board
-        </h1>
+      <div className="flex items-center gap-3 border-b border-border bg-panel px-4 py-3 md:px-6">
+        <div><p className="font-mono text-[0.6rem] font-semibold uppercase tracking-[0.16em] text-primary">Software factory</p><h1 className="mt-0.5 text-sm font-semibold tracking-tight">Execution board</h1></div>
         <div className="flex-1" />
         <Button onClick={() => setShowNewTask(true)} size="sm">
           <Plus aria-hidden />
           New Task
         </Button>
       </div>
-      <div className="grid auto-rows-min gap-3 p-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid auto-rows-min gap-px overflow-auto bg-border p-px sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
         {COLUMNS.map((col) => {
           const items = tasks.filter((t) => t.status === col.status);
           return (
             <section
-              className="flex min-h-32 flex-col gap-2 rounded-lg border border-border bg-panel p-2.5"
+              className="flex min-h-40 flex-col gap-2 bg-bg p-3"
               key={col.status}
             >
               <h2 className="mb-1 flex items-center justify-between text-xs font-semibold tracking-wider text-muted uppercase">

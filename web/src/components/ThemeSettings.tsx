@@ -12,8 +12,8 @@ import {
 
 const options: Array<{ mode: ThemeMode; label: string; description: string; icon: typeof Monitor }> = [
   { mode: "system", label: "System", description: "Follow your operating system preference", icon: Monitor },
-  { mode: "dracula", label: "Dracula", description: "Deep purple surfaces with vivid accents", icon: Moon },
-  { mode: "alucard", label: "Alucard", description: "The warm, light counterpart to Dracula", icon: Sun },
+  { mode: "dracula", label: "Dark", description: "Low-glare workspace for focused sessions", icon: Moon },
+  { mode: "alucard", label: "Light", description: "High-contrast daylight workspace", icon: Sun },
 ];
 
 export function ThemeSettings(): JSX.Element {

@@ -23,7 +23,7 @@ function getSystemTheme(): ResolvedTheme {
 
 function getInitialMode(): ThemeMode {
   const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-  return isThemeMode(stored) ? stored : "system";
+  return isThemeMode(stored) ? stored : "dracula";
 }
 
 function applyTheme(theme: ResolvedTheme): void {
