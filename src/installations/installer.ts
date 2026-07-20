@@ -57,6 +57,22 @@ export interface InstallCandidate {
   installation_risk: "low" | "medium" | "high";
 }
 
+function normalizePlatform(platform: string): string {
+  const [rawPlatform, rawArch] = platform.split("-");
+  const normalizedPlatform = rawPlatform === "windows" ? "win32" : rawPlatform;
+  const normalizedArch =
+    rawArch === "aarch64" ? "arm64" : rawArch === "x86_64" ? "x64" : rawArch;
+  return `${normalizedPlatform}-${normalizedArch}`;
+}
+
+function supportsPlatform(distribution: RegistryDistribution, platform: string): boolean {
+  return (
+    distribution.kind !== "binary" ||
+    distribution.platforms?.some((candidate) => normalizePlatform(candidate) === normalizePlatform(platform)) ===
+      true
+  );
+}
+
 export function selectDistribution(
   agent: RegistryAgent,
   platform = `${process.platform}-${process.arch}`,
@@ -64,9 +80,7 @@ export function selectDistribution(
 ): RegistryDistribution {
   if (preferred) {
     const candidates = agent.distributions.filter(
-      (entry) =>
-        entry.kind === preferred &&
-        (entry.kind !== "binary" || entry.platforms?.includes(platform)),
+      (entry) => entry.kind === preferred && supportsPlatform(entry, platform),
     );
     const selected =
       preferred === "binary"
@@ -80,7 +94,7 @@ export function selectDistribution(
   // not let registry ordering make an unverified binary win over a verified
   // one; checksumless binaries remain an explicit opt-in.
   const compatibleBinaries = agent.distributions.filter(
-    (entry) => entry.kind === "binary" && entry.platforms?.includes(platform),
+    (entry) => entry.kind === "binary" && supportsPlatform(entry, platform),
   );
   const binary =
     compatibleBinaries.find((entry) => Boolean(entry.checksum)) ?? compatibleBinaries[0];

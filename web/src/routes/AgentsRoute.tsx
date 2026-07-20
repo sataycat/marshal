@@ -25,15 +25,13 @@ import {
   useUpdateRegistryAgentMutation,
 } from "../api/queries";
 import { fetchInstallCandidate, type InstallCandidate } from "../api/client";
-import type { InstalledAgent, RegistryAgent, RegistryDistribution } from "../types";
-
-type DistributionKind = "npx" | "uvx" | "binary";
+import type { InstalledAgent, RegistryAgent } from "../types";
+import { useToastStore } from "../state/toastStore";
 
 const featuredAgentNames = ["claude", "codex", "opencode", "gemini", "amp", "zed"];
 
 interface PendingTrust {
   agent: RegistryAgent;
-  distribution: DistributionKind;
   candidate: InstallCandidate;
   mode: "install" | "update";
 }
@@ -55,6 +53,7 @@ export function AgentsRoute(): JSX.Element {
   const authenticate = useAuthenticateInstalledAgentMutation();
   const client = useQueryClient();
   const { confirm } = useConfirmContext();
+  const pushError = useToastStore((state) => state.pushError);
   const initialRefreshStarted = useRef(false);
 
   const runRefresh = async (): Promise<void> => {
@@ -83,15 +82,17 @@ export function AgentsRoute(): JSX.Element {
   const isInstalled = (agent: RegistryAgent): boolean =>
     inventory.some((entry) => entry.id === agent.id && entry.version === agent.version && entry.status === "installed");
 
-  const requestInstall = async (agent: RegistryAgent, distribution: DistributionKind, mode: "install" | "update"): Promise<void> => {
+  const requestInstall = async (agent: RegistryAgent, mode: "install" | "update"): Promise<void> => {
     const key = `${agent.id}@${agent.version}:${mode}`;
     setPreparingId(key);
     try {
       const candidate = await client.fetchQuery({
-        queryKey: [...queryKeys.registry, "candidate", agent.id, agent.version, distribution],
-        queryFn: () => fetchInstallCandidate(agent.id, agent.version, distribution),
+        queryKey: [...queryKeys.registry, "candidate", agent.id, agent.version, "auto"],
+        queryFn: () => fetchInstallCandidate(agent.id, agent.version),
       });
-      setPendingTrust({ agent, distribution, candidate, mode });
+      setPendingTrust({ agent, candidate, mode });
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : "Unable to prepare this installation.");
     } finally {
       setPreparingId(null);
     }
@@ -99,9 +100,9 @@ export function AgentsRoute(): JSX.Element {
 
   const confirmInstall = async (): Promise<void> => {
     if (!pendingTrust) return;
-    const { agent, distribution, mode } = pendingTrust;
+    const { agent, candidate, mode } = pendingTrust;
     const mutation = mode === "update" ? update : install;
-    const operation = await mutation.mutateAsync({ agentId: agent.id, version: agent.version, distribution });
+    const operation = await mutation.mutateAsync({ agentId: agent.id, version: agent.version, distribution: candidate.distribution.kind });
     setOperationIds((current) => ({ ...current, [`${agent.id}@${agent.version}`]: operation.id }));
     setPendingTrust(null);
     await client.invalidateQueries({ queryKey: queryKeys.installedAgents });
@@ -167,7 +168,7 @@ export function AgentsRoute(): JSX.Element {
                 onProbe={() => void probeAgent(entry)}
                 onRemove={() => void removeAgent(entry)}
                 onUpdate={registryMatchFor(entry) && registryMatchFor(entry)!.version !== entry.version
-                  ? (distribution) => void requestInstall(registryMatchFor(entry)!, distribution, "update")
+                  ? () => void requestInstall(registryMatchFor(entry)!, "update")
                   : null}
                 onDefault={(installationId) => void setDefault.mutateAsync({ agentId: entry.id, installationId })}
                 onAuthenticate={(methodId) => void authenticate.mutateAsync({ agentId: entry.id, version: entry.version, methodId })}
@@ -202,7 +203,7 @@ export function AgentsRoute(): JSX.Element {
                 agent={agent}
                 installed={isInstalled(agent)}
                 operationId={operationIds[`${agent.id}@${agent.version}`] ?? null}
-                onInstall={(distribution) => void requestInstall(agent, distribution, "install")}
+                onInstall={() => void requestInstall(agent, "install")}
                 busy={busy}
                 preparing={preparingId === `${agent.id}@${agent.version}:install`}
               />
@@ -285,10 +286,6 @@ function popularityScore(agent: RegistryAgent): number {
   return index === -1 ? 0 : featuredAgentNames.length - index;
 }
 
-function preferredDistribution(agent: RegistryAgent): RegistryDistribution | undefined {
-  return agent.distributions.find((distribution) => distribution.kind === "binary") ?? agent.distributions.find((distribution) => distribution.kind === "npx") ?? agent.distributions.find((distribution) => distribution.kind === "uvx");
-}
-
 function AgentIcon({ agent, className }: { agent: RegistryAgent; className?: string }): JSX.Element {
   if (agent.icon) return <img src={agent.icon} alt="" className={className} />;
   return (
@@ -303,7 +300,7 @@ function InstalledCard({ entry, registryAgent, onProbe, onRemove, onUpdate, onDe
   registryAgent: RegistryAgent | undefined;
   onProbe: () => void;
   onRemove: () => void;
-  onUpdate: ((distribution: DistributionKind) => void) | null;
+  onUpdate: (() => void) | null;
   onDefault: (installationId: string) => void;
   onAuthenticate: (methodId: string) => void;
   busy: boolean;
@@ -313,7 +310,6 @@ function InstalledCard({ entry, registryAgent, onProbe, onRemove, onUpdate, onDe
   const cancel = useCancelAgentAuthenticationMutation();
   const auth = authentication.data?.authentication;
   const name = registryAgent?.name ?? entry.id;
-  const updateDistribution = registryAgent ? preferredDistribution(registryAgent)?.kind : undefined;
 
   return (
     <article className="flex flex-col rounded-xl border border-border bg-panel p-4">
@@ -354,7 +350,7 @@ function InstalledCard({ entry, registryAgent, onProbe, onRemove, onUpdate, onDe
         {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "agent").map((method) => (
           <Button key={method.id} size="sm" onClick={() => onAuthenticate(method.id)} disabled={busy}>Authenticate</Button>
         ))}
-        {onUpdate && updateDistribution && <Button variant="outline" size="sm" onClick={() => onUpdate(updateDistribution)} disabled={busy || preparing}><Download aria-hidden />Update available</Button>}
+        {onUpdate && <Button variant="outline" size="sm" onClick={onUpdate} disabled={busy || preparing}><Download aria-hidden />Update available</Button>}
         {entry.status === "installed" && !entry.is_default && <Button variant="outline" size="sm" onClick={() => onDefault(entry.installation_id)} disabled={busy}>Use by default</Button>}
         <Button variant="outline" size="sm" onClick={onProbe} disabled={busy}>Probe</Button>
         <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground hover:text-error" onClick={onRemove} disabled={busy}>Remove</Button>
@@ -367,12 +363,11 @@ function CatalogCard({ agent, installed, operationId, onInstall, busy, preparing
   agent: RegistryAgent;
   installed: boolean;
   operationId: string | null;
-  onInstall: (distribution: DistributionKind) => void;
+  onInstall: () => void;
   busy: boolean;
   preparing: boolean;
 }): JSX.Element {
   const operation = useInstallationQuery(operationId);
-  const preferred = preferredDistribution(agent);
   const installing = operation.data && !["completed", "failed", "interrupted"].includes(operation.data.phase);
 
   return (
@@ -398,7 +393,7 @@ function CatalogCard({ agent, installed, operationId, onInstall, busy, preparing
         {installed ? (
           <p className="flex h-8 items-center gap-1.5 text-sm font-medium text-success"><Check className="size-4" />Installed</p>
         ) : (
-          <Button className="w-full" onClick={() => preferred && onInstall(preferred.kind)} disabled={busy || !preferred || Boolean(installing) || preparing}>
+          <Button className="w-full" onClick={onInstall} disabled={busy || agent.distributions.length === 0 || Boolean(installing) || preparing}>
             {installing || preparing ? <LoaderCircleSpin /> : <Download aria-hidden />}
             {installing ? "Installing…" : preparing ? "Preparing…" : "Install"}
           </Button>

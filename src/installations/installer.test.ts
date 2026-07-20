@@ -45,6 +45,7 @@ describe("uvx installations", () => {
     const agent: RegistryAgent = {
       id: "precedence", name: "Precedence", version: "1.2.3", description: "fixture", license: "MIT", authors: [],
       distributions: [
+        { kind: "binary", platforms: ["darwin-aarch64"], archive_url: "https://example.invalid/darwin.tgz", archive_format: "tgz", checksum: "b".repeat(64), executable: "agent" },
         { kind: "binary", platforms: ["linux-x64"], archive_url: "https://example.invalid/unverified.tgz", archive_format: "tgz", executable: "agent" },
         { kind: "binary", platforms: ["linux-x64"], archive_url: "https://example.invalid/verified.tgz", archive_format: "tgz", checksum: "a".repeat(64), executable: "agent" },
         { kind: "npx", package: "precedence@1.2.3" },
@@ -52,6 +53,7 @@ describe("uvx installations", () => {
       ],
     };
     expect(selectDistribution(agent, "linux-x64").archive_url).toContain("verified");
+    expect(selectDistribution(agent, "darwin-arm64").archive_url).toContain("darwin");
     expect(selectDistribution(agent, "linux-arm64").kind).toBe("npx");
     expect(selectDistribution(agent, "linux-x64", "npx").kind).toBe("npx");
     expect(selectDistribution(agent, "linux-x64", "uvx").kind).toBe("uvx");
