@@ -440,10 +440,10 @@ export async function startInstallation(
       installationId,
       machineDir,
     );
-     if (duplicate && !options.retry) {
-       resumeActivation(duplicate, machineDir, bus);
-       return duplicate;
-     }
+    if (duplicate && !options.retry && getInstalledAgent(agent.id, agent.version, machineDir, installationId)) {
+      resumeActivation(duplicate, machineDir, bus);
+      return duplicate;
+    }
     const operationId = randomUUID();
     const root = resolve(machineDir, "agents", agent.id, agent.version, randomUUID());
     mkdirSync(resolve(machineDir, "agents"), { recursive: true });
@@ -520,10 +520,10 @@ export async function startInstallation(
     installationId,
     machineDir,
   );
-   if (duplicate && !options.retry) {
-     resumeActivation(duplicate, machineDir, bus);
-     return duplicate;
-   }
+   if (duplicate && !options.retry && getInstalledAgent(agent.id, agent.version, machineDir, installationId)) {
+      resumeActivation(duplicate, machineDir, bus);
+      return duplicate;
+    }
   const running = getInstallationByIdentity(
     agent.id,
     agent.version,

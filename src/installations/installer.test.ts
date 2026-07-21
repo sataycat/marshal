@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { cancelInstallationOperation, exactNpxPackage, exactUvxPackage, installBinary, installCandidate, selectDistribution, startInstallation } from "./installer.js";
 import { createInstallation, getInstalledAgent, getInstallationOperation, reconcileInstallationOperations } from "../agents/store.js";
+import { openMachineDb } from "../storage/machine.js";
 import type { RegistryAgent } from "../registry/types.js";
 
 const uvxAgent: RegistryAgent = {
@@ -123,6 +124,23 @@ describe("uvx installations", () => {
     expect(operation.published_root).not.toBe(operation.temporary_root);
     expect(existsSync(`${operation.published_root}/manifest.json`)).toBe(true);
     expect(JSON.parse(readFileSync(`${operation.published_root}/manifest.json`, "utf8")).installation_id).toContain("uv-agent@1.2.3:uvx:");
+  });
+
+  it("reinstalls when a completed operation has lost its installed-agent row", async () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-stale-installation-`);
+    const first = await startInstallation(uvxAgent, machineDir, async (_specifier, cwd) => {
+      await import("node:fs").then(({ writeFileSync }) => writeFileSync(`${cwd}/payload`, "first"));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(getInstalledAgent("uv-agent", "1.2.3", machineDir)).toBeDefined();
+    openMachineDb(machineDir).prepare("DELETE FROM installed_agents WHERE id = ? AND version = ? AND installation_id = ?").run("uv-agent", "1.2.3", first.installation_id);
+
+    const second = await startInstallation(uvxAgent, machineDir, async (_specifier, cwd) => {
+      await import("node:fs").then(({ writeFileSync }) => writeFileSync(`${cwd}/payload`, "second"));
+    });
+    expect(second.id).not.toBe(first.id);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(getInstalledAgent("uv-agent", "1.2.3", machineDir)?.status).toBe("installed");
   });
 
   it("marks incomplete operations interrupted and cleans temporary roots on recovery", () => {
