@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { registerRepository, removeRepository, selectRepository } from "../src/repositories/store.js";
 
 const binPath = resolve(process.cwd(), "bin/marshal");
 
@@ -18,6 +19,15 @@ function run(args: string[], cwd?: string): { stdout: string; stderr: string } {
 
 describe("CLI smoke tests", () => {
   let globalConfigPath: string;
+  let originalHome: string | undefined;
+  let selectedRepositoryId: string | undefined;
+
+  function selectTestRepository(root: string): void {
+    const machineDir = join(process.env.HOME!, ".marshal");
+    const repository = registerRepository(root, machineDir);
+    selectRepository(repository.id, machineDir);
+    selectedRepositoryId = repository.id;
+  }
 
   beforeEach(() => {
     // `marshal init` is non-interactive (ADR-024 Decision 3): it checks
@@ -25,6 +35,8 @@ describe("CLI smoke tests", () => {
     // initializes repo state. Tests exercise the already-configured fast
     // path (ADR-020 Decision 1): a complete ~/.marshal/config.json
     // collapses phases 1–5.
+    originalHome = process.env.HOME;
+    process.env.HOME = mkdtempSync(join(tmpdir(), "marshal-home-"));
     const globalDir = mkdtempSync(join(tmpdir(), "marshal-global-"));
     globalConfigPath = join(globalDir, "config.json");
     writeFileSync(
@@ -40,7 +52,13 @@ describe("CLI smoke tests", () => {
   });
 
   afterEach(() => {
+    if (selectedRepositoryId) {
+      removeRepository(selectedRepositoryId, join(process.env.HOME!, ".marshal"));
+      selectedRepositoryId = undefined;
+    }
     delete process.env.MARSHAL_GLOBAL_CONFIG;
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
   });
 
   it("prints version with --version", () => {
@@ -60,6 +78,7 @@ describe("CLI smoke tests", () => {
   it("lists no tasks with task list", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-"));
     run(["init"], root);
+    selectTestRepository(root);
     const { stdout } = run(["task", "list"], root);
     expect(stdout.trim()).toBe("No tasks.");
   });
@@ -82,6 +101,7 @@ describe("CLI smoke tests", () => {
     execFileSync("git", ["commit", "-m", "init"], { cwd: root, stdio: "ignore" });
 
     run(["init"], root);
+    selectTestRepository(root);
 
     const worktreeConfigPath = join(worktreeRoot, "global-config.json");
     writeFileSync(worktreeConfigPath, JSON.stringify({ worktree: { root: worktreeRoot } }));
@@ -120,6 +140,7 @@ describe("CLI smoke tests", () => {
     });
 
     run(["init"], root);
+    selectTestRepository(root);
 
     const worktreeConfigPath = join(worktreeRoot, "global-config.json");
     writeFileSync(worktreeConfigPath, JSON.stringify({ worktree: { root: worktreeRoot } }));
@@ -178,6 +199,7 @@ describe("CLI smoke tests", () => {
   it("supports escape-hatch transitions via `task transition`", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-"));
     run(["init"], root);
+    selectTestRepository(root);
     run(["task", "create", "--slug", "stuck", "--title", "Stuck"], root);
 
     run(["task", "transition", "stuck", "ready"], root);
@@ -194,6 +216,7 @@ describe("CLI smoke tests", () => {
   it("supports validating -> backlog escape hatch", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-"));
     run(["init"], root);
+    selectTestRepository(root);
     run(["task", "create", "--slug", "vstuck", "--title", "V Stuck"], root);
     run(["task", "transition", "vstuck", "ready"], root);
     run(["task", "transition", "vstuck", "building"], root);
@@ -205,6 +228,7 @@ describe("CLI smoke tests", () => {
   it("shows the last run's error context in `task show` when stuck in building", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-"));
     run(["init"], root);
+    selectTestRepository(root);
     run(["task", "create", "--slug", "bricked", "--title", "Bricked"], root);
     run(["task", "transition", "bricked", "ready"], root);
     run(["task", "transition", "bricked", "building"], root);

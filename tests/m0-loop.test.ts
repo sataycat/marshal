@@ -16,6 +16,7 @@ import { WorktreeManager } from "../src/worktree/manager.js";
 import { getTask, transitionTask } from "../src/tasks/store.js";
 import { RunLog } from "../src/daemon/run-log.js";
 import { runOnce } from "../src/daemon/orchestrator.js";
+import { registerRepository, removeRepository, selectRepository } from "../src/repositories/store.js";
 
 const binPath = resolve(process.cwd(), "bin/marshal");
 
@@ -79,12 +80,20 @@ describe("M0 loop integration (CLI + orchestrator)", () => {
   let worktreeRoot: string;
   let globalConfigPath: string;
   let manager: WorktreeManager;
+  let originalHome: string | undefined;
+  let selectedRepositoryId: string;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-m0-"));
     worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-m0-wt-"));
     initGitRepo(repoRoot);
     mkdirSync(join(repoRoot, ".marshal"), { recursive: true });
+
+    originalHome = process.env.HOME;
+    process.env.HOME = mkdtempSync(join(tmpdir(), "marshal-m0-home-"));
+    const repository = registerRepository(repoRoot, join(process.env.HOME, ".marshal"));
+    selectRepository(repository.id, join(process.env.HOME, ".marshal"));
+    selectedRepositoryId = repository.id;
 
     globalConfigPath = join(worktreeRoot, "global-config.json");
     writeFileSync(
@@ -103,7 +112,10 @@ describe("M0 loop integration (CLI + orchestrator)", () => {
   });
 
   afterEach(() => {
+    removeRepository(selectedRepositoryId, join(process.env.HOME!, ".marshal"));
     delete process.env.MARSHAL_GLOBAL_CONFIG;
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
   });
 
   it("drives the full M0 loop: create -> ready -> build -> validate -> review", async () => {
