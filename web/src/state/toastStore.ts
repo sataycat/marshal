@@ -10,7 +10,11 @@ interface ToastStore {
 
 export const useToastStore = create<ToastStore>((set) => ({
   toasts: [],
-  pushError: (message) => set((state) => ({ toasts: toastReducer(state.toasts, addErrorToast(message)) })),
+  pushError: (message) => set((state) => ({
+    toasts: state.toasts.some((toast) => toast.kind === "error" && toast.message === message)
+      ? state.toasts
+      : toastReducer(state.toasts, addErrorToast(message)),
+  })),
   pushInfo: (message) => set((state) => ({ toasts: toastReducer(state.toasts, addInfoToast(message)) })),
   dismiss: (id) => set((state) => ({ toasts: toastReducer(state.toasts, { type: "dismiss", id }) })),
 }));

@@ -60,6 +60,18 @@ describe("uvx installations", () => {
     expect(installCandidate(agent, "linux-x64", "binary")).toMatchObject({ checksum: "a".repeat(64), integrity_policy: "verified_if_declared" });
   });
 
+  it("persists binary installations without a package specifier", async () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-binary-start-`);
+    const agent: RegistryAgent = {
+      id: "binary-agent", name: "Binary Agent", version: "1.0.0", description: "fixture", license: "MIT", authors: [],
+      distributions: [{ kind: "binary", platforms: ["linux-x64"], archive_url: "https://fixture/binary.tgz", archive_format: "tgz", executable: "agent", checksum: "a".repeat(64) }],
+    };
+    const operation = await startInstallation(agent, machineDir, undefined, undefined, { fetch: async () => new Response(new Uint8Array()) });
+    expect(operation.package_specifier).toBeNull();
+    expect(getInstallationOperation(operation.id, machineDir)).toMatchObject({ package_specifier: null });
+    expect(getInstalledAgent(agent.id, agent.version, machineDir)?.package_specifier).toBeNull();
+  });
+
   it("accepts only exact package launch pins for both package distributions", () => {
     expect(exactNpxPackage("precedence@1.2.3")).toBe("precedence@1.2.3");
     expect(exactUvxPackage("precedence==1.2.3")).toBe("precedence==1.2.3");

@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { friendlyErrorMessage } from "../api/errors";
 
 interface Props {
   children: ReactNode;
@@ -31,7 +32,7 @@ export class AppErrorBoundary extends Component<Props, State> {
             Reload the page to try again. If the problem persists, send this detail to the operator:
           </p>
           <pre className="mt-4 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
-            {this.state.error.message}
+             {friendlyErrorMessage(this.state.error)}
           </pre>
           <Button type="button" className="mt-4" onClick={() => window.location.reload()}>
             Reload page
