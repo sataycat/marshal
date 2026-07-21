@@ -51,7 +51,7 @@ export function validateWorkflowProfile(repositoryId: string, input: WorkflowPro
     seen.add(item.role);
     const agent = getInstalledAgent(item.agent_id, item.agent_version, machineDir);
     if (!agent || agent.status !== "installed") { issues.push({ field: `assignments.${item.role}`, code: "agent_not_installed", message: `${item.agent_id}@${item.agent_version} is not installed` }); continue; }
-    if (agent.readiness_status !== "ready") { issues.push({ field: `assignments.${item.role}`, code: "agent_not_ready", message: `${item.agent_id}@${item.agent_version} is not ready; probe readiness before assigning it` }); continue; }
+    if (agent.readiness_status !== "ready") { issues.push({ field: `assignments.${item.role}`, code: "agent_not_ready", message: `${item.agent_id}@${item.agent_version} is not ready; complete its readiness check before assigning it` }); continue; }
     const capabilities = agent.capabilities as AgentCapabilities | null;
     if (!capabilities?.prompt.text) issues.push({ field: `assignments.${item.role}`, code: "text_unsupported", message: `${item.agent_id}@${item.agent_version} does not advertise text prompts` });
     const advertised = (agent.raw_initialize as Record<string, unknown> | null)?.configOptions as Record<string, unknown> | undefined;

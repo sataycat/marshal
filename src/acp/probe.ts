@@ -7,7 +7,7 @@ import type { ReadinessResult } from "./types.js";
 export const PROBE_TIMEOUT_MS = 15_000;
 
 export async function probeAgent(cwd: string, launch: AgentLaunchSpec, timeoutMs = PROBE_TIMEOUT_MS): Promise<ReadinessResult> {
-  const child = spawn(launch.command, launch.args, { cwd, env: process.env, shell: false, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(launch.command, launch.args, { cwd, env: { ...process.env, ...launch.env }, shell: false, stdio: ["pipe", "pipe", "pipe"] });
   let timer: NodeJS.Timeout | undefined;
   try {
     await waitForSpawn(child, launch.command, timeoutMs);

@@ -31,10 +31,16 @@ import {
 import type { AgentLaunchSpec, InstallationOperation } from "../agents/types.js";
 import type { EventBus } from "../daemon/bus.js";
 import { publishInstallationOperationUpdated } from "../daemon/bus.js";
+import { activateInstalledAgent } from "../agents/activation.js";
 
 export const INSTALL_TIMEOUT_MS = 120_000;
 export const BINARY_MAX_BYTES = 256 * 1024 * 1024;
 export const BINARY_MAX_REDIRECTS = 3;
+
+function resumeActivation(operation: InstallationOperation, machineDir: string, bus?: EventBus): void {
+  if (operation.status !== "installed" || !["not_started", "checking", "interrupted"].includes(operation.activation_status)) return;
+  void activateInstalledAgent(operation.agent_id, operation.version, machineDir, bus, operation.id, operation.installation_id).catch(() => undefined);
+}
 
 function failureCode(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -366,6 +372,7 @@ export async function installBinary(
     renameSync(temp, root);
     finishInstallation(operationId, "installed", null, machineDir);
     publish();
+    void activateInstalledAgent(agent.id, agent.version, machineDir, bus, operationId, operation.installation_id).catch(() => undefined);
   } catch (error) {
     finishInstallation(
       operationId,
@@ -433,7 +440,10 @@ export async function startInstallation(
       installationId,
       machineDir,
     );
-    if (duplicate && !options.retry) return duplicate;
+     if (duplicate && !options.retry) {
+       resumeActivation(duplicate, machineDir, bus);
+       return duplicate;
+     }
     const operationId = randomUUID();
     const root = resolve(machineDir, "agents", agent.id, agent.version, randomUUID());
     mkdirSync(resolve(machineDir, "agents"), { recursive: true });
@@ -510,7 +520,10 @@ export async function startInstallation(
     installationId,
     machineDir,
   );
-  if (duplicate && !options.retry) return duplicate;
+   if (duplicate && !options.retry) {
+     resumeActivation(duplicate, machineDir, bus);
+     return duplicate;
+   }
   const running = getInstallationByIdentity(
     agent.id,
     agent.version,
@@ -608,6 +621,7 @@ export async function startInstallation(
       renameSync(temporaryRoot, installationRoot);
       finishInstallation(operationId, "installed", null, machineDir);
       publish();
+      void activateInstalledAgent(agent.id, agent.version, machineDir, bus, operationId, operation.installation_id).catch(() => undefined);
     } catch (error) {
       if (getInstallationOperation(operationId, machineDir)?.status === "installing")
         finishInstallation(

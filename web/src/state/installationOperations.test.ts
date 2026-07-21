@@ -4,7 +4,7 @@ import type { InstallationOperation } from "../types";
 
 function operation(overrides: Partial<InstallationOperation> = {}): InstallationOperation {
   return {
-    id: "op-1", agent_id: "agent", version: "1.0.0", package_specifier: "agent@1.0.0", distribution: "npx", installation_id: "agent@1.0.0:npx", phase: "resolving", status: "installing", started_at: "now", finished_at: null, error: null, error_code: null, diagnostic: null, ...overrides,
+    id: "op-1", agent_id: "agent", version: "1.0.0", package_specifier: "agent@1.0.0", distribution: "npx", installation_id: "agent@1.0.0:npx", phase: "resolving", status: "installing", activation_status: "not_started", activation_started_at: null, activation_finished_at: null, activation_error: null, activation_error_code: null, activation_diagnostic: null, started_at: "now", finished_at: null, error: null, error_code: null, diagnostic: null, ...overrides,
   };
 }
 
@@ -18,7 +18,7 @@ describe("installation operation state", () => {
   });
 
   it("recognizes all terminal states and preserves actionable failure data", () => {
-    expect(isTerminalInstallationOperation(operation({ phase: "completed", status: "installed" }))).toBe(true);
+    expect(isTerminalInstallationOperation(operation({ phase: "completed", status: "installed", activation_status: "ready" }))).toBe(true);
     expect(isTerminalInstallationOperation(operation({ phase: "failed", status: "failed", error_code: "download_timeout", diagnostic: { message: "timed out", action: "Retry" } }))).toBe(true);
     expect(isTerminalInstallationOperation(operation({ phase: "interrupted", status: "interrupted" }))).toBe(true);
   });
@@ -32,7 +32,7 @@ describe("installation operation state", () => {
   it("marks a live operation interrupted and ignores cancellation after terminal state", () => {
     const live = operation({ phase: "downloading" });
     expect(cancelInstallationOperation({ byId: {} }, live).byId[live.id]).toMatchObject({ status: "interrupted", phase: "interrupted", error_code: "installation_cancelled" });
-    const done = operation({ phase: "completed", status: "installed" });
+    const done = operation({ phase: "completed", status: "installed", activation_status: "ready" });
     expect(cancelInstallationOperation({ byId: { [done.id]: done } }, done).byId[done.id]).toEqual(done);
   });
 });

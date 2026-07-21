@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { clearDefaultInstalledAgent, createInstallation, executeAgentRemoval, finishInstallation, getAgentRemovalOperation, getInstalledAgent, listInstalledAgents, removeInstalledAgent, resolveInstalledAgentLaunch, setAgentReadiness, setDefaultInstalledAgent } from "./store.js";
+import { clearDefaultInstalledAgent, createInstallation, executeAgentRemoval, finishInstallation, getAgentAuthenticationOperation, getAgentRemovalOperation, getInstalledAgent, getInstallationOperation, listInstalledAgents, removeInstalledAgent, resolveInstalledAgentLaunch, setAgentReadiness, setDefaultInstalledAgent, setInstallationActivation } from "./store.js";
 import { createSession, updateSession } from "../acp/supervisor-store.js";
 import { beginAgentAuthentication } from "./store.js";
 import { registerRepository } from "../repositories/store.js";
@@ -50,6 +50,16 @@ describe("installed agent storage", () => {
     expect(resolveInstalledAgentLaunch("demo", "1.2.3", machineDir)).toEqual({ command: "npx", args: ["--yes", "demo@1.2.3"] });
   });
 
+  it("persists guided activation state independently from installation state", () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-agent-activation-state-`);
+    const operation = createInstallation({ id: "activation", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "activation@1.0.0", launch: { command: "npx", args: ["activation@1.0.0"] }, registry_snapshot_fetched_at: "snapshot", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "activation-op", machineDir);
+    finishInstallation(operation.id, "installed", null, machineDir);
+    setInstallationActivation(operation.id, "checking", machineDir);
+    expect(getInstallationOperation(operation.id, machineDir)).toMatchObject({ status: "installed", activation_status: "checking" });
+    setInstallationActivation(operation.id, "failed", machineDir, { error: "npx missing", code: "host_prerequisite_missing", diagnostic: { message: "npx missing", action: "Install npx" } });
+    expect(getInstallationOperation(operation.id, machineDir)).toMatchObject({ status: "installed", activation_status: "failed", activation_error_code: "host_prerequisite_missing", activation_diagnostic: { action: "Install npx" } });
+  });
+
   it("keeps side-by-side installations launchable and changes only the default", () => {
     const machineDir = mkdtempSync(`${tmpdir()}/marshal-side-by-side-`);
     for (const [op, installationId, distribution] of [["old", "old-install", "npx"], ["new", "new-install", "uvx"]] as const) {
@@ -82,13 +92,23 @@ describe("installed agent storage", () => {
     const machineDir = mkdtempSync(`${tmpdir()}/marshal-removal-live-`); const root = mkdtempSync(`${tmpdir()}/marshal-removal-workflow-`); execFileSync("git", ["init", "-q", root]);
     installation(machineDir); setAgentReadiness("demo", "1.0.0", { readiness_status: "ready", readiness_error: null, protocol_version: 1, capabilities: { prompt: { text: true, image: false, audio: false, embedded_context: false }, session: { close: true, list: false, load: false, fork: false, resume: false }, load_session: false, auth: { logout: false } }, auth_methods: [], raw_initialize: {}, probed_at: new Date().toISOString() }, machineDir); const repository = registerRepository(root, machineDir); listWorkflowProfiles(repository.id, machineDir);
     saveWorkflowProfile(repository.id, { name: "Default", permission_policy: "allow_reads_ask_writes", unattended_authorized: false, timeout_ms: 1000, max_retries: 0, verification_commands: [], require_decorrelated_builder_validator: false, assignments: [{ role: "builder", agent_id: "demo", agent_version: "1.0.0" }] }, undefined, machineDir);
-    beginAgentAuthentication({ id: "auth-1", agent_id: "demo", version: "1.0.0", method_id: "login", method_name: "Login" }, machineDir);
+    beginAgentAuthentication({ id: "auth-1", agent_id: "demo", version: "1.0.0", installation_id: "remove-install", method_id: "login", method_name: "Login" }, machineDir);
     installation(machineDir, "installing-install");
     createInstallation({ id: "demo", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "demo@1.0.0", launch: { command: "npx", args: ["demo@1.0.0"] }, registry_snapshot_fetched_at: "snapshot", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null, installation_id: "installing-install" }, "active-install-op", machineDir);
     const operation = removeInstalledAgent("demo", "1.0.0", machineDir, "remove-install");
     expect(operation.error_code).toBe("agent_removal_conflict");
     expect(operation.references.map((reference) => reference.type)).toEqual(expect.arrayContaining(["workflow_assignment", "authentication"]));
     expect(removeInstalledAgent("demo", "1.0.0", machineDir, "installing-install").references.map((reference) => reference.type)).toContain("installation");
+  });
+
+  it("keeps authentication operations tied to their installation identity", () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-auth-identity-`);
+    installation(machineDir, "first-install");
+    installation(machineDir, "second-install");
+    const first = beginAgentAuthentication({ id: "auth-first", agent_id: "demo", version: "1.0.0", installation_id: "first-install", method_id: "login", method_name: "Login" }, machineDir);
+    const second = beginAgentAuthentication({ id: "auth-second", agent_id: "demo", version: "1.0.0", installation_id: "second-install", method_id: "login", method_name: "Login" }, machineDir);
+    expect(getAgentAuthenticationOperation(first.id, machineDir)?.installation_id).toBe("first-install");
+    expect(getAgentAuthenticationOperation(second.id, machineDir)?.installation_id).toBe("second-install");
   });
 
   it("cleans only the owned payload, records a tombstone, and is idempotent", () => {

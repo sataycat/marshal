@@ -3,6 +3,7 @@ import { runOnce, type RunOnceOptions, type RunOnceResult } from "./orchestrator
 import { publishDaemonCycleComplete, publishDaemonIdle, type EventBus } from "./bus.js";
 import { repositoryRoot } from "../repositories/store.js";
 import { reconcileInstallationOperations } from "../agents/store.js";
+import { reconcileAgentActivations } from "../agents/activation.js";
 import { GLOBAL_DIR } from "./config.js";
 
 export const DEFAULT_DAEMON_INTERVAL_MS = 5000;
@@ -52,9 +53,12 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 export async function startDaemon(options: StartDaemonOptions = {}): Promise<void> {
   const intervalMs = options.intervalMs ?? DEFAULT_DAEMON_INTERVAL_MS;
   const signal = options.signal;
-  reconcileInstallationOperations(GLOBAL_DIR);
+  const machineDir = options.machineDir ?? GLOBAL_DIR;
+  reconcileInstallationOperations(machineDir);
+  reconcileAgentActivations(machineDir, options.bus);
 
   while (!signal?.aborted) {
+    reconcileAgentActivations(machineDir, options.bus);
     let result: RunOnceResult | null = null;
     let published = false;
     try {

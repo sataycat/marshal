@@ -2,6 +2,7 @@ import { ChildProcess, spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -18,6 +19,8 @@ import {
   createInstallation,
   finishInstallation,
   getInstallationOperation,
+  getInstalledAgent,
+  beginAgentAuthentication,
   updateInstallationPhase,
 } from "../agents/store.js";
 import { completeRegistryRefresh, beginRegistryRefresh } from "../registry/store.js";
@@ -120,6 +123,47 @@ describe("buildApp /api/health", () => {
 });
 
 describe("installation operation API durability", () => {
+  it("routes readiness checks to the requested side-by-side installation", async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-installation-routing-"));
+    const agentPath = join(machineDir, "ready-agent.cjs");
+    writeFileSync(agentPath, `const readline = require("node:readline"); const rl = readline.createInterface({ input: process.stdin }); const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n"); rl.on("line", (line) => { const message = JSON.parse(line); if (message.method === "initialize") send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: message.params.protocolVersion, agentCapabilities: { sessionCapabilities: { close: {} } }, authMethods: [] } }); else if (message.method === "session/new") send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "routing-session" } }); else if (message.method === "session/close") send({ jsonrpc: "2.0", id: message.id, result: {} }); });`);
+    chmodSync(agentPath, 0o755);
+    const input = (installationId: string, launch: { command: string; args: string[] }) => createInstallation({
+      id: "side-by-side",
+      version: "1.0.0",
+      source: "registry",
+      license: "MIT",
+      distribution: "npx",
+      package_specifier: "side-by-side@1.0.0",
+      launch,
+      registry_snapshot_fetched_at: "fixture",
+      integrity_status: "not_applicable",
+      status: "installing",
+      readiness_status: "unknown",
+      readiness_error: null,
+      protocol_version: null,
+      capabilities: null,
+      auth_methods: [],
+      raw_initialize: null,
+      probed_at: null,
+      installation_id: installationId,
+    }, `install-${installationId}`, machineDir);
+    const first = input("first-install", { command: "npx", args: ["/missing/side-by-side"] });
+    finishInstallation(first.id, "installed", null, machineDir);
+    const second = input("second-install", { command: "node", args: [agentPath] });
+    finishInstallation(second.id, "installed", null, machineDir);
+    beginAgentAuthentication({ id: "auth-first", agent_id: "side-by-side", version: "1.0.0", installation_id: "first-install", method_id: "login", method_name: "First login" }, machineDir);
+    beginAgentAuthentication({ id: "auth-second", agent_id: "side-by-side", version: "1.0.0", installation_id: "second-install", method_id: "login", method_name: "Second login" }, machineDir);
+    const app = buildApp("0.0.1", { machineDir });
+
+    const response = await app.request("/api/agents/side-by-side/probe?version=1.0.0&installation_id=second-install", { method: "POST" });
+    expect(response.status).toBe(200);
+    expect((await response.json()) as { agent: { installation_id: string; readiness_status: string } }).toMatchObject({ agent: { installation_id: "second-install", readiness_status: "ready" } });
+    expect(getInstalledAgent("side-by-side", "1.0.0", machineDir, "first-install")?.readiness_status).toBe("unknown");
+    const authResponse = await app.request("/api/agents/side-by-side/auth?version=1.0.0&installation_id=second-install");
+    expect((await authResponse.json()) as { authentication: { installation_id: string } }).toMatchObject({ authentication: { installation_id: "second-install" } });
+  });
+
   it("retries a failed durable operation using the cached registry version", async () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-install-retry-"));
     const refresh = beginRegistryRefresh(machineDir);

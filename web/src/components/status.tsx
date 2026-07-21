@@ -21,11 +21,11 @@ const THREAD_STATUS: Record<ChatThreadStatus, { tone: Tone; label: string }> = {
 };
 
 const READINESS: Record<AgentReadinessStatus, { tone: Tone; label: string }> = {
-  unknown: { tone: "neutral", label: "Not probed" },
-  probing: { tone: "accent", label: "Probing" },
+  unknown: { tone: "neutral", label: "Not checked" },
+  probing: { tone: "accent", label: "Checking agent" },
   ready: { tone: "success", label: "Ready" },
-  authentication_required: { tone: "warn", label: "Auth required" },
-  failed: { tone: "error", label: "Probe failed" },
+  authentication_required: { tone: "warn", label: "Sign in required" },
+  failed: { tone: "error", label: "Setup failed" },
 };
 
 const INSTALL_STATUS: Record<InstalledAgentStatus, { tone: Tone; label: string }> = {

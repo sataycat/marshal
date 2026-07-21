@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Download, ExternalLink, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { Check, Download, ExternalLink, RefreshCw, Search, ShieldCheck, Wrench } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -25,7 +25,7 @@ import {
   useUpdateRegistryAgentMutation,
 } from "../api/queries";
 import { fetchInstallCandidate, type InstallCandidate } from "../api/client";
-import type { InstalledAgent, RegistryAgent } from "../types";
+import type { InstalledAgent, InstallationOperation, RegistryAgent } from "../types";
 import { useToastStore } from "../state/toastStore";
 
 const featuredAgentNames = ["claude", "codex", "devin", "copilot", "opencode", "gemini", "amp", "zed"];
@@ -118,7 +118,16 @@ export function AgentsRoute(): JSX.Element {
     await remove.mutateAsync({ agentId: entry.id, version: entry.version, installationId: entry.installation_id });
     await client.invalidateQueries({ queryKey: queryKeys.installedAgents });
   };
-  const probeAgent = async (entry: InstalledAgent): Promise<void> => { await probe.mutateAsync({ agentId: entry.id, version: entry.version }); await client.invalidateQueries({ queryKey: queryKeys.installedAgents }); };
+  const probeAgent = async (entry: InstalledAgent): Promise<void> => { await probe.mutateAsync({ agentId: entry.id, version: entry.version, installationId: entry.installation_id }); await client.invalidateQueries({ queryKey: queryKeys.installedAgents }); };
+  const authenticateAgent = async (entry: InstalledAgent, methodId: string): Promise<void> => {
+    try {
+      await authenticate.mutateAsync({ agentId: entry.id, version: entry.version, methodId, installationId: entry.installation_id });
+      await client.invalidateQueries({ queryKey: queryKeys.agentAuthentication(entry.id, entry.version, entry.installation_id) });
+      await client.invalidateQueries({ queryKey: queryKeys.installedAgents });
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : "Unable to start authentication.");
+    }
+  };
 
   const busy = install.isPending || update.isPending || setDefault.isPending || remove.isPending || probe.isPending || authenticate.isPending;
   const refreshing = refresh.isPending || catalog.data?.refresh?.status === "running";
@@ -165,13 +174,14 @@ export function AgentsRoute(): JSX.Element {
                 key={entry.installation_id}
                 entry={entry}
                 registryAgent={registryMatchFor(entry)}
+                activationOperation={(operations.data ?? []).find((operation) => operation.agent_id === entry.id && operation.version === entry.version && operation.installation_id === entry.installation_id) ?? null}
                 onProbe={() => void probeAgent(entry)}
                 onRemove={() => void removeAgent(entry)}
                 onUpdate={registryMatchFor(entry) && registryMatchFor(entry)!.version !== entry.version
                   ? () => void requestInstall(registryMatchFor(entry)!, "update")
                   : null}
                 onDefault={(installationId) => void setDefault.mutateAsync({ agentId: entry.id, installationId })}
-                onAuthenticate={(methodId) => void authenticate.mutateAsync({ agentId: entry.id, version: entry.version, methodId })}
+                onAuthenticate={(methodId) => void authenticateAgent(entry, methodId)}
                 busy={busy}
                 preparing={preparingId !== null}
               />
@@ -220,10 +230,11 @@ export function AgentsRoute(): JSX.Element {
             <div key={operation.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-panel px-3 py-2 text-xs">
               <span className="font-mono font-medium">{operation.agent_id}@{operation.version}</span>
               <span className="text-muted-foreground">{operation.distribution}</span>
-              <span className={operation.status === "failed" ? "ml-auto text-error" : operation.status === "installed" ? "ml-auto text-success" : "ml-auto text-primary"}>
-                {operation.status === "installing" ? `Installing · ${operation.phase}` : operation.status}
+              <span className={operation.activation_status === "failed" || operation.status === "failed" ? "ml-auto text-error" : operation.activation_status === "ready" ? "ml-auto text-success" : "ml-auto text-primary"}>
+                {operation.status === "installing" ? `Installing · ${operation.phase}` : operation.status !== "installed" ? operation.status : activationLabel(operation.activation_status)}
               </span>
               {operation.error && <span className="basis-full text-error">{operation.error_code ?? "failed"}: {operation.error}</span>}
+              {operation.activation_error && <span className="basis-full text-error">{operation.activation_error_code ?? "activation_failed"}: {operation.activation_error}</span>}
             </div>
           ))}
           {operations.data?.length === 0 && <p className="text-xs text-muted-foreground">Nothing installed yet.</p>}
@@ -253,9 +264,9 @@ function TrustDialog({ pending, busy, onCancel, onConfirm }: { pending: PendingT
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><ShieldCheck aria-hidden className="size-4 text-primary" />{pending?.mode === "update" ? "Update agent" : "Install agent"}</DialogTitle>
-          <DialogDescription>
-            This runs third-party code on your machine. Review exactly what will be installed before continuing.
-          </DialogDescription>
+           <DialogDescription>
+             This runs third-party code on your machine. After publication, Marshal immediately starts it to check ACP compatibility, authentication, and a temporary session. It does not assign the agent to a repository or unattended workflow.
+           </DialogDescription>
         </DialogHeader>
         {pending && (
           <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-2 rounded-lg border border-border bg-inset px-3.5 py-3 text-sm">
@@ -295,9 +306,10 @@ function AgentIcon({ agent, className }: { agent: RegistryAgent; className?: str
   );
 }
 
-function InstalledCard({ entry, registryAgent, onProbe, onRemove, onUpdate, onDefault, onAuthenticate, busy, preparing }: {
+function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onRemove, onUpdate, onDefault, onAuthenticate, busy, preparing }: {
   entry: InstalledAgent;
   registryAgent: RegistryAgent | undefined;
+  activationOperation: InstallationOperation | null;
   onProbe: () => void;
   onRemove: () => void;
   onUpdate: (() => void) | null;
@@ -306,10 +318,11 @@ function InstalledCard({ entry, registryAgent, onProbe, onRemove, onUpdate, onDe
   busy: boolean;
   preparing: boolean;
 }): JSX.Element {
-  const authentication = useAgentAuthenticationQuery(entry.id, entry.version, entry.status === "installed");
+  const authentication = useAgentAuthenticationQuery(entry.id, entry.version, entry.installation_id, entry.status === "installed");
   const cancel = useCancelAgentAuthenticationMutation();
   const auth = authentication.data?.authentication;
   const name = registryAgent?.name ?? entry.id;
+  const activationBusy = entry.readiness_status === "probing" || activationOperation?.activation_status === "checking";
 
   return (
     <article className="flex flex-col rounded-xl border border-border bg-panel p-4">
@@ -335,7 +348,9 @@ function InstalledCard({ entry, registryAgent, onProbe, onRemove, onUpdate, onDe
       </dl>
 
       {entry.status === "failed" && <p className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">Installation failed: {entry.failure ?? "unknown error"}</p>}
-      {entry.readiness_status === "failed" && entry.readiness_error && <p className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">Readiness failed: {entry.readiness_error}</p>}
+      {entry.status === "installed" && entry.readiness_status === "probing" && <p className="mt-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">Checking agent startup, ACP negotiation, and a temporary session.</p>}
+      {entry.readiness_status === "authentication_required" && <p className="mt-3 rounded-lg border border-warn-border bg-warn-bg px-3 py-2 text-xs text-warn">Sign in to this agent, then Marshal will check readiness again automatically.</p>}
+      {entry.readiness_status === "failed" && (entry.readiness_error || activationOperation?.activation_diagnostic) && <div className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error"><p>Setup failed: {entry.readiness_error ?? activationOperation?.activation_diagnostic?.message}</p><p className="mt-1 text-error/80">{activationOperation?.activation_diagnostic?.action ?? "Retry the readiness check after reviewing the installation."}</p></div>}
       {auth && auth.status !== "succeeded" && (
         <div className="mt-3 rounded-lg border border-border bg-inset px-3 py-2 text-xs">
           <div className="flex items-center justify-between gap-2">
@@ -348,12 +363,12 @@ function InstalledCard({ entry, registryAgent, onProbe, onRemove, onUpdate, onDe
 
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
         {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "agent").map((method) => (
-          <Button key={method.id} size="sm" onClick={() => onAuthenticate(method.id)} disabled={busy}>Authenticate</Button>
+          <Button key={method.id} size="sm" onClick={() => onAuthenticate(method.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Sign in with {method.name}</Button>
         ))}
         {onUpdate && <Button variant="outline" size="sm" onClick={onUpdate} disabled={busy || preparing}><Download aria-hidden />Update available</Button>}
         {entry.status === "installed" && !entry.is_default && <Button variant="outline" size="sm" onClick={() => onDefault(entry.installation_id)} disabled={busy}>Use by default</Button>}
-        <Button variant="outline" size="sm" onClick={onProbe} disabled={busy} title="Check ACP initialization, authentication, capabilities, and a temporary session">Probe readiness</Button>
-        <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground hover:text-error" onClick={onRemove} disabled={busy}>Remove</Button>
+        <Button variant="outline" size="sm" onClick={onProbe} disabled={busy || activationBusy} title="Check ACP initialization, authentication, capabilities, and a temporary session"><Wrench aria-hidden />Retry readiness check</Button>
+        <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground hover:text-error" onClick={onRemove} disabled={busy || activationBusy}>Remove</Button>
       </div>
     </article>
   );
@@ -410,4 +425,13 @@ function LoaderCircleSpin(): JSX.Element {
       <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
   );
+}
+
+function activationLabel(status: InstallationOperation["activation_status"]): string {
+  if (status === "checking") return "Checking agent";
+  if (status === "authentication_required") return "Sign in required";
+  if (status === "ready") return "Ready";
+  if (status === "failed") return "Setup failed";
+  if (status === "interrupted") return "Activation interrupted";
+  return "Installed";
 }

@@ -121,21 +121,21 @@ import {
   listInstalledAgents,
   listInstallationOperations,
   getInstallationOperation,
+  getInstallationByIdentity,
   removeInstalledAgent,
   executeAgentRemoval,
   getAgentRemovalOperation,
   listAgentRemovalOperations,
-  setAgentReadiness,
   setDefaultInstalledAgent,
   getDefaultInstalledAgent,
 } from "../agents/store.js";
+import { activateInstalledAgent } from "../agents/activation.js";
 import {
   cancelInstallationOperation,
   installationOperation,
   installCandidate,
   startInstallation,
 } from "../installations/installer.js";
-import { probeAgent } from "../acp/probe.js";
 import { authenticateAgent } from "../acp/authenticate.js";
 import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
 import { randomUUID } from "node:crypto";
@@ -716,6 +716,7 @@ function registerDiagnosticsRoute(
         severity: "warning",
       });
     for (const agent of agents) {
+      const activation = getInstallationByIdentity(agent.id, agent.version, agent.distribution, agent.installation_id, machineDir);
       if (agent.status === "failed")
         issues.push({
           code: "INSTALLATION_FAILED",
@@ -725,9 +726,9 @@ function registerDiagnosticsRoute(
         });
       if (agent.readiness_status === "failed")
         issues.push({
-          code: "ACP_READINESS_FAILED",
+          code: activation?.activation_error_code?.toUpperCase() ?? "ACP_READINESS_FAILED",
           message: `${agent.id}@${agent.version}: ${agent.readiness_error ?? "readiness probe failed"}`,
-          action: "Probe again after checking the installation and authentication state.",
+          action: activation?.activation_diagnostic?.action ?? "Retry the readiness check after reviewing the installation and authentication state.",
           severity: "error",
         });
       if (agent.readiness_status === "authentication_required")
@@ -863,71 +864,41 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
   });
   app.get("/api/agents/:id", (c) => {
     const version = c.req.query("version");
+    const installationId = c.req.query("installation_id");
     if (!version) throw new ApiError(422, "version is required", "missing_query");
-    const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
+    const installed = getInstalledAgent(c.req.param("id"), version, machineDir, installationId);
     if (!installed) throw new ApiError(404, "Installed agent not found", "agent_not_found");
     return c.json({ agent: installed });
   });
   app.post("/api/agents/:id/probe", async (c) => {
     const version = c.req.query("version");
+    const installationId = c.req.query("installation_id");
     if (!version) throw new ApiError(422, "version is required", "missing_query");
-    const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
+    const installed = getInstalledAgent(c.req.param("id"), version, machineDir, installationId);
     if (!installed || installed.status !== "installed")
       throw new ApiError(409, "Only an installed agent can be probed", "agent_not_installed");
-    const workspace = mkdtempSync(resolve(tmpdir(), "marshal-probe-"));
-    const started = new Date().toISOString();
-    setAgentReadiness(
-      installed.id,
-      installed.version,
-      {
-        readiness_status: "probing",
-        readiness_error: null,
-        protocol_version: installed.protocol_version,
-        capabilities: installed.capabilities,
-        auth_methods: installed.auth_methods,
-        raw_initialize: installed.raw_initialize,
-        probed_at: started,
-      },
-      machineDir,
-    );
-    try {
-      const result = await probeAgent(workspace, installed.launch);
-      const agent = setAgentReadiness(
-        installed.id,
-        installed.version,
-        {
-          readiness_status: result.status,
-          readiness_error: result.error,
-          protocol_version: result.protocol_version,
-          capabilities: result.capabilities,
-          auth_methods: result.auth_methods,
-          raw_initialize: result.raw_initialize,
-          probed_at: new Date().toISOString(),
-        },
-        machineDir,
-      );
-      return c.json({ agent });
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
+    const agent = await activateInstalledAgent(installed.id, installed.version, machineDir, bus, undefined, installed.installation_id);
+    return c.json({ agent });
   });
   app.get("/api/agents/:id/auth", (c) => {
     const version = c.req.query("version");
+    const installationId = c.req.query("installation_id");
     if (!version) throw new ApiError(422, "version is required", "missing_query");
-    const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
+    const installed = getInstalledAgent(c.req.param("id"), version, machineDir, installationId);
     if (!installed) throw new ApiError(404, "Installed agent not found", "agent_not_found");
     return c.json({
       agent: installed,
       authentication:
-        getLatestAgentAuthenticationOperation(installed.id, installed.version, machineDir) ?? null,
+        getLatestAgentAuthenticationOperation(installed.id, installed.version, machineDir, installed.installation_id) ?? null,
     });
   });
   app.post("/api/agents/:id/auth", async (c) => {
     const version = c.req.query("version");
+    const installationId = c.req.query("installation_id");
     if (!version) throw new ApiError(422, "version is required", "missing_query");
     const body = await readJsonObject(c, new Set(["method_id"]));
     const methodId = assertString(body.method_id, "method_id");
-    const installed = getInstalledAgent(c.req.param("id"), version, machineDir);
+    const installed = getInstalledAgent(c.req.param("id"), version, machineDir, installationId);
     if (!installed || installed.status !== "installed")
       throw new ApiError(409, "Only an installed agent can authenticate", "agent_not_installed");
     const method = installed.auth_methods.find((entry) => entry.id === methodId);
@@ -941,6 +912,7 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
       installed.id,
       installed.version,
       machineDir,
+      installed.installation_id,
     );
     if (current?.status === "authenticating") return c.json({ authentication: current }, 202);
     const operation = beginAgentAuthentication(
@@ -948,6 +920,7 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
         id: randomUUID(),
         agent_id: installed.id,
         version: installed.version,
+        installation_id: installed.installation_id,
         method_id: method.id,
         method_name: method.name,
       },
@@ -960,24 +933,8 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
       try {
         await authenticateAgent(workspace, installed.launch, method.id, controller.signal);
         finishAgentAuthentication(operation.id, "succeeded", null, machineDir);
-        const refreshed = getInstalledAgent(installed.id, installed.version, machineDir);
-        if (refreshed) {
-          const result = await probeAgent(workspace, refreshed.launch);
-          setAgentReadiness(
-            refreshed.id,
-            refreshed.version,
-            {
-              readiness_status: result.status,
-              readiness_error: result.error,
-              protocol_version: result.protocol_version,
-              capabilities: result.capabilities,
-              auth_methods: result.auth_methods,
-              raw_initialize: result.raw_initialize,
-              probed_at: new Date().toISOString(),
-            },
-            machineDir,
-          );
-        }
+        const refreshed = getInstalledAgent(installed.id, installed.version, machineDir, installed.installation_id);
+        if (refreshed) await activateInstalledAgent(refreshed.id, refreshed.version, machineDir, bus, undefined, refreshed.installation_id, workspace);
       } catch (error) {
         const cancelled = controller.signal.aborted;
         finishAgentAuthentication(

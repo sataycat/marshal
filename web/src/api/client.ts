@@ -271,9 +271,12 @@ export async function retryAgentRemoval(
 export async function probeInstalledAgent(
   agentId: string,
   version: string,
+  installationId?: string,
 ): Promise<InstalledAgent> {
+  const params = new URLSearchParams({ version });
+  if (installationId) params.set("installation_id", installationId);
   const res = await fetch(
-    `/api/agents/${encodeURIComponent(agentId)}/probe?version=${encodeURIComponent(version)}`,
+    `/api/agents/${encodeURIComponent(agentId)}/probe?${params}`,
     { method: "POST" },
   );
   return (await jsonOrThrow<{ agent: InstalledAgent }>(res)).agent;
@@ -282,9 +285,12 @@ export async function authenticateInstalledAgent(
   agentId: string,
   version: string,
   methodId: string,
+  installationId?: string,
 ): Promise<AgentAuthenticationOperation> {
+  const params = new URLSearchParams({ version });
+  if (installationId) params.set("installation_id", installationId);
   const res = await fetch(
-    `/api/agents/${encodeURIComponent(agentId)}/auth?version=${encodeURIComponent(version)}`,
+    `/api/agents/${encodeURIComponent(agentId)}/auth?${params}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -296,10 +302,13 @@ export async function authenticateInstalledAgent(
 export async function fetchAgentAuthentication(
   agentId: string,
   version: string,
+  installationId?: string,
   signal?: AbortSignal,
 ): Promise<{ authentication: AgentAuthenticationOperation | null }> {
+  const params = new URLSearchParams({ version });
+  if (installationId) params.set("installation_id", installationId);
   const res = await fetch(
-    `/api/agents/${encodeURIComponent(agentId)}/auth?version=${encodeURIComponent(version)}`,
+    `/api/agents/${encodeURIComponent(agentId)}/auth?${params}`,
     { signal },
   );
   return jsonOrThrow<{ authentication: AgentAuthenticationOperation | null }>(res);

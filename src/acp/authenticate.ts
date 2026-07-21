@@ -6,7 +6,7 @@ import type { AgentLaunchSpec } from "../agents/types.js";
 export const AUTHENTICATION_TIMEOUT_MS = 10 * 60 * 1000;
 
 export async function authenticateAgent(cwd: string, launch: AgentLaunchSpec, methodId: string, signal?: AbortSignal, timeoutMs = AUTHENTICATION_TIMEOUT_MS): Promise<void> {
-  const child = spawn(launch.command, launch.args, { cwd, env: process.env, shell: false, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(launch.command, launch.args, { cwd, env: { ...process.env, ...launch.env }, shell: false, stdio: ["pipe", "pipe", "pipe"] });
   let timer: NodeJS.Timeout | undefined;
   const abort = () => child.kill("SIGTERM");
   signal?.addEventListener("abort", abort, { once: true });

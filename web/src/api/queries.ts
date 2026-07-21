@@ -27,7 +27,7 @@ export function useInstallCandidateQuery(agentId: string | null, version: string
   return useQuery({ queryKey: [...queryKeys.registry, "candidate", agentId ?? "", version ?? "", distribution ?? "auto"], queryFn: ({ signal }) => api.fetchInstallCandidate(agentId!, version!, distribution, signal), enabled: Boolean(agentId && version), ...queryOptions });
 }
 export function useInstalledAgentsQuery() {
-  return useQuery({ queryKey: queryKeys.installedAgents, queryFn: ({ signal }) => api.fetchInstalledAgents(signal), ...queryOptions, refetchInterval: (query) => query.state.data?.some((agent) => agent.status === "installing") ? 1000 : false });
+  return useQuery({ queryKey: queryKeys.installedAgents, queryFn: ({ signal }) => api.fetchInstalledAgents(signal), ...queryOptions, refetchInterval: (query) => query.state.data?.some((agent) => agent.status === "installing" || agent.readiness_status === "probing") ? 1000 : false });
 }
 export function useInstallationQuery(id: string | null) {
   return useQuery({ queryKey: queryKeys.installation(id ?? ""), queryFn: ({ signal }) => api.fetchInstallationOperation(id ?? "", signal), enabled: Boolean(id), ...queryOptions, refetchInterval: (query) => query.state.data && isTerminalInstallationOperation(query.state.data) ? false : 1000 });
@@ -41,10 +41,10 @@ export const useUpdateRegistryAgentMutation = () => useMutation({ mutationFn: ({
 export const useSetDefaultInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, installationId }: { agentId: string; installationId: string }) => api.setDefaultInstalledAgent(agentId, installationId) });
 export const useRemoveInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, installationId }: { agentId: string; version: string; installationId?: string }) => api.removeInstalledAgent(agentId, version, installationId) });
 export const useRetryAgentRemovalMutation = () => useMutation({ mutationFn: api.retryAgentRemoval });
-export const useProbeInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version }: { agentId: string; version: string }) => api.probeInstalledAgent(agentId, version) });
-export const useAuthenticateInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, methodId }: { agentId: string; version: string; methodId: string }) => api.authenticateInstalledAgent(agentId, version, methodId) });
-export function useAgentAuthenticationQuery(agentId: string, version: string, enabled: boolean) {
-  return useQuery({ queryKey: queryKeys.agentAuthentication(agentId, version), queryFn: ({ signal }) => api.fetchAgentAuthentication(agentId, version, signal), enabled, ...queryOptions, refetchInterval: (query) => query.state.data?.authentication?.status === "authenticating" ? 1000 : false });
+export const useProbeInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, installationId }: { agentId: string; version: string; installationId?: string }) => api.probeInstalledAgent(agentId, version, installationId) });
+export const useAuthenticateInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, methodId, installationId }: { agentId: string; version: string; methodId: string; installationId?: string }) => api.authenticateInstalledAgent(agentId, version, methodId, installationId) });
+export function useAgentAuthenticationQuery(agentId: string, version: string, installationId: string, enabled: boolean) {
+  return useQuery({ queryKey: queryKeys.agentAuthentication(agentId, version, installationId), queryFn: ({ signal }) => api.fetchAgentAuthentication(agentId, version, installationId, signal), enabled, ...queryOptions, refetchInterval: (query) => query.state.data?.authentication?.status === "authenticating" ? 1000 : false });
 }
 export const useCancelAgentAuthenticationMutation = () => useMutation({ mutationFn: api.cancelAgentAuthentication });
 export const useRegisterRepositoryMutation = () => useMutation({ mutationFn: api.registerRepository });

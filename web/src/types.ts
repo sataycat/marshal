@@ -44,6 +44,7 @@ export interface RegistryAgent {
 
 export type InstalledAgentStatus = "installing" | "installed" | "failed" | "interrupted";
 export type InstallationPhase = "resolving" | "downloading" | "verifying" | "extracting" | "publishing" | "completed" | "failed" | "interrupted";
+export type AgentActivationStatus = "not_started" | "checking" | "authentication_required" | "ready" | "failed" | "interrupted";
 export type AgentReadinessStatus = "unknown" | "probing" | "ready" | "authentication_required" | "failed";
 export type AgentAuthenticationStatus = "authenticating" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export interface AgentCapabilities { prompt: { text: boolean; image: boolean; audio: boolean; embedded_context: boolean }; session: { close: boolean; list: boolean; load: boolean; fork: boolean; resume: boolean }; load_session: boolean; auth: { logout: boolean } }
@@ -74,16 +75,22 @@ export interface InstalledAgent {
   provenance: { exact_version: string; distribution: "binary" | "npx" | "uvx"; source: "registry" | "custom"; package_specifier: string | null; archive_identity: string | null; registry_snapshot_fetched_at: string | null; installation_root: string; integrity_status: string };
   is_default: boolean;
 }
-export interface AgentAuthenticationOperation { id: string; agent_id: string; version: string; method_id: string; method_name: string; status: AgentAuthenticationStatus; started_at: string; finished_at: string | null; error: string | null }
+export interface AgentAuthenticationOperation { id: string; agent_id: string; version: string; installation_id: string; method_id: string; method_name: string; status: AgentAuthenticationStatus; started_at: string; finished_at: string | null; error: string | null }
 export interface InstallationOperation {
   id: string;
   agent_id: string;
   version: string;
-  package_specifier: string;
+  package_specifier: string | null;
   distribution: "npx" | "uvx" | "binary";
   installation_id: string;
   phase: InstallationPhase;
   status: InstalledAgentStatus;
+  activation_status: AgentActivationStatus;
+  activation_started_at: string | null;
+  activation_finished_at: string | null;
+  activation_error: string | null;
+  activation_error_code: string | null;
+  activation_diagnostic: { message: string; action: string; details?: Record<string, unknown> } | null;
   started_at: string;
   finished_at: string | null;
   error: string | null;

@@ -1,5 +1,6 @@
 export type InstalledAgentStatus = "installing" | "installed" | "failed" | "interrupted";
 export type InstallationPhase = "resolving" | "downloading" | "verifying" | "extracting" | "publishing" | "completed" | "failed" | "interrupted";
+export type AgentActivationStatus = "not_started" | "checking" | "authentication_required" | "ready" | "failed" | "interrupted";
 export type AgentRemovalStatus = "removing" | "blocked" | "completed" | "failed";
 export type AgentReadinessStatus = "unknown" | "probing" | "ready" | "authentication_required" | "failed";
 export type AgentAuthenticationStatus = "authenticating" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -87,6 +88,12 @@ export interface InstallationOperation {
   published_root: string | null;
   recovery_metadata: Record<string, unknown> | null;
   status: InstalledAgentStatus;
+  activation_status: AgentActivationStatus;
+  activation_started_at: string | null;
+  activation_finished_at: string | null;
+  activation_error: string | null;
+  activation_error_code: string | null;
+  activation_diagnostic: { message: string; action: string; details?: Record<string, unknown> } | null;
   started_at: string;
   finished_at: string | null;
   error: string | null;
@@ -100,6 +107,7 @@ export interface AgentAuthenticationOperation {
   id: string;
   agent_id: string;
   version: string;
+  installation_id: string;
   method_id: string;
   method_name: string;
   status: AgentAuthenticationStatus;
@@ -108,7 +116,7 @@ export interface AgentAuthenticationOperation {
   error: string | null;
 }
 
-export interface AgentRemovalReference { type: "active_session" | "recoverable_session" | "authentication" | "installation" | "workflow_assignment" | "default"; id: string; detail: string }
+export interface AgentRemovalReference { type: "active_session" | "recoverable_session" | "authentication" | "activation" | "installation" | "workflow_assignment" | "default"; id: string; detail: string }
 export interface AgentRemovalOperation {
   id: string; agent_id: string; version: string; installation_id: string; status: AgentRemovalStatus;
   started_at: string; finished_at: string | null; error: string | null; error_code: string | null;
