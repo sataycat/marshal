@@ -28,7 +28,7 @@ import { fetchInstallCandidate, type InstallCandidate } from "../api/client";
 import type { InstalledAgent, RegistryAgent } from "../types";
 import { useToastStore } from "../state/toastStore";
 
-const featuredAgentNames = ["claude", "codex", "opencode", "gemini", "amp", "zed"];
+const featuredAgentNames = ["claude", "codex", "devin", "copilot", "opencode", "gemini", "amp", "zed"];
 
 interface PendingTrust {
   agent: RegistryAgent;

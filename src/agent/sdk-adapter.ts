@@ -168,6 +168,7 @@ export class SdkAcpAgentAdapter implements Agent {
     } finally {
       state.connection.close();
       state.process.kill();
+      await waitForExit(state.process);
       this.sessions.delete(session);
     }
   }
@@ -294,6 +295,21 @@ function waitForSpawn(child: ChildProcessWithoutNullStreams, command: string): P
       if (err.code === "ENOENT") reject(new Error(`ACP agent command not found: ${command}`));
       else reject(new Error(`Failed to start ACP agent command "${command}": ${err.message}`));
     });
+  });
+}
+
+function waitForExit(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.removeListener("exit", onExit);
+      resolve();
+    }, 1000);
+    const onExit = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    child.once("exit", onExit);
   });
 }
 
