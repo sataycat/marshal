@@ -1494,7 +1494,8 @@ function registerTaskRoutes(
         : new WorktreeManager(selectedRoot);
     })();
   app.get("/api/tasks", (c) => {
-    const tasks = listTasks(root).map(taskCard);
+    const selectedRoot = root ?? repositoryRoot(machineDir);
+    const tasks = selectedRoot ? listTasks(selectedRoot).map(taskCard) : [];
     return c.json({ tasks });
   });
 

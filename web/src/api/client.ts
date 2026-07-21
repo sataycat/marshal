@@ -104,7 +104,13 @@ export async function fetchInstallationOperations(signal?: AbortSignal): Promise
 export interface InstallationRemovalOperation { id: string; agent_id: string; version: string; installation_id: string; status: "removing" | "blocked" | "completed" | "failed"; started_at: string; finished_at: string | null; error: string | null; error_code: string | null; diagnostic: { message: string; action: string; details?: { references?: Array<{ type: string; id: string; detail: string }> } } | null; references: Array<{ type: string; id: string; detail: string }> }
 export async function removeInstalledAgent(agentId: string, version: string, installationId?: string): Promise<{ operation: InstallationRemovalOperation }> {
   const params = new URLSearchParams({ version }); if (installationId) params.set("installation_id", installationId);
-  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}?${params}`, { method: "DELETE" }); return jsonOrThrow(res);
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}?${params}`, { method: "DELETE" });
+  if (res.ok) return (await res.json()) as { operation: InstallationRemovalOperation };
+  let body: { error?: string; code?: string; operation?: InstallationRemovalOperation } = {};
+  try { body = (await res.json()) as typeof body; } catch { /* use status fallback */ }
+  const references = body.operation?.references ?? [];
+  const detail = references.length > 0 ? ` ${references.map((reference) => reference.detail).join("; ")}.` : "";
+  throw new ApiError(`${body.error ?? `Request failed: ${res.status}`}${detail}`, res.status, body.code);
 }
 export async function retryAgentRemoval(operationId: string): Promise<InstallationRemovalOperation> { const res = await fetch(`/api/agents/removal-operations/${encodeURIComponent(operationId)}/retry`, { method: "POST" }); return (await jsonOrThrow<{ operation: InstallationRemovalOperation }>(res)).operation; }
 

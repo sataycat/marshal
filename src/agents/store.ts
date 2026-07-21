@@ -283,7 +283,6 @@ function removalReferences(id: string, version: string, installationId: string, 
   const db = tables(machineDir); const refs: AgentRemovalReference[] = [];
   for (const row of db.prepare("SELECT id, method_name FROM agent_authentication_operations WHERE agent_id = ? AND version = ? AND status = 'authenticating'").all(id, version) as Record<string, unknown>[]) refs.push({ type: "authentication", id: String(row.id), detail: `Authentication ${String(row.method_name)} is still running` });
   for (const row of db.prepare("SELECT id FROM installation_operations WHERE agent_id = ? AND version = ? AND installation_id = ? AND status = 'installing'").all(id, version, installationId) as Record<string, unknown>[]) refs.push({ type: "installation", id: String(row.id), detail: "Installation is still running" });
-  for (const row of db.prepare("SELECT id FROM installed_agents WHERE id = ? AND installation_id = ? AND is_default = 1").all(id, installationId) as Record<string, unknown>[]) refs.push({ type: "default", id: String(row.id), detail: "This installation is the default selection; choose another default first" });
   try { for (const row of db.prepare("SELECT id, role FROM agent_assignments WHERE agent_id = ? AND agent_version = ?").all(id, version) as Record<string, unknown>[]) refs.push({ type: "workflow_assignment", id: String(row.id), detail: `Workflow assignment ${String(row.role)} must be reassigned` }); } catch { /* no workflow tables exist until a workflow is opened */ }
   for (const repository of listRepositories(machineDir)) {
     try {
@@ -323,7 +322,12 @@ export function executeAgentRemoval(operationId: string, machineDir?: string): A
     const root = String(row.installation_root ?? ""); const base = resolve(machineDir ?? GLOBAL_DIR, "agents");
     if (root && (resolve(root) === base || relative(base, root).startsWith(".."))) throw new Error("Installation payload is outside Marshal's owned agents directory");
     if (root) rmSync(root, { recursive: true, force: true });
-    db.transaction(() => { db.prepare("INSERT OR REPLACE INTO agent_removal_tombstones (installation_id, agent_id, version, provenance, removed_at, removal_operation_id) VALUES (?, ?, ?, ?, ?, ?)").run(op.installation_id, op.agent_id, op.version, String(row.provenance ?? "{}"), new Date().toISOString(), operationId); db.prepare("DELETE FROM installed_agents WHERE id = ? AND version = ? AND installation_id = ?").run(op.agent_id, op.version, op.installation_id); db.prepare("UPDATE agent_removal_operations SET status = 'completed', finished_at = ?, error = NULL WHERE id = ?").run(new Date().toISOString(), operationId); })();
+    db.transaction(() => {
+      db.prepare("INSERT OR REPLACE INTO agent_removal_tombstones (installation_id, agent_id, version, provenance, removed_at, removal_operation_id) VALUES (?, ?, ?, ?, ?, ?)").run(op.installation_id, op.agent_id, op.version, String(row.provenance ?? "{}"), new Date().toISOString(), operationId);
+      db.prepare("DELETE FROM installed_agents WHERE id = ? AND version = ? AND installation_id = ?").run(op.agent_id, op.version, op.installation_id);
+      db.prepare("UPDATE installed_agents SET is_default = 1 WHERE id = ? AND status = 'installed' AND is_default = 0 AND NOT EXISTS (SELECT 1 FROM installed_agents WHERE id = ? AND is_default = 1) AND installation_id = (SELECT installation_id FROM installed_agents WHERE id = ? AND status = 'installed' ORDER BY updated_at DESC LIMIT 1)").run(op.agent_id, op.agent_id, op.agent_id);
+      db.prepare("UPDATE agent_removal_operations SET status = 'completed', finished_at = ?, error = NULL WHERE id = ?").run(new Date().toISOString(), operationId);
+    })();
   } catch (error) { db.prepare("UPDATE agent_removal_operations SET status = 'failed', finished_at = ?, error = ?, error_code = 'agent_cleanup_failed', diagnostic = ? WHERE id = ?").run(new Date().toISOString(), error instanceof Error ? error.message : String(error), JSON.stringify({ message: "Marshal could not clean up the installation payload", action: "Fix the payload permissions or path, then retry removal." }), operationId); }
   return getAgentRemovalOperation(operationId, machineDir)!;
 }

@@ -115,7 +115,7 @@ export function AgentsRoute(): JSX.Element {
       confirmLabel: "Remove",
     });
     if (!ok) return;
-    await remove.mutateAsync({ agentId: entry.id, version: entry.version });
+    await remove.mutateAsync({ agentId: entry.id, version: entry.version, installationId: entry.installation_id });
     await client.invalidateQueries({ queryKey: queryKeys.installedAgents });
   };
   const probeAgent = async (entry: InstalledAgent): Promise<void> => { await probe.mutateAsync({ agentId: entry.id, version: entry.version }); await client.invalidateQueries({ queryKey: queryKeys.installedAgents }); };
@@ -352,7 +352,7 @@ function InstalledCard({ entry, registryAgent, onProbe, onRemove, onUpdate, onDe
         ))}
         {onUpdate && <Button variant="outline" size="sm" onClick={onUpdate} disabled={busy || preparing}><Download aria-hidden />Update available</Button>}
         {entry.status === "installed" && !entry.is_default && <Button variant="outline" size="sm" onClick={() => onDefault(entry.installation_id)} disabled={busy}>Use by default</Button>}
-        <Button variant="outline" size="sm" onClick={onProbe} disabled={busy}>Probe</Button>
+        <Button variant="outline" size="sm" onClick={onProbe} disabled={busy} title="Check ACP initialization, authentication, capabilities, and a temporary session">Probe readiness</Button>
         <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground hover:text-error" onClick={onRemove} disabled={busy}>Remove</Button>
       </div>
     </article>

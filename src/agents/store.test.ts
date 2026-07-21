@@ -78,7 +78,7 @@ describe("installed agent storage", () => {
     expect(repository.id).toBeTruthy();
   });
 
-  it("blocks workflow assignments, defaults, authentication, and installation operations", () => {
+  it("blocks workflow assignments, authentication, and installation operations", () => {
     const machineDir = mkdtempSync(`${tmpdir()}/marshal-removal-live-`); const root = mkdtempSync(`${tmpdir()}/marshal-removal-workflow-`); execFileSync("git", ["init", "-q", root]);
     installation(machineDir); setAgentReadiness("demo", "1.0.0", { readiness_status: "ready", readiness_error: null, protocol_version: 1, capabilities: { prompt: { text: true, image: false, audio: false, embedded_context: false }, session: { close: true, list: false, load: false, fork: false, resume: false }, load_session: false, auth: { logout: false } }, auth_methods: [], raw_initialize: {}, probed_at: new Date().toISOString() }, machineDir); const repository = registerRepository(root, machineDir); listWorkflowProfiles(repository.id, machineDir);
     saveWorkflowProfile(repository.id, { name: "Default", permission_policy: "allow_reads_ask_writes", unattended_authorized: false, timeout_ms: 1000, max_retries: 0, verification_commands: [], require_decorrelated_builder_validator: false, assignments: [{ role: "builder", agent_id: "demo", agent_version: "1.0.0" }] }, undefined, machineDir);
@@ -87,7 +87,7 @@ describe("installed agent storage", () => {
     createInstallation({ id: "demo", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "demo@1.0.0", launch: { command: "npx", args: ["demo@1.0.0"] }, registry_snapshot_fetched_at: "snapshot", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null, installation_id: "installing-install" }, "active-install-op", machineDir);
     const operation = removeInstalledAgent("demo", "1.0.0", machineDir, "remove-install");
     expect(operation.error_code).toBe("agent_removal_conflict");
-    expect(operation.references.map((reference) => reference.type)).toEqual(expect.arrayContaining(["workflow_assignment", "default", "authentication"]));
+    expect(operation.references.map((reference) => reference.type)).toEqual(expect.arrayContaining(["workflow_assignment", "authentication"]));
     expect(removeInstalledAgent("demo", "1.0.0", machineDir, "installing-install").references.map((reference) => reference.type)).toContain("installation");
   });
 
@@ -99,6 +99,16 @@ describe("installed agent storage", () => {
     expect(first.status).toBe("completed"); expect(getInstalledAgent("demo", "1.0.0", machineDir, "owned-install")).toBeUndefined(); expect(getAgentRemovalOperation(first.id, machineDir)).toMatchObject({ status: "completed" });
     expect(() => execFileSync("test", ["!", "-e", root])).not.toThrow();
     expect(removeInstalledAgent("demo", "1.0.0", machineDir, "owned-install").id).toBe(first.id);
+  });
+
+  it("removes the default installation and promotes the newest remaining installation", () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-removal-default-`);
+    installation(machineDir, "old-install");
+    installation(machineDir, "new-install");
+    setDefaultInstalledAgent("demo", "old-install", machineDir);
+    const removed = removeInstalledAgent("demo", "1.0.0", machineDir, "old-install");
+    expect(removed.status).toBe("completed");
+    expect(getInstalledAgent("demo", "1.0.0", machineDir, "new-install")?.is_default).toBe(true);
   });
 
   it("retains a failed cleanup operation for retry", () => {
