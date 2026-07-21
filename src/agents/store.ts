@@ -95,6 +95,7 @@ function tables(machineDir?: string) {
     "ALTER TABLE installation_operations ADD COLUMN error_code TEXT",
     "ALTER TABLE installation_operations ADD COLUMN diagnostic TEXT",
   ]) { try { db.exec(statement); } catch (error) { if (!(error instanceof Error) || !error.message.includes("duplicate column name")) throw error; } }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_installed_agents_identity ON installed_agents(id, version, distribution, installation_id)");
   return db;
 }
 

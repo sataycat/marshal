@@ -8,8 +8,38 @@ import { createSession, updateSession } from "../acp/supervisor-store.js";
 import { beginAgentAuthentication } from "./store.js";
 import { registerRepository } from "../repositories/store.js";
 import { listWorkflowProfiles, saveWorkflowProfile } from "../workflows/store.js";
+import { openMachineDb } from "../storage/machine.js";
 
 describe("installed agent storage", () => {
+  it("migrates legacy installation tables for identity upserts", () => {
+    const machineDir = mkdtempSync(`${tmpdir()}/marshal-agents-legacy-`);
+    const db = openMachineDb(machineDir);
+    db.exec(`
+      CREATE TABLE installed_agents (
+        id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        source TEXT NOT NULL,
+        license TEXT NOT NULL,
+        distribution TEXT NOT NULL,
+        package_specifier TEXT NOT NULL,
+        launch TEXT NOT NULL,
+        registry_snapshot_fetched_at TEXT NOT NULL,
+        integrity_status TEXT NOT NULL,
+        installation_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        failure TEXT,
+        PRIMARY KEY (id, version)
+      )
+    `);
+    db.close();
+
+    createInstallation({ id: "legacy", version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "legacy@1.0.0", launch: { command: "npx", args: ["legacy@1.0.0"] }, registry_snapshot_fetched_at: "snapshot", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null, installation_id: "legacy-install" }, "legacy-op", machineDir);
+
+    expect(listInstalledAgents(machineDir)).toHaveLength(1);
+  });
+
   it("preserves agent identity/version references and generalized npx provenance", () => {
     const machineDir = mkdtempSync(`${tmpdir()}/marshal-agents-`);
     createInstallation({ id: "demo", version: "1.2.3", source: "registry", license: "MIT", distribution: "npx", package_specifier: "demo@1.2.3", launch: { command: "npx", args: ["--yes", "demo@1.2.3"] }, registry_snapshot_fetched_at: "snapshot", integrity_status: "not_applicable", status: "installing", readiness_status: "unknown", readiness_error: null, protocol_version: null, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: null }, "op", machineDir);
