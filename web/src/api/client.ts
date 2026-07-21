@@ -25,14 +25,23 @@ import type {
   DirectorySuggestion,
 } from "../types";
 
-export async function fetchDiagnostics(signal?: AbortSignal): Promise<DiagnosticsResponse> { const res = await fetch("/api/diagnostics", { signal }); return jsonOrThrow<DiagnosticsResponse>(res); }
+export async function fetchDiagnostics(signal?: AbortSignal): Promise<DiagnosticsResponse> {
+  const res = await fetch("/api/diagnostics", { signal });
+  return jsonOrThrow<DiagnosticsResponse>(res);
+}
 
-export async function fetchRepositories(signal?: AbortSignal): Promise<{ repositories: Repository[]; selected_repository_id: string | null }> {
+export async function fetchRepositories(
+  signal?: AbortSignal,
+): Promise<{ repositories: Repository[]; selected_repository_id: string | null }> {
   const res = await fetch("/api/repositories", { signal });
   return jsonOrThrow(res);
 }
 export async function registerRepository(path: string): Promise<Repository> {
-  const res = await fetch("/api/repositories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
+  const res = await fetch("/api/repositories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
   return (await jsonOrThrow<{ repository: Repository }>(res)).repository;
 }
 export async function selectRepository(id: string): Promise<Repository> {
@@ -43,18 +52,75 @@ export async function removeRepository(id: string): Promise<void> {
   const res = await fetch(`/api/repositories/${encodeURIComponent(id)}`, { method: "DELETE" });
   await jsonOrThrow(res);
 }
-export async function fetchDirectorySuggestions(path = "~", query = "", signal?: AbortSignal): Promise<{ path: string; display_path: string; directories: DirectorySuggestion[] }> {
+export async function fetchDirectorySuggestions(
+  path = "~",
+  query = "",
+  signal?: AbortSignal,
+): Promise<{ path: string; display_path: string; directories: DirectorySuggestion[] }> {
   const params = new URLSearchParams({ path });
   if (query) params.set("q", query);
   const res = await fetch(`/api/repositories/directories?${params}`, { signal });
   return jsonOrThrow(res);
 }
 
-export interface WorkflowProfileInput { name: string; permission_policy: PermissionPolicy; unattended_authorized: boolean; timeout_ms: number; max_retries: number; verification_commands: string[]; require_decorrelated_builder_validator: boolean; assignments: Array<{ role: WorkflowRole; agent_id: string; agent_version: string; model: string | null; mode: string | null }> }
-export async function fetchWorkflowProfiles(repositoryId: string, signal?: AbortSignal): Promise<WorkflowProfile[]> { const res = await fetch(`/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles`, { signal }); return (await jsonOrThrow<{ profiles: WorkflowProfile[] }>(res)).profiles; }
-export async function createWorkflowProfile(repositoryId: string, input: WorkflowProfileInput): Promise<WorkflowProfile> { const res = await fetch(`/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }); return (await jsonOrThrow<{ profile: WorkflowProfile }>(res)).profile; }
-export async function updateWorkflowProfile(repositoryId: string, id: string, input: WorkflowProfileInput): Promise<WorkflowProfile> { const res = await fetch(`/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }); return (await jsonOrThrow<{ profile: WorkflowProfile }>(res)).profile; }
-export async function deleteWorkflowProfile(repositoryId: string, id: string): Promise<void> { const res = await fetch(`/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles/${encodeURIComponent(id)}`, { method: "DELETE" }); await jsonOrThrow(res); }
+export interface WorkflowProfileInput {
+  name: string;
+  permission_policy: PermissionPolicy;
+  unattended_authorized: boolean;
+  timeout_ms: number;
+  max_retries: number;
+  verification_commands: string[];
+  require_decorrelated_builder_validator: boolean;
+  assignments: Array<{
+    role: WorkflowRole;
+    agent_id: string;
+    agent_version: string;
+    model: string | null;
+    mode: string | null;
+  }>;
+}
+export async function fetchWorkflowProfiles(
+  repositoryId: string,
+  signal?: AbortSignal,
+): Promise<WorkflowProfile[]> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles`,
+    { signal },
+  );
+  return (await jsonOrThrow<{ profiles: WorkflowProfile[] }>(res)).profiles;
+}
+export async function createWorkflowProfile(
+  repositoryId: string,
+  input: WorkflowProfileInput,
+): Promise<WorkflowProfile> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  return (await jsonOrThrow<{ profile: WorkflowProfile }>(res)).profile;
+}
+export async function updateWorkflowProfile(
+  repositoryId: string,
+  id: string,
+  input: WorkflowProfileInput,
+): Promise<WorkflowProfile> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles/${encodeURIComponent(id)}`,
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) },
+  );
+  return (await jsonOrThrow<{ profile: WorkflowProfile }>(res)).profile;
+}
+export async function deleteWorkflowProfile(repositoryId: string, id: string): Promise<void> {
+  const res = await fetch(
+    `/api/repositories/${encodeURIComponent(repositoryId)}/workflow-profiles/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+  await jsonOrThrow(res);
+}
 
 export interface RegistryCatalogResponse {
   agents: RegistryAgent[];
@@ -67,8 +133,22 @@ export async function fetchRegistryCatalog(signal?: AbortSignal): Promise<Regist
   const res = await fetch("/api/registry/agents", { signal });
   return jsonOrThrow<RegistryCatalogResponse>(res);
 }
-export interface InstallCandidate { agent_id: string; version: string; source: "registry"; license: string; distribution: RegistryAgent["distributions"][number]; checksum: string | null; integrity_policy: "verified_if_declared" | "unverified_binary_allowed" | "not_applicable"; installation_risk: "low" | "medium" | "high" }
-export async function fetchInstallCandidate(agentId: string, version: string, distribution?: "npx" | "uvx" | "binary", signal?: AbortSignal): Promise<InstallCandidate> {
+export interface InstallCandidate {
+  agent_id: string;
+  version: string;
+  source: "registry";
+  license: string;
+  distribution: RegistryAgent["distributions"][number];
+  checksum: string | null;
+  integrity_policy: "verified_if_declared" | "unverified_binary_allowed" | "not_applicable";
+  installation_risk: "low" | "medium" | "high";
+}
+export async function fetchInstallCandidate(
+  agentId: string,
+  version: string,
+  distribution?: "npx" | "uvx" | "binary",
+  signal?: AbortSignal,
+): Promise<InstallCandidate> {
   const params = new URLSearchParams({ agent_id: agentId, version });
   if (distribution) params.set("distribution", distribution);
   const res = await fetch(`/api/agents/install-candidate?${params}`, { signal });
@@ -85,49 +165,151 @@ export async function fetchInstalledAgents(signal?: AbortSignal): Promise<Instal
   return (await jsonOrThrow<{ agents: InstalledAgent[] }>(res)).agents;
 }
 
-export async function installRegistryAgent(agentId: string, version: string, distribution?: "npx" | "uvx" | "binary"): Promise<InstallationOperation> {
-  const res = await fetch("/api/agents/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent_id: agentId, version, ...(distribution ? { distribution } : {}) }) });
+export async function installRegistryAgent(
+  agentId: string,
+  version: string,
+  distribution?: "npx" | "uvx" | "binary",
+): Promise<InstallationOperation> {
+  const res = await fetch("/api/agents/install", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: agentId, version, ...(distribution ? { distribution } : {}) }),
+  });
   return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation;
 }
-export async function updateRegistryAgent(agentId: string, version: string, distribution?: "npx" | "uvx" | "binary"): Promise<InstallationOperation> { const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/update`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, ...(distribution ? { distribution } : {}) }) }); return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation; }
-export async function setDefaultInstalledAgent(agentId: string, installationId: string): Promise<InstalledAgent> { const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/default`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ installation_id: installationId }) }); return (await jsonOrThrow<{ agent: InstalledAgent }>(res)).agent; }
+export async function updateRegistryAgent(
+  agentId: string,
+  version: string,
+  distribution?: "npx" | "uvx" | "binary",
+): Promise<InstallationOperation> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/update`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version, ...(distribution ? { distribution } : {}) }),
+  });
+  return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation;
+}
+export async function setDefaultInstalledAgent(
+  agentId: string,
+  installationId: string,
+): Promise<InstalledAgent> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/default`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ installation_id: installationId }),
+  });
+  return (await jsonOrThrow<{ agent: InstalledAgent }>(res)).agent;
+}
 
-export async function fetchInstallationOperation(id: string, signal?: AbortSignal): Promise<InstallationOperation> {
+export async function fetchInstallationOperation(
+  id: string,
+  signal?: AbortSignal,
+): Promise<InstallationOperation> {
   const res = await fetch(`/api/agents/operations/${encodeURIComponent(id)}`, { signal });
   return (await jsonOrThrow<{ operation: InstallationOperation }>(res)).operation;
 }
-export async function fetchInstallationOperations(signal?: AbortSignal): Promise<InstallationOperation[]> {
+export async function fetchInstallationOperations(
+  signal?: AbortSignal,
+): Promise<InstallationOperation[]> {
   const res = await fetch("/api/agents/operations", { signal });
   return (await jsonOrThrow<{ operations: InstallationOperation[] }>(res)).operations;
 }
 
-export interface InstallationRemovalOperation { id: string; agent_id: string; version: string; installation_id: string; status: "removing" | "blocked" | "completed" | "failed"; started_at: string; finished_at: string | null; error: string | null; error_code: string | null; diagnostic: { message: string; action: string; details?: { references?: Array<{ type: string; id: string; detail: string }> } } | null; references: Array<{ type: string; id: string; detail: string }> }
-export async function removeInstalledAgent(agentId: string, version: string, installationId?: string): Promise<{ operation: InstallationRemovalOperation }> {
-  const params = new URLSearchParams({ version }); if (installationId) params.set("installation_id", installationId);
-  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}?${params}`, { method: "DELETE" });
+export interface InstallationRemovalOperation {
+  id: string;
+  agent_id: string;
+  version: string;
+  installation_id: string;
+  status: "removing" | "blocked" | "completed" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  error: string | null;
+  error_code: string | null;
+  diagnostic: {
+    message: string;
+    action: string;
+    details?: { references?: Array<{ type: string; id: string; detail: string }> };
+  } | null;
+  references: Array<{ type: string; id: string; detail: string }>;
+}
+export async function removeInstalledAgent(
+  agentId: string,
+  version: string,
+  installationId?: string,
+): Promise<{ operation: InstallationRemovalOperation }> {
+  const params = new URLSearchParams({ version });
+  if (installationId) params.set("installation_id", installationId);
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}?${params}`, {
+    method: "DELETE",
+  });
   if (res.ok) return (await res.json()) as { operation: InstallationRemovalOperation };
   let body: { error?: string; code?: string; operation?: InstallationRemovalOperation } = {};
-  try { body = (await res.json()) as typeof body; } catch { /* use status fallback */ }
+  try {
+    body = (await res.json()) as typeof body;
+  } catch {
+    /* use status fallback */
+  }
   const references = body.operation?.references ?? [];
-  const detail = references.length > 0 ? ` ${references.map((reference) => reference.detail).join("; ")}.` : "";
-  throw new ApiError(`${body.error ?? `Request failed: ${res.status}`}${detail}`, res.status, body.code);
+  const detail =
+    references.length > 0 ? ` ${references.map((reference) => reference.detail).join("; ")}.` : "";
+  throw new ApiError(
+    `${body.error ?? `Request failed: ${res.status}`}${detail}`,
+    res.status,
+    body.code,
+  );
 }
-export async function retryAgentRemoval(operationId: string): Promise<InstallationRemovalOperation> { const res = await fetch(`/api/agents/removal-operations/${encodeURIComponent(operationId)}/retry`, { method: "POST" }); return (await jsonOrThrow<{ operation: InstallationRemovalOperation }>(res)).operation; }
+export async function retryAgentRemoval(
+  operationId: string,
+): Promise<InstallationRemovalOperation> {
+  const res = await fetch(
+    `/api/agents/removal-operations/${encodeURIComponent(operationId)}/retry`,
+    { method: "POST" },
+  );
+  return (await jsonOrThrow<{ operation: InstallationRemovalOperation }>(res)).operation;
+}
 
-export async function probeInstalledAgent(agentId: string, version: string): Promise<InstalledAgent> {
-  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/probe?version=${encodeURIComponent(version)}`, { method: "POST" });
+export async function probeInstalledAgent(
+  agentId: string,
+  version: string,
+): Promise<InstalledAgent> {
+  const res = await fetch(
+    `/api/agents/${encodeURIComponent(agentId)}/probe?version=${encodeURIComponent(version)}`,
+    { method: "POST" },
+  );
   return (await jsonOrThrow<{ agent: InstalledAgent }>(res)).agent;
 }
-export async function authenticateInstalledAgent(agentId: string, version: string, methodId: string): Promise<AgentAuthenticationOperation> {
-  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/auth?version=${encodeURIComponent(version)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ method_id: methodId }) });
+export async function authenticateInstalledAgent(
+  agentId: string,
+  version: string,
+  methodId: string,
+): Promise<AgentAuthenticationOperation> {
+  const res = await fetch(
+    `/api/agents/${encodeURIComponent(agentId)}/auth?version=${encodeURIComponent(version)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method_id: methodId }),
+    },
+  );
   return (await jsonOrThrow<{ authentication: AgentAuthenticationOperation }>(res)).authentication;
 }
-export async function fetchAgentAuthentication(agentId: string, version: string, signal?: AbortSignal): Promise<{ authentication: AgentAuthenticationOperation | null }> {
-  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/auth?version=${encodeURIComponent(version)}`, { signal });
+export async function fetchAgentAuthentication(
+  agentId: string,
+  version: string,
+  signal?: AbortSignal,
+): Promise<{ authentication: AgentAuthenticationOperation | null }> {
+  const res = await fetch(
+    `/api/agents/${encodeURIComponent(agentId)}/auth?version=${encodeURIComponent(version)}`,
+    { signal },
+  );
   return jsonOrThrow<{ authentication: AgentAuthenticationOperation | null }>(res);
 }
-export async function cancelAgentAuthentication(operationId: string): Promise<AgentAuthenticationOperation> {
-  const res = await fetch(`/api/agents/auth/operations/${encodeURIComponent(operationId)}/cancel`, { method: "POST" });
+export async function cancelAgentAuthentication(
+  operationId: string,
+): Promise<AgentAuthenticationOperation> {
+  const res = await fetch(`/api/agents/auth/operations/${encodeURIComponent(operationId)}/cancel`, {
+    method: "POST",
+  });
   return (await jsonOrThrow<{ authentication: AgentAuthenticationOperation }>(res)).authentication;
 }
 
@@ -186,7 +368,11 @@ export async function fetchTaskDetail(slug: string, signal?: AbortSignal): Promi
 
 export class ApiError extends Error {
   code?: string;
-  constructor(message: string, public readonly status: number, code?: string) {
+  constructor(
+    message: string,
+    public readonly status: number,
+    code?: string,
+  ) {
     super(message);
     this.name = "ApiError";
     this.code = code;
@@ -229,8 +415,32 @@ export async function createTask(input: {
   return body.task;
 }
 
-export interface SpecAuthorSessionEvidence { id: string; agent_id: string; agent_version: string; capabilities: unknown; assignment_config: unknown; acp_session_id: string | null; supervisor_session_id: string | null; status: string; operations: Array<{ id: number; operation: string; status: string; diagnostic: string | null; created_at: string }> }
-export async function fetchSpecAuthorSessions(slug: string, signal?: AbortSignal): Promise<SpecAuthorSessionEvidence[]> { const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-author-sessions`, { signal }); return (await jsonOrThrow<{ sessions: SpecAuthorSessionEvidence[] }>(res)).sessions; }
+export interface SpecAuthorSessionEvidence {
+  id: string;
+  agent_id: string;
+  agent_version: string;
+  capabilities: unknown;
+  assignment_config: unknown;
+  acp_session_id: string | null;
+  supervisor_session_id: string | null;
+  status: string;
+  operations: Array<{
+    id: number;
+    operation: string;
+    status: string;
+    diagnostic: string | null;
+    created_at: string;
+  }>;
+}
+export async function fetchSpecAuthorSessions(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<SpecAuthorSessionEvidence[]> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-author-sessions`, {
+    signal,
+  });
+  return (await jsonOrThrow<{ sessions: SpecAuthorSessionEvidence[] }>(res)).sessions;
+}
 
 export async function freezeTask(slug: string, specMarkdown?: string): Promise<TaskDetail> {
   const body: Record<string, string> = {};
@@ -268,7 +478,10 @@ export async function mergeTask(slug: string): Promise<MergeResponse> {
   return jsonOrThrow<MergeResponse>(res);
 }
 
-export async function fetchSpecMessages(slug: string, signal?: AbortSignal): Promise<SpecMessage[]> {
+export async function fetchSpecMessages(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<SpecMessage[]> {
   const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-messages`, { signal });
   const body = await jsonOrThrow<{ messages: SpecMessage[] }>(res);
   return body.messages;
@@ -301,13 +514,20 @@ export async function updateTaskSpec(slug: string, specMarkdown: string): Promis
   return body.task;
 }
 
-export async function fetchChatThreads(includeArchived = false, signal?: AbortSignal): Promise<ChatThread[]> {
+export async function fetchChatThreads(
+  includeArchived = false,
+  signal?: AbortSignal,
+): Promise<ChatThread[]> {
   const res = await fetch(`/api/threads${includeArchived ? "?archived=true" : ""}`, { signal });
   const body = await jsonOrThrow<{ threads: ChatThread[] }>(res);
   return body.threads;
 }
 
-export async function createChatThread(input: { agent_id: string; agent_version: string; cwd?: string }): Promise<ChatThread> {
+export async function createChatThread(input: {
+  agent_id: string;
+  agent_version: string;
+  cwd?: string;
+}): Promise<ChatThread> {
   const res = await fetch("/api/threads", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -317,8 +537,21 @@ export async function createChatThread(input: { agent_id: string; agent_version:
   return body.thread;
 }
 
-export async function updateChatThread(id: string, input: { title?: string; status?: ChatThread["status"]; archived?: boolean; pinned?: boolean; scratch_markdown?: string }): Promise<ChatThread> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+export async function updateChatThread(
+  id: string,
+  input: {
+    title?: string;
+    status?: ChatThread["status"];
+    archived?: boolean;
+    pinned?: boolean;
+    scratch_markdown?: string;
+  },
+): Promise<ChatThread> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
   return (await jsonOrThrow<{ thread: ChatThread }>(res)).thread;
 }
 
@@ -327,7 +560,10 @@ export async function deleteChatThread(id: string): Promise<void> {
   await jsonOrThrow<{ deleted: boolean }>(res);
 }
 
-export async function fetchChatThread(id: string, signal?: AbortSignal): Promise<{ thread: ChatThread; messages: ChatMessage[]; events?: AcpEvent[] }> {
+export async function fetchChatThread(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ thread: ChatThread; messages: ChatMessage[]; events?: AcpEvent[] }> {
   const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, { signal });
   return jsonOrThrow<{ thread: ChatThread; messages: ChatMessage[] }>(res);
 }
@@ -339,11 +575,17 @@ export async function fetchChatEvents(id: string, signal?: AbortSignal): Promise
 export async function uploadChatAttachment(id: string, file: File): Promise<ChatAttachment> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/attachments`, { method: "POST", body: form });
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/attachments`, {
+    method: "POST",
+    body: form,
+  });
   return (await jsonOrThrow<{ attachment: ChatAttachment }>(res)).attachment;
 }
 
-export async function fetchChatAttachments(id: string, signal?: AbortSignal): Promise<ChatAttachment[]> {
+export async function fetchChatAttachments(
+  id: string,
+  signal?: AbortSignal,
+): Promise<ChatAttachment[]> {
   const res = await fetch(`/api/threads/${encodeURIComponent(id)}/attachments`, { signal });
   return (await jsonOrThrow<{ attachments: ChatAttachment[] }>(res)).attachments;
 }
@@ -352,7 +594,11 @@ export function chatAttachmentUrl(threadId: string, attachmentId: string): strin
   return `/api/threads/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(attachmentId)}`;
 }
 
-export async function sendChatMessage(id: string, content: string, attachmentIds: string[] = []): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage }> {
+export async function sendChatMessage(
+  id: string,
+  content: string,
+  attachmentIds: string[] = [],
+): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage }> {
   const res = await fetch(`/api/threads/${encodeURIComponent(id)}/send`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -366,17 +612,27 @@ export async function cancelChatTurn(id: string): Promise<void> {
   await jsonOrThrow<{ cancelled: boolean }>(res);
 }
 
-export async function fetchChatPermissions(id: string, signal?: AbortSignal): Promise<PendingPermission[]> {
+export async function fetchChatPermissions(
+  id: string,
+  signal?: AbortSignal,
+): Promise<PendingPermission[]> {
   const res = await fetch(`/api/threads/${encodeURIComponent(id)}/permissions`, { signal });
   return (await jsonOrThrow<{ permissions: PendingPermission[] }>(res)).permissions;
 }
 
-export async function decideChatPermission(id: string, requestId: string, action: "approve" | "deny"): Promise<void> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/permissions/${encodeURIComponent(requestId)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action }),
-  });
+export async function decideChatPermission(
+  id: string,
+  requestId: string,
+  action: "approve" | "deny",
+): Promise<void> {
+  const res = await fetch(
+    `/api/threads/${encodeURIComponent(id)}/permissions/${encodeURIComponent(requestId)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    },
+  );
   await jsonOrThrow<{ requestId: string; action: string }>(res);
 }
 
@@ -385,8 +641,15 @@ export async function fetchChatFiles(id: string, signal?: AbortSignal): Promise<
   return (await jsonOrThrow<{ files: ChatFileEntry[] }>(res)).files;
 }
 
-export async function fetchChatFile(id: string, path: string, signal?: AbortSignal): Promise<ChatFileContent> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/files/content?path=${encodeURIComponent(path)}`, { signal });
+export async function fetchChatFile(
+  id: string,
+  path: string,
+  signal?: AbortSignal,
+): Promise<ChatFileContent> {
+  const res = await fetch(
+    `/api/threads/${encodeURIComponent(id)}/files/content?path=${encodeURIComponent(path)}`,
+    { signal },
+  );
   return (await jsonOrThrow<{ file: ChatFileContent }>(res)).file;
 }
 
@@ -413,7 +676,13 @@ export function connectBus(
   const open = (): void => {
     options.onStatus?.("connecting");
     ws = new WebSocket(wsUrl());
-    ws.onopen = () => options.onStatus?.("open");
+    ws.onopen = () => {
+      if (closed) {
+        ws?.close();
+        return;
+      }
+      options.onStatus?.("open");
+    };
     ws.onmessage = (ev) => {
       try {
         onEvent(JSON.parse(ev.data as string) as BusEvent);
@@ -442,7 +711,9 @@ export function connectBus(
       closed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try {
-        ws?.close();
+        // Let an in-flight handshake finish before closing. This avoids Vite
+        // writing to a proxy socket that React StrictMode just interrupted.
+        if (ws && ws.readyState !== WebSocket.CONNECTING) ws.close();
       } catch {
         // ignore
       }

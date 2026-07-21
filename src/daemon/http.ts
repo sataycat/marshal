@@ -1917,6 +1917,10 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const attachWs = options.attachWebSockets ?? true;
 
   const trustedProxy = options.trustedProxy ?? options.config?.daemon?.trustedProxy ?? false;
+  const trustedOrigins =
+    options.trustedOrigins ??
+    options.config?.daemon?.trustedOrigins ??
+    (options.webUrl ? [new URL(options.webUrl).origin] : undefined);
   const app = buildApp(version, {
     root,
     bus,
@@ -1952,7 +1956,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
       {
         path: "/ws",
         authenticate: (req) => auth.isAuthenticated(req.headers.cookie),
-        allowedOrigins: options.trustedOrigins ?? options.config?.daemon?.trustedOrigins,
+        allowedOrigins: trustedOrigins,
       },
     );
   }
