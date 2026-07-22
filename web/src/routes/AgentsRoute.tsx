@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Download, ExternalLink, MessageSquare, RefreshCw, Search, ShieldCheck, Wrench } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, Download, ExternalLink, MessageSquare, RefreshCw, Search, ShieldCheck, Wrench } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, buttonVariants } from "../components/ui/button";
 import { Link } from "wouter";
@@ -290,20 +290,23 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
   };
 
   return (
-    <article className="flex flex-col rounded-xl border border-border bg-panel p-4">
+    <article className={cn(
+      "flex flex-col overflow-hidden rounded-xl border bg-panel transition-colors",
+      cardState === "ready" ? "border-success-border bg-success-bg/35" : "border-border",
+    )}>
+      <div className="p-4 md:p-5">
       <div className="flex items-start gap-3">
-        {registryAgent && <AgentIcon agent={registryAgent} className="size-10 shrink-0 rounded-lg border border-border bg-bg object-cover p-1" />}
+        {registryAgent && <AgentIcon agent={registryAgent} className="size-11 shrink-0 rounded-lg border border-border bg-bg object-cover p-1" />}
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="font-semibold tracking-tight">{name}</h3>
-            {entry.is_default && <Badge tone="accent">Default</Badge>}
-          </div>
+          <h3 className="text-base font-semibold tracking-tight">{name}</h3>
           <p className="mt-0.5 font-mono text-xs text-muted-foreground">{entry.id}@{entry.version}</p>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
+        {cardState !== "ready" && <div className="flex shrink-0 flex-col items-end gap-1">
           {cardState === "signing_in" ? <Badge tone="accent">{installedCardStateLabel(cardState)}</Badge> : <ReadinessBadge status={entry.readiness_status} />}
-        </div>
+        </div>}
       </div>
+
+      {cardState === "ready" && <div className="mt-4 flex items-center gap-2 border-t border-success-border/70 pt-3 text-sm font-medium text-success"><span aria-hidden className="size-2 rounded-full bg-success" />Ready for a new conversation</div>}
 
       {entry.status === "failed" && <p className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">Installation failed: {entry.failure ?? "unknown error"}</p>}
       {entry.status === "installed" && entry.readiness_status === "probing" && <p className="mt-3 text-sm text-muted-foreground">Marshal is getting this agent ready.</p>}
@@ -344,33 +347,39 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
         </div>
       )}
 
-      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
-        {cardState === "ready" && <Link href="/chat" className={cn(buttonVariants({ size: "sm" }))}><MessageSquare aria-hidden />Start chat</Link>}
-        {cardState === "sign_in_required" && signInMethod && <Button size="sm" onClick={() => onAuthenticate(signInMethod.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Sign in</Button>}
-        {cardState === "setup_needed" && <Button size="sm" onClick={onProbe} disabled={busy || activationBusy}><Wrench aria-hidden />Retry setup</Button>}
-        <details className="ml-auto text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none py-1 font-medium hover:text-text">Details</summary>
-          <div className="mt-2 min-w-72 rounded-lg border border-border bg-inset p-3">
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-              <dt>Distribution</dt><dd className="font-medium text-text">{entry.distribution}</dd>
-              <dt>Integrity</dt><dd className="font-medium text-text">{entry.integrity_status.replaceAll("_", " ")}</dd>
-              <dt>ACP</dt><dd className="font-medium text-text">{entry.protocol_version === null ? "not negotiated" : `v${entry.protocol_version}`}</dd>
-              <dt>Authentication</dt><dd className="font-medium text-text">{entry.auth_methods.length === 0 ? "No methods advertised" : entry.auth_methods.map((method) => method.name).join(", ")}</dd>
-              <dt>Last check</dt><dd className="font-medium text-text">{entry.probed_at ? new Date(entry.probed_at).toLocaleString() : "not completed"}</dd>
-            </dl>
-            {entry.readiness_failure && <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-bg p-2 font-mono text-[0.6875rem] text-error">{JSON.stringify(entry.readiness_failure, null, 2)}</pre>}
-            {(entry.capabilities || entry.raw_initialize) && <details className="mt-3 border-t border-border pt-2"><summary className="cursor-pointer font-medium">Protocol diagnostics</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-bg p-2 font-mono text-[0.6875rem] text-text">{JSON.stringify({ capabilities: entry.capabilities, raw_initialize: entry.raw_initialize }, null, 2)}</pre></details>}
-            <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
-              {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "agent").map((method) => <Button key={method.id} variant="outline" size="xs" onClick={() => onAuthenticate(method.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />{method.name}</Button>)}
-              {entry.auth_methods.map((method) => ({ method, support: authMethodSupport(method) })).filter(({ support }) => !support.supported).map(({ method, support }) => <div key={method.id} className="basis-full rounded border border-warn-border bg-warn-bg px-2 py-1.5 text-warn"><strong>{method.name}</strong> is advertised but unavailable: {!support.supported && support.reason}</div>)}
-              {onUpdate && <Button variant="outline" size="xs" onClick={onUpdate} disabled={busy || preparing}><Download aria-hidden />Update</Button>}
-              {entry.status === "installed" && !entry.is_default && <Button variant="outline" size="xs" onClick={() => onDefault(entry.installation_id)} disabled={busy}>Use by default</Button>}
-              <Button variant="outline" size="xs" onClick={onProbe} disabled={busy || activationBusy}><Wrench aria-hidden />Retry setup check</Button>
-              <Button variant="ghost" size="xs" className="text-muted-foreground hover:text-error" onClick={onRemove} disabled={busy || activationBusy}>Remove</Button>
-            </div>
-          </div>
-        </details>
+      <div className="mt-4 flex flex-col gap-2 border-t border-border/80 pt-4 sm:flex-row sm:items-center">
+        {cardState === "ready" && <Link href="/chat" className={cn(buttonVariants({ size: "lg" }), "h-10 w-full px-6 sm:w-auto")}><MessageSquare aria-hidden />Start a chat</Link>}
+        {cardState === "sign_in_required" && signInMethod && <Button size="lg" className="h-10 w-full px-6 sm:w-auto" onClick={() => onAuthenticate(signInMethod.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Sign in</Button>}
+        {cardState === "setup_needed" && <Button size="lg" className="h-10 w-full px-6 sm:w-auto" onClick={onProbe} disabled={busy || activationBusy}><Wrench aria-hidden />Retry setup</Button>}
+        {cardState === "getting_ready" && <p className="text-sm text-muted-foreground">Setup is running. Details will update when the check finishes.</p>}
       </div>
+      </div>
+
+      <details className="group border-t border-border/80 bg-panel/70 text-sm">
+        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 font-medium text-muted-foreground transition-colors hover:bg-inset/70 hover:text-text md:px-5 [&::-webkit-details-marker]:hidden">
+          <span>Installation details</span>
+          <ChevronDown aria-hidden className="size-4 transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="border-t border-border/80 px-4 py-4 md:px-5">
+          <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div><dt className="text-xs text-muted-foreground">Distribution</dt><dd className="mt-0.5 font-medium text-text">{entry.distribution}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Integrity</dt><dd className="mt-0.5 font-medium capitalize text-text">{entry.integrity_status.replaceAll("_", " ")}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">ACP protocol</dt><dd className="mt-0.5 font-medium text-text">{entry.protocol_version === null ? "Not negotiated" : `v${entry.protocol_version}`}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Authentication</dt><dd className="mt-0.5 font-medium text-text">{entry.auth_methods.length === 0 ? "No methods advertised" : entry.auth_methods.map((method) => method.name).join(", ")}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Last setup check</dt><dd className="mt-0.5 font-medium text-text">{entry.probed_at ? new Date(entry.probed_at).toLocaleString() : "Not completed"}</dd></div>
+          </dl>
+          {entry.readiness_failure && <pre className="mt-4 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-bg p-3 font-mono text-[0.6875rem] text-error">{JSON.stringify(entry.readiness_failure, null, 2)}</pre>}
+          {(entry.capabilities || entry.raw_initialize) && <details className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground"><summary className="cursor-pointer font-medium hover:text-text">Protocol diagnostics</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-bg p-3 font-mono text-[0.6875rem] text-text">{JSON.stringify({ capabilities: entry.capabilities, raw_initialize: entry.raw_initialize }, null, 2)}</pre></details>}
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+            {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "agent").map((method) => <Button key={method.id} variant="outline" size="sm" onClick={() => onAuthenticate(method.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />{method.name}</Button>)}
+            {entry.auth_methods.map((method) => ({ method, support: authMethodSupport(method) })).filter(({ support }) => !support.supported).map(({ method, support }) => <div key={method.id} className="basis-full rounded border border-warn-border bg-warn-bg px-2 py-1.5 text-xs text-warn"><strong>{method.name}</strong> is advertised but unavailable: {!support.supported && support.reason}</div>)}
+            {onUpdate && <Button variant="outline" size="sm" onClick={onUpdate} disabled={busy || preparing}><Download aria-hidden />Update</Button>}
+            {entry.status === "installed" && !entry.is_default && <Button variant="outline" size="sm" onClick={() => onDefault(entry.installation_id)} disabled={busy}>Use this version</Button>}
+            <Button variant="outline" size="sm" onClick={onProbe} disabled={busy || activationBusy}><Wrench aria-hidden />Retry setup check</Button>
+            <Button variant="ghost" size="sm" className="sm:ml-auto text-muted-foreground hover:text-error" onClick={onRemove} disabled={busy || activationBusy}>Remove</Button>
+          </div>
+        </div>
+      </details>
     </article>
   );
 }

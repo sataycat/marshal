@@ -144,6 +144,22 @@ import { TerminalAuthManager } from "../acp/terminal-auth.js";
 import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
 import { randomUUID } from "node:crypto";
 import { reconcileThreadPermissions } from "../acp/permission-store.js";
+
+function fuzzyDirectoryScore(name: string, query: string): number | null {
+  if (!query) return 0;
+  const candidate = name.toLowerCase();
+  let cursor = 0;
+  let score = 0;
+  let previous = -1;
+  for (const character of query) {
+    const index = candidate.indexOf(character, cursor);
+    if (index === -1) return null;
+    score += index === previous + 1 ? 0 : index + 1;
+    previous = index;
+    cursor = index + 1;
+  }
+  return score + (candidate.length - query.length) * 0.01;
+}
 import {
   deleteWorkflowProfile,
   getWorkflowProfile,
@@ -664,10 +680,11 @@ function registerRepositoryRoutes(app: Hono): void {
         path: resolve(parent, entry.name),
         is_git: existsSync(resolve(parent, entry.name, ".git")),
       }))
-      .filter((entry) => !query || entry.name.toLowerCase().includes(query))
-      .sort((a, b) => Number(b.is_git) - Number(a.is_git) || a.name.localeCompare(b.name))
+      .map((entry) => ({ ...entry, fuzzy_score: fuzzyDirectoryScore(entry.name, query) }))
+      .filter((entry) => entry.fuzzy_score !== null)
+      .sort((a, b) => (a.fuzzy_score! - b.fuzzy_score!) || Number(b.is_git) - Number(a.is_git) || a.name.localeCompare(b.name))
       .slice(0, 30);
-    return c.json({ path: parent, display_path: parent === homedir() ? "~" : parent, directories });
+    return c.json({ path: parent, display_path: parent === homedir() ? "~" : parent, directories: directories.map(({ fuzzy_score: _score, ...directory }) => directory) });
   });
   app.get("/api/repositories/:id", (c) => {
     const repository = getRepository(c.req.param("id"));

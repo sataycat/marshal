@@ -365,7 +365,8 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
   const [projectPath, setProjectPath] = useState("~");
   const [project, setProject] = useState<string | null>(null);
   const [projectSearch, setProjectSearch] = useState("");
-  const directoryQuery = useDirectorySuggestionsQuery(projectPath, projectSearch);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const directoryQuery = useDirectorySuggestionsQuery(projectPath, projectSearch, projectPickerOpen);
   const selectedRepository = repositories.data?.repositories.find((item) => item.id === repositories.data?.selected_repository_id);
   useEffect(() => {
     if (selectedRepository && !project) { setProject(selectedRepository.path); setProjectPath(selectedRepository.path); }
@@ -374,12 +375,14 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
     setProject(path);
     setProjectPath(path);
     setProjectSearch("");
+    setProjectPickerOpen(false);
     try {
       const existing = repositories.data?.repositories.find((item) => item.path === path);
       const repo = existing ?? await register.mutateAsync(path);
       await select.mutateAsync(repo.id);
     } catch (error) {
       setProject(null);
+      setProjectPickerOpen(true);
       pushError(error instanceof Error ? error.message : "Unable to select this project.");
     }
   };
@@ -439,29 +442,36 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
               <button
                 type="button"
                 className="rounded-md bg-secondary px-2 py-1 text-xs font-medium hover:bg-secondary/70"
-                onClick={() => setProject((current) => current ? null : projectPath)}
+                onClick={() => setProjectPickerOpen((open) => !open)}
               >
                 {project ? project.split("/").filter(Boolean).pop() ?? "~" : "Choose project"}
               </button>
               <span className="truncate font-mono text-[0.6875rem] text-muted-foreground">{project ?? "Required — the agent works inside this checkout"}</span>
             </div>
-            {!project && (
+            {projectPickerOpen && (
               <div className="mt-2 rounded-xl border border-border bg-bg p-2">
                 <label className="sr-only" htmlFor="project-search">Search projects</label>
                 <Input id="project-search" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Search directories…" autoFocus />
                 <div className="mt-1 max-h-48 overflow-y-auto">
-                  {directoryQuery.data?.directories.map((directory) => (
-                    <button key={directory.path} type="button" className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-secondary" onClick={() => void chooseProject(directory.path)}>
-                      <Folder className="size-4 text-muted-foreground" aria-hidden />
-                      <span className="min-w-0 flex-1 truncate">{directory.name}</span>
-                      {directory.is_git ? <Badge tone="success">Git</Badge> : <span className="text-xs text-muted-foreground">Open</span>}
+                  {projectPath !== "~" && (
+                    <button type="button" className="flex w-full items-center gap-2 rounded-lg bg-secondary px-2 py-2 text-left text-sm hover:bg-secondary/70" onClick={() => { const parent = projectPath.split("/").slice(0, -1).join("/") || "/"; setProjectPath(parent === "/" ? "~" : parent); setProjectSearch(""); }}>
+                      <ChevronLeft className="size-4 text-muted-foreground" aria-hidden />
+                      <span>..</span>
                     </button>
+                  )}
+                  {directoryQuery.data?.directories.map((directory) => (
+                    <div key={directory.path} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-secondary">
+                      <Folder className="size-4 text-muted-foreground" aria-hidden />
+                      <button type="button" className="min-w-0 flex-1 truncate text-left" onClick={() => { setProjectPath(directory.path); setProjectSearch(""); }}>{directory.name}</button>
+                      {directory.is_git ? <Badge tone="success">Git</Badge> : <span className="text-xs text-muted-foreground">Open</span>}
+                      <button type="button" className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-panel hover:text-text" onClick={() => void chooseProject(directory.path)}>Add</button>
+                    </div>
                   ))}
                   {directoryQuery.data?.directories.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">No directories match here.</p>}
                 </div>
                 <div className="mt-1 flex items-center justify-between px-2 text-xs text-muted-foreground">
-                  <span className="truncate font-mono">Searching {directoryQuery.data?.display_path ?? projectPath}</span>
-                  <button type="button" className="hover:text-text" onClick={() => { setProject(null); setProjectPath("~"); setProjectSearch(""); }}>Home</button>
+                  <span className="truncate font-mono">{directoryQuery.isFetching ? "Searching…" : directoryQuery.data?.display_path ?? projectPath}</span>
+                  <button type="button" className="hover:text-text" onClick={() => { setProjectPath("~"); setProjectSearch(""); }}>Home</button>
                 </div>
               </div>
             )}
