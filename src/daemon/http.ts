@@ -56,7 +56,7 @@ import {
   type RunEventRecord,
   type RunRecord,
 } from "./run-log.js";
-import { runSpecAuthorTurn, SpecChatClosedError } from "./spec-chat.js";
+import { runSpecAuthorTurn, resubmitSpecAuthorTurn, SpecChatClosedError } from "./spec-chat.js";
 import { listSpecMessages, type SpecMessage } from "../tasks/spec-store.js";
 import { publishSpecMessage } from "./bus.js";
 import type { Agent } from "../agent/types.js";
@@ -137,6 +137,10 @@ import {
   startInstallation,
 } from "../installations/installer.js";
 import { authenticateAgent } from "../acp/authenticate.js";
+import { bindAgentCredential } from "../agents/credentials.js";
+import { launchWithResolvedEnvironment } from "../agents/launch-environment.js";
+import { StructuredAcpFailureError, structuredAcpError, type StructuredAcpError } from "../acp/errors.js";
+import { TerminalAuthManager } from "../acp/terminal-auth.js";
 import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
 import { randomUUID } from "node:crypto";
 import { reconcileThreadPermissions } from "../acp/permission-store.js";
@@ -201,6 +205,7 @@ export interface BuildAppOptions {
   auth?: AuthService;
   trustedProxy?: boolean;
   machineDir?: string;
+  terminalAuth?: TerminalAuthManager;
 }
 
 export function defaultWebDistDir(): string {
@@ -260,7 +265,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerDiagnosticsRoute(app, options.machineDir, root, version);
   registerRepositoryRoutes(app);
   registerRegistryRoutes(app, options.machineDir);
-  registerAgentRoutes(app, options.machineDir, bus);
+  registerAgentRoutes(app, options.machineDir, bus, options.terminalAuth);
   registerWorkflowProfileRoutes(app, options.machineDir);
   registerTaskRoutes(app, root, options.worktreeRoot, bus, options.machineDir);
   registerRunRoutes(app, root);
@@ -269,10 +274,12 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerStaticRoutes(app, webDir, options.webUrl);
   app.notFound((c) => spaNotFound(c, webDir, options.webUrl));
   app.onError((err, c) => {
-    if (err instanceof ApiError) {
-      const body: { error: string; code?: string } = { error: err.message };
-      if (err.code !== undefined) body.code = err.code;
-      return c.json(body, err.status);
+    const mapped = err instanceof ApiError || err instanceof StructuredAcpFailureError ? mapDomainError(err) : null;
+    if (mapped) {
+      const body: { error: string; code?: string; failure?: StructuredAcpError } = { error: mapped.message };
+      if (mapped.code !== undefined) body.code = mapped.code;
+      if (mapped.failure) body.failure = mapped.failure;
+      return c.json(body, mapped.status);
     }
     logger.error({ err }, "Unhandled HTTP error");
     return c.json({ error: "Internal server error" }, 500);
@@ -280,7 +287,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   return app;
 }
 
-type StatusCode = 200 | 201 | 400 | 404 | 409 | 422 | 500;
+type StatusCode = 200 | 201 | 400 | 404 | 409 | 422 | 500 | 502 | 504;
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -385,6 +392,7 @@ class ApiError extends Error {
     readonly status: StatusCode,
     message: string,
     readonly code?: string,
+    readonly failure?: StructuredAcpError,
   ) {
     super(message);
     this.name = "ApiError";
@@ -474,6 +482,21 @@ function assertString(value: unknown, field: string): string {
 
 function mapDomainError(err: unknown): ApiError {
   if (err instanceof ApiError) return err;
+  if (err instanceof StructuredAcpFailureError) {
+    const failure = err.failure;
+    if (failure.kind === "agent_internal_error" && failure.protocol_code === null) {
+      logger.error({ err }, "Unexpected error in task HTTP handler");
+      return new ApiError(500, "Internal server error", "internal_error");
+    }
+    const status: StatusCode = failure.kind === "resource_not_found"
+      ? 404
+      : failure.kind === "timeout"
+        ? 504
+        : failure.kind === "agent_internal_error" || failure.kind === "process_start_failed"
+          ? 502
+          : 409;
+    return new ApiError(status, failure.message, failure.kind, failure);
+  }
   if (err instanceof TaskNotFoundError) {
     return new ApiError(404, err.message, "task_not_found");
   }
@@ -808,7 +831,7 @@ function registerRegistryRoutes(app: Hono, machineDir?: string): void {
   });
 }
 
-function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): void {
+function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus, terminalAuth?: TerminalAuthManager): void {
   app.get("/api/agents", (c) => c.json({ agents: listInstalledAgents(machineDir) }));
   app.post("/api/agents/:id/default", async (c) => {
     const body = await readJsonObject(c, new Set(["installation_id"]));
@@ -896,18 +919,50 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
     const version = c.req.query("version");
     const installationId = c.req.query("installation_id");
     if (!version) throw new ApiError(422, "version is required", "missing_query");
-    const body = await readJsonObject(c, new Set(["method_id"]));
+    const body = await readJsonObject(c, new Set(["method_id", "values"]));
     const methodId = assertString(body.method_id, "method_id");
     const installed = getInstalledAgent(c.req.param("id"), version, machineDir, installationId);
     if (!installed || installed.status !== "installed")
       throw new ApiError(409, "Only an installed agent can authenticate", "agent_not_installed");
     const method = installed.auth_methods.find((entry) => entry.id === methodId);
-    if (!method || method.type !== "agent")
+    if (!method)
       throw new ApiError(
         422,
-        "Only an advertised agent-managed authentication method can be selected",
+        "The selected authentication method is not advertised by this installed agent",
         "auth_method_invalid",
       );
+    if (method.type === "env_var") {
+      if (body.values === null || typeof body.values !== "object" || Array.isArray(body.values)) throw new ApiError(422, "values must be an object", "auth_values_invalid");
+      const values = body.values as Record<string, unknown>;
+      for (const variable of method.vars) {
+        const value = values[variable.name];
+        if (value === undefined) {
+          if (!variable.optional) throw new ApiError(422, `${variable.name} is required`, "auth_value_missing");
+          continue;
+        }
+        if (typeof value !== "string") throw new ApiError(422, `${variable.name} must be a string`, "auth_value_invalid");
+        bindAgentCredential(installed.installation_id, variable.name, value, variable.secret, machineDir);
+      }
+      const operation = beginAgentAuthentication({ id: randomUUID(), agent_id: installed.id, version: installed.version, installation_id: installed.installation_id, method_id: method.id, method_name: method.name, method_type: method.type }, machineDir);
+      try {
+        const refreshed = await activateInstalledAgent(installed.id, installed.version, machineDir, bus, undefined, installed.installation_id);
+        finishAgentAuthentication(operation.id, refreshed.readiness_status === "ready" ? "succeeded" : "failed", refreshed.readiness_status === "ready" ? null : refreshed.readiness_error ?? "Agent is still not ready after saving credentials", machineDir, refreshed.readiness_failure);
+        return c.json({ agent: refreshed, authentication: getAgentAuthenticationOperation(operation.id, machineDir) }, 200);
+      } catch (error) {
+        const failure = structuredAcpError(error);
+        finishAgentAuthentication(operation.id, "failed", failure.message, machineDir, failure);
+        throw error;
+      }
+    }
+    if (method.type === "terminal") {
+      if (!terminalAuth) throw new ApiError(500, "Terminal authentication is unavailable", "terminal_auth_unavailable");
+      if (!Array.isArray(method.args) || method.args.some((arg) => typeof arg !== "string") || !method.env || Object.values(method.env).some((value) => typeof value !== "string")) throw new ApiError(422, "The advertised terminal authentication metadata is invalid", "auth_method_invalid");
+      const current = getLatestAgentAuthenticationOperation(installed.id, installed.version, machineDir, installed.installation_id);
+      if (current?.status === "authenticating") return c.json({ authentication: current, terminal: terminalAuth.snapshot(current.id) }, 202);
+      const operation = beginAgentAuthentication({ id: randomUUID(), agent_id: installed.id, version: installed.version, installation_id: installed.installation_id, method_id: method.id, method_name: method.name, method_type: method.type }, machineDir);
+      return c.json({ authentication: operation, terminal: terminalAuth.start(operation, installed, method) }, 202);
+    }
+    if (method.type !== "agent") throw new ApiError(422, "This advertised authentication method is not supported", "auth_method_unsupported");
     const current = getLatestAgentAuthenticationOperation(
       installed.id,
       installed.version,
@@ -923,6 +978,7 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
         installation_id: installed.installation_id,
         method_id: method.id,
         method_name: method.name,
+        method_type: method.type,
       },
       machineDir,
     );
@@ -931,12 +987,25 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
     void (async () => {
       const workspace = mkdtempSync(resolve(tmpdir(), "marshal-auth-"));
       try {
-        await authenticateAgent(workspace, installed.launch, method.id, controller.signal);
-        finishAgentAuthentication(operation.id, "succeeded", null, machineDir);
+        await authenticateAgent(workspace, launchWithResolvedEnvironment(installed, machineDir), method.id, controller.signal);
         const refreshed = getInstalledAgent(installed.id, installed.version, machineDir, installed.installation_id);
-        if (refreshed) await activateInstalledAgent(refreshed.id, refreshed.version, machineDir, bus, undefined, refreshed.installation_id, workspace);
+        if (!refreshed) throw new Error("Installed agent disappeared before the required readiness check");
+        const reprobed = await activateInstalledAgent(refreshed.id, refreshed.version, machineDir, bus, undefined, refreshed.installation_id);
+        if (reprobed.readiness_status === "ready") {
+          finishAgentAuthentication(operation.id, "succeeded", null, machineDir);
+        } else {
+          const message = reprobed.readiness_error ?? `Fresh readiness check returned ${reprobed.readiness_status}`;
+          const failure = reprobed.readiness_failure ?? {
+            kind: reprobed.readiness_status === "authentication_required" ? "authentication_required" as const : "agent_internal_error" as const,
+            message,
+            protocol_code: null,
+            data: { readiness_status: reprobed.readiness_status },
+          };
+          finishAgentAuthentication(operation.id, "failed", message, machineDir, failure);
+        }
       } catch (error) {
         const cancelled = controller.signal.aborted;
+        const failure = structuredAcpError(error);
         finishAgentAuthentication(
           operation.id,
           cancelled ? "cancelled" : "failed",
@@ -946,6 +1015,7 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
               ? error.message
               : String(error),
           machineDir,
+          cancelled ? { kind: "cancelled", message: "Authentication was cancelled", protocol_code: null, data: null } : failure,
         );
       } finally {
         authenticationControllers.delete(operation.id);
@@ -960,10 +1030,23 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus): vo
       throw new ApiError(404, "Authentication operation not found", "operation_not_found");
     return c.json({ authentication: operation });
   });
+  app.get("/api/agents/auth/operations/:id/terminal", (c) => {
+    const operation = getAgentAuthenticationOperation(c.req.param("id"), machineDir);
+    if (!operation) throw new ApiError(404, "Authentication operation not found", "operation_not_found");
+    if (operation.method_type !== "terminal") throw new ApiError(409, "Authentication operation is not a terminal operation", "operation_not_terminal");
+    const terminal = terminalAuth?.snapshot(operation.id);
+    if (!terminal) throw new ApiError(404, "Terminal operation is not retained", "terminal_not_retained");
+    return c.json({ terminal });
+  });
   app.post("/api/agents/auth/operations/:id/cancel", (c) => {
     const operation = getAgentAuthenticationOperation(c.req.param("id"), machineDir);
     if (!operation)
       throw new ApiError(404, "Authentication operation not found", "operation_not_found");
+    if (operation.status === "authenticating" && operation.method_type === "terminal") {
+      const cancelled = terminalAuth?.cancel(operation.id);
+      if (!cancelled) throw new ApiError(409, "Terminal authentication operation is not running", "authentication_not_running");
+      return c.json({ authentication: cancelled });
+    }
     if (operation.status === "authenticating") authenticationControllers.get(operation.id)?.abort();
     return c.json({ authentication: getAgentAuthenticationOperation(operation.id, machineDir) });
   });
@@ -1244,7 +1327,7 @@ function registerChatRoutes(
         c.req.param("id"),
         {
           title: body.title as string | undefined,
-          status: body.status as "draft" | "active" | "closed" | "error" | undefined,
+          status: body.status as "draft" | "active" | "authentication_required" | "closed" | "error" | undefined,
           archived: body.archived as boolean | undefined,
           pinned: body.pinned as boolean | undefined,
           scratchMarkdown: body.scratch_markdown as string | undefined,
@@ -1413,6 +1496,10 @@ function registerChatRoutes(
     } catch (err) {
       throw mapDomainError(err);
     }
+  });
+  app.post("/api/threads/:id/messages/:messageId/resubmit", async (c) => {
+    try { return c.json(await turns.resubmit(c.req.param("id"), Number(c.req.param("messageId"))), 201); }
+    catch (err) { throw mapDomainError(err); }
   });
   app.post("/api/threads/:id/cancel", async (c) => {
     try {
@@ -1611,6 +1698,9 @@ interface RunCardFields {
   operation_id: string | null | undefined;
   verification_status: "pass" | "fail" | null | undefined;
   verification_output: string | null | undefined;
+  failure: unknown;
+  auth_recovery_resolved_at: string | null | undefined;
+  superseded_by_run_id: number | null | undefined;
 }
 
 interface RunDetailFields extends RunCardFields {
@@ -1642,6 +1732,9 @@ function runCard(run: RunRecord): RunCardFields {
     operation_id: run.operationId,
     verification_status: run.verificationStatus,
     verification_output: run.verificationOutput,
+    failure: run.failure,
+    auth_recovery_resolved_at: run.authRecoveryResolvedAt,
+    superseded_by_run_id: run.supersededByRunId,
   };
 }
 
@@ -1686,6 +1779,11 @@ function registerRunRoutes(app: Hono, root: string | undefined): void {
     if (run === undefined) throw new ApiError(404, `Run not found: ${runId}`, "run_not_found");
     return c.json({ run: runDetail(run) });
   });
+  app.post("/api/runs/:id/recover-authentication", (c) => {
+    const runId = parseRunId(c.req.param("id")); const log = new RunLog(root);
+    try { const run = log.resolveAuthenticationRequired(runId); return c.json({ run: runDetail(run) }); }
+    catch (err) { if (err instanceof RunNotFoundError) throw new ApiError(404, err.message, "run_not_found"); throw new ApiError(409, err instanceof Error ? err.message : String(err), "run_not_authentication_required"); }
+  });
 
   app.get("/api/runs/:id/events", (c) => {
     const runId = parseRunId(c.req.param("id"));
@@ -1724,6 +1822,8 @@ interface SpecMessageFields {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  prompt_status: "authentication_required" | null;
+  failure: unknown;
 }
 
 function specMessageFields(msg: SpecMessage): SpecMessageFields {
@@ -1733,6 +1833,8 @@ function specMessageFields(msg: SpecMessage): SpecMessageFields {
     role: msg.role,
     content: msg.content,
     created_at: msg.created_at,
+    prompt_status: msg.prompt_status ?? null,
+    failure: msg.failure ?? null,
   };
 }
 
@@ -1782,17 +1884,26 @@ function registerSpecRoutes(
         machineDir,
       });
       publishSpecMessage(busLocal, slug, promptEvents.userMessage);
-      publishSpecMessage(busLocal, slug, promptEvents.assistantMessage);
+      if (promptEvents.assistantMessage) publishSpecMessage(busLocal, slug, promptEvents.assistantMessage);
       return c.json(
         {
           userMessage: specMessageFields(promptEvents.userMessage),
-          assistantMessage: specMessageFields(promptEvents.assistantMessage),
+          assistantMessage: promptEvents.assistantMessage ? specMessageFields(promptEvents.assistantMessage) : null,
         },
         201,
       );
     } catch (err) {
       throw mapDomainError(err);
     }
+  });
+  app.post("/api/tasks/:slug/spec-messages/:messageId/resubmit", async (c) => {
+    const messageId = Number(c.req.param("messageId"));
+    if (!Number.isInteger(messageId) || messageId <= 0) throw new ApiError(400, "message id must be a positive integer", "invalid_message_id");
+    try {
+      const result = await resubmitSpecAuthorTurn(c.req.param("slug"), messageId, { root, agent: specAgent, machineDir });
+      const busLocal = ensureBus(bus); publishSpecMessage(busLocal, c.req.param("slug"), result.userMessage); if (result.assistantMessage) publishSpecMessage(busLocal, c.req.param("slug"), result.assistantMessage);
+      return c.json({ userMessage: specMessageFields(result.userMessage), assistantMessage: result.assistantMessage ? specMessageFields(result.assistantMessage) : null }, 201);
+    } catch (err) { throw mapDomainError(err); }
   });
 
   app.get("/api/tasks/:slug/spec-author-sessions", (c) => {
@@ -1872,6 +1983,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const version = options.version ?? readVersion();
   const bus = options.bus ?? new EventBus();
   const attachWs = options.attachWebSockets ?? true;
+  const terminalAuth = new TerminalAuthManager({ machineDir: options.machineDir, bus });
 
   const trustedProxy = options.trustedProxy ?? options.config?.daemon?.trustedProxy ?? false;
   const trustedOrigins =
@@ -1886,6 +1998,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     auth,
     trustedProxy,
     machineDir: options.machineDir,
+    terminalAuth,
   });
   const server = serve({ fetch: app.fetch, hostname: host, port });
 
@@ -1914,6 +2027,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
         path: "/ws",
         authenticate: (req) => auth.isAuthenticated(req.headers.cookie),
         allowedOrigins: trustedOrigins,
+        terminal: { pathPrefix: "/ws/terminal", attach: (operationId, socket) => terminalAuth.attach(operationId, socket) },
       },
     );
   }
@@ -1933,7 +2047,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     portFile,
     bus,
     close() {
-      return closeServer(server, portFile, wsHandle, pidFile, resolve(GLOBAL_DIR, "daemon.port"));
+      return closeServer(server, portFile, wsHandle, pidFile, resolve(GLOBAL_DIR, "daemon.port"), terminalAuth);
     },
   };
 }
@@ -1944,7 +2058,9 @@ async function closeServer(
   wsHandle?: WebSocketBridgeHandle,
   pidFile?: string,
   globalPortFile?: string,
+  terminalAuth?: TerminalAuthManager,
 ): Promise<void> {
+  if (terminalAuth) await terminalAuth.close();
   if (wsHandle) {
     try {
       await wsHandle.close();

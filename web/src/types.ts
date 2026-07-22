@@ -48,7 +48,9 @@ export type AgentActivationStatus = "not_started" | "checking" | "authentication
 export type AgentReadinessStatus = "unknown" | "probing" | "ready" | "authentication_required" | "failed";
 export type AgentAuthenticationStatus = "authenticating" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export interface AgentCapabilities { prompt: { text: boolean; image: boolean; audio: boolean; embedded_context: boolean }; session: { close: boolean; list: boolean; load: boolean; fork: boolean; resume: boolean }; load_session: boolean; auth: { logout: boolean } }
-export interface AgentAuthMethod { id: string; type: "agent" | "terminal" | "env_var"; name: string; description: string | null }
+export interface AgentAuthMethod { id: string; type: "agent" | "terminal" | "env_var" | string; name: string; description: string | null; vars: Array<{ name: string; label: string | null; secret: boolean; optional: boolean; meta: Record<string, unknown> | null; raw: Record<string, unknown> }>; link: string | null; args: string[]; env: Record<string, string>; meta: Record<string, unknown> | null; raw: Record<string, unknown> }
+export type AcpFailureKind = "authentication_required" | "cancelled" | "resource_not_found" | "protocol_incompatible" | "process_start_failed" | "timeout" | "agent_internal_error";
+export interface StructuredAcpError { kind: AcpFailureKind; message: string; protocol_code: number | null; data: unknown }
 export interface InstalledAgent {
   id: string;
   version: string;
@@ -65,6 +67,7 @@ export interface InstalledAgent {
   failure: string | null;
   readiness_status: AgentReadinessStatus;
   readiness_error: string | null;
+  readiness_failure: StructuredAcpError | null;
   protocol_version: number | null;
   capabilities: AgentCapabilities | null;
   auth_methods: AgentAuthMethod[];
@@ -75,7 +78,8 @@ export interface InstalledAgent {
   provenance: { exact_version: string; distribution: "binary" | "npx" | "uvx"; source: "registry" | "custom"; package_specifier: string | null; archive_identity: string | null; registry_snapshot_fetched_at: string | null; installation_root: string; integrity_status: string };
   is_default: boolean;
 }
-export interface AgentAuthenticationOperation { id: string; agent_id: string; version: string; installation_id: string; method_id: string; method_name: string; status: AgentAuthenticationStatus; started_at: string; finished_at: string | null; error: string | null }
+export interface AgentAuthenticationOperation { id: string; agent_id: string; version: string; installation_id: string; method_id: string; method_name: string; method_type: string; status: AgentAuthenticationStatus; started_at: string; finished_at: string | null; error: string | null; failure: StructuredAcpError | null; terminal_exit_code: number | null; terminal_signal: number | null; terminal_output_truncated: boolean; terminal_last_activity_at: string | null; terminal_diagnostic: { code: string; message: string; action: string } | null }
+export interface TerminalAuthSnapshot { operation: AgentAuthenticationOperation; phase: "running" | "reprobing" | "completed"; output: string; output_truncated: boolean; connected: boolean; host: string }
 export interface InstallationOperation {
   id: string;
   agent_id: string;
@@ -153,14 +157,17 @@ export interface SpecMessage {
   role: SpecMessageRole;
   content: string;
   created_at: string;
+  prompt_status?: "authentication_required" | null;
+  failure?: StructuredAcpError | null;
 }
+export interface WorkflowRun { id: number; task_id: number; role: "builder" | "validator"; agent_id: string; agent_version?: string; status: string; started_at: string; ended_at: string | null; error: string | null; failure: StructuredAcpError | null; auth_recovery_resolved_at: string | null; superseded_by_run_id: number | null }
 
 export interface SpecMessagePayload {
   taskSlug: string;
   message: SpecMessage;
 }
 
-export type ChatThreadStatus = "draft" | "active" | "closed" | "error";
+export type ChatThreadStatus = "draft" | "active" | "authentication_required" | "closed" | "error";
 export type ChatMessageRole = "user" | "assistant";
 
 export interface ChatThread {
@@ -179,6 +186,8 @@ export interface ChatThread {
   updated_at: string;
   last_message_at: string | null;
   scratch_markdown: string;
+  agent_provenance?: { installation_id?: string | null };
+  failure?: StructuredAcpError | null;
 }
 
 export interface ChatMessage {
@@ -188,6 +197,8 @@ export interface ChatMessage {
   content: string;
   created_at: string;
   attachment_ids: string[];
+  prompt_status?: "authentication_required" | null;
+  failure?: StructuredAcpError | null;
 }
 export interface AcpEvent {
   id: number;

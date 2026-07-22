@@ -16,16 +16,17 @@ const TASK_STATUS: Record<TaskStatus, { tone: Tone; label: string }> = {
 const THREAD_STATUS: Record<ChatThreadStatus, { tone: Tone; label: string }> = {
   draft: { tone: "neutral", label: "Draft" },
   active: { tone: "success", label: "Active" },
+  authentication_required: { tone: "warn", label: "Sign-in required" },
   closed: { tone: "neutral", label: "Closed" },
   error: { tone: "error", label: "Error" },
 };
 
 const READINESS: Record<AgentReadinessStatus, { tone: Tone; label: string }> = {
-  unknown: { tone: "neutral", label: "Not checked" },
-  probing: { tone: "accent", label: "Checking agent" },
-  ready: { tone: "success", label: "Ready" },
-  authentication_required: { tone: "warn", label: "Sign in required" },
-  failed: { tone: "error", label: "Setup failed" },
+  unknown: { tone: "neutral", label: "Getting agent ready" },
+  probing: { tone: "accent", label: "Getting agent ready" },
+  ready: { tone: "success", label: "Ready to use" },
+  authentication_required: { tone: "warn", label: "Sign-in required" },
+  failed: { tone: "error", label: "Setup needed" },
 };
 
 const INSTALL_STATUS: Record<InstalledAgentStatus, { tone: Tone; label: string }> = {

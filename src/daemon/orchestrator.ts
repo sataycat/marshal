@@ -24,12 +24,13 @@ import { getWorkflowProfile } from "../workflows/store.js";
 import { historicalProvenance } from "../agents/provenance.js";
 import { getSelectedRepository } from "../repositories/store.js";
 import { AcpSessionSupervisor } from "../acp/supervisor.js";
+import { structuredAcpError } from "../acp/errors.js";
 
 export interface RunOnceResult {
   slug: string;
   runId: number;
   commitSha: string;
-  status: "built" | "error" | "skipped" | "validated" | "validation_failed";
+  status: "built" | "error" | "authentication_required" | "skipped" | "validated" | "validation_failed";
   error?: string;
   reason?: string;
 }
@@ -206,10 +207,10 @@ export async function buildTask(
        supervisorSessionId = started.record.id;
        runLog.setSupervisorEvidence(runId, { sessionId: started.record.id, capabilities: started.record.capabilities });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const failure = structuredAcpError(err); const msg = failure.message;
       logger.error({ err, slug, runId }, "Builder spawn failed");
-      runLog.finishRun(runId, "error", { error: `spawn failed: ${msg}` });
-      return { slug, runId, commitSha: "", status: "error", error: `spawn failed: ${msg}` };
+      runLog.finishRun(runId, failure.kind === "authentication_required" ? "authentication_required" : "error", { error: `spawn failed: ${msg}`, failure });
+      return { slug, runId, commitSha: "", status: failure.kind === "authentication_required" ? "authentication_required" : "error", error: `spawn failed: ${msg}` };
     }
 
     let errorMessage: string | undefined;
@@ -218,8 +219,9 @@ export async function buildTask(
     try {
        await supervisor.prompt(supervisorSessionId, prompt, undefined, (event) => { runLog.insertEvent(runId, seq, event); seq += 1; if (event.type === "error") errorMessage = event.message; });
     } catch (err) {
-      errorMessage = err instanceof Error ? err.message : String(err);
+      const failure = structuredAcpError(err); errorMessage = failure.message;
       logger.error({ err, slug, runId }, "Builder prompt stream failed");
+      if (failure.kind === "authentication_required") { runLog.finishRun(runId, "authentication_required", { error: failure.message, failure }); return { slug, runId, commitSha: "", status: "authentication_required", error: failure.message }; }
     }
 
     if (errorMessage !== undefined) {
@@ -233,7 +235,7 @@ export async function buildTask(
       gitInWorktree(worktree.path, ["commit", "--allow-empty", "-m", `build: ${slug}`]);
       commitSha = gitInWorktree(worktree.path, ["rev-parse", "HEAD"]).trim();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const failure = structuredAcpError(err); const msg = failure.message;
       logger.error({ err, slug, runId }, "Builder commit failed");
       runLog.finishRun(runId, "error", { error: `commit failed: ${msg}` });
       return { slug, runId, commitSha: "", status: "error", error: `commit failed: ${msg}` };
@@ -381,7 +383,7 @@ export async function validateTask(
     diffText = result.diff;
     totalDiffLines = result.totalLines;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+       const failure = structuredAcpError(err); const msg = failure.message;
     logger.error({ err, slug }, "Validator diff computation failed");
     return {
       slug,
@@ -417,15 +419,16 @@ export async function validateTask(
         session = started.session;
         supervisorSessionId = started.record.id;
        runLog.setSupervisorEvidence(runId, { sessionId: started.record.id, capabilities: started.record.capabilities });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+     } catch (err) {
+       const failure = structuredAcpError(err);
+       const msg = failure.message;
       logger.error({ err, slug, runId }, "Validator spawn failed");
-      runLog.finishRun(runId, "error", { error: `spawn failed: ${msg}` });
+      runLog.finishRun(runId, failure.kind === "authentication_required" ? "authentication_required" : "error", { error: `spawn failed: ${msg}`, failure });
       return {
         slug,
         runId,
         commitSha: buildCommit,
-        status: "validation_failed",
+        status: failure.kind === "authentication_required" ? "authentication_required" : "validation_failed",
         reason: `spawn failed: ${msg}`,
       };
     }
@@ -435,8 +438,9 @@ export async function validateTask(
     try {
        await supervisor.prompt(supervisorSessionId, prompt, undefined, (event) => { runLog.insertEvent(runId, seq, event); seq += 1; seenEvents.push(event); if (event.type === "error") errorMessage = event.message; });
     } catch (err) {
-      errorMessage = err instanceof Error ? err.message : String(err);
+      const failure = structuredAcpError(err); errorMessage = failure.message;
       logger.error({ err, slug, runId }, "Validator prompt stream failed");
+      if (failure.kind === "authentication_required") { runLog.finishRun(runId, "authentication_required", { error: failure.message, failure }); return { slug, runId, commitSha: buildCommit, status: "authentication_required", reason: failure.message }; }
     }
 
     if (errorMessage !== undefined) {
@@ -494,7 +498,7 @@ export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResu
   const db = openDb(root);
   const row = db
     .prepare(
-      "SELECT slug, status FROM tasks WHERE status IN ('ready', 'validating') ORDER BY created_at ASC, id ASC LIMIT 1",
+      "SELECT t.slug, t.status FROM tasks t WHERE t.status IN ('ready', 'validating') AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status = 'authentication_required' AND r.auth_recovery_resolved_at IS NULL) ORDER BY t.created_at ASC, t.id ASC LIMIT 1",
     )
     .get() as (ReadyTaskRow & { status: string }) | undefined;
   if (!row) {

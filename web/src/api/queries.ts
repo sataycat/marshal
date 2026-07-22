@@ -9,6 +9,8 @@ const queryOptions = { retry: 1, refetchOnWindowFocus: false } as const;
 export function useTaskDetailQuery(slug: string) {
   return useQuery({ queryKey: queryKeys.task(slug), queryFn: ({ signal }) => api.fetchTaskDetail(slug, signal), ...queryOptions });
 }
+export function useTaskRunsQuery(slug: string) { return useQuery({ queryKey: queryKeys.taskRuns(slug), queryFn: ({ signal }) => api.fetchTaskRuns(slug, signal), ...queryOptions }); }
+export const useRecoverRunAuthenticationMutation = () => useMutation({ mutationFn: api.recoverRunAuthentication });
 export function useRepositoriesQuery() {
   return useQuery({ queryKey: queryKeys.repositories, queryFn: ({ signal }) => api.fetchRepositories(signal), ...queryOptions });
 }
@@ -42,7 +44,7 @@ export const useSetDefaultInstalledAgentMutation = () => useMutation({ mutationF
 export const useRemoveInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, installationId }: { agentId: string; version: string; installationId?: string }) => api.removeInstalledAgent(agentId, version, installationId) });
 export const useRetryAgentRemovalMutation = () => useMutation({ mutationFn: api.retryAgentRemoval });
 export const useProbeInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, installationId }: { agentId: string; version: string; installationId?: string }) => api.probeInstalledAgent(agentId, version, installationId) });
-export const useAuthenticateInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, methodId, installationId }: { agentId: string; version: string; methodId: string; installationId?: string }) => api.authenticateInstalledAgent(agentId, version, methodId, installationId) });
+export const useAuthenticateInstalledAgentMutation = () => useMutation({ mutationFn: ({ agentId, version, methodId, installationId, values }: { agentId: string; version: string; methodId: string; installationId?: string; values?: Record<string, string> }) => api.authenticateInstalledAgent(agentId, version, methodId, installationId, values) });
 export function useAgentAuthenticationQuery(agentId: string, version: string, installationId: string, enabled: boolean) {
   return useQuery({ queryKey: queryKeys.agentAuthentication(agentId, version, installationId), queryFn: ({ signal }) => api.fetchAgentAuthentication(agentId, version, installationId, signal), enabled, ...queryOptions, refetchInterval: (query) => query.state.data?.authentication?.status === "authenticating" ? 1000 : false });
 }
@@ -82,10 +84,12 @@ export const useCreateThreadMutation = () => useMutation({ mutationFn: api.creat
 export const useUpdateThreadMutation = () => useMutation({ mutationFn: ({ id, input }: { id: string; input: Parameters<typeof api.updateChatThread>[1] }) => api.updateChatThread(id, input) });
 export const useDeleteThreadMutation = () => useMutation({ mutationFn: api.deleteChatThread });
 export const useSendChatMutation = () => useMutation({ mutationFn: ({ id, content, attachmentIds }: { id: string; content: string; attachmentIds?: string[] }) => api.sendChatMessage(id, content, attachmentIds) });
+export const useResubmitChatMutation = () => useMutation({ mutationFn: ({ id, messageId }: { id: string; messageId: number }) => api.resubmitChatMessage(id, messageId) });
 export const useCancelChatMutation = () => useMutation({ mutationFn: api.cancelChatTurn });
 export const usePermissionMutation = () => useMutation({ mutationFn: ({ id, requestId, action }: { id: string; requestId: string; action: "approve" | "deny" }) => api.decideChatPermission(id, requestId, action) });
 export const useUploadAttachmentMutation = () => useMutation({ mutationFn: ({ id, file }: { id: string; file: File }) => api.uploadChatAttachment(id, file) });
 export const useSendSpecMessageMutation = () => useMutation({ mutationFn: ({ slug, content }: { slug: string; content: string }) => api.sendSpecMessage(slug, content) });
+export const useResubmitSpecMessageMutation = () => useMutation({ mutationFn: ({ slug, messageId }: { slug: string; messageId: number }) => api.resubmitSpecMessage(slug, messageId) });
 export const useCreateTaskMutation = () => useMutation({ mutationFn: api.createTask });
 export const useFreezeTaskMutation = () => useMutation({ mutationFn: ({ slug, specMarkdown }: { slug: string; specMarkdown?: string }) => api.freezeTask(slug, specMarkdown) });
 export const useTransitionTaskMutation = () => useMutation({ mutationFn: ({ slug, to }: { slug: string; to: TaskStatus }) => api.transitionTask(slug, to) });

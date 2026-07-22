@@ -1,11 +1,13 @@
 import type { Agent, AgentEvent, AgentPromptPart, AgentSession, AgentPermissionRequest, SpawnOptions } from "../agent/types.js";
 import { createPrompt, createSession, appendEvent, getSession, interruptActiveSessions, listSessionEvents, listSessions, updatePrompt, updateSession, type AcpSessionRecord, type AcpPromptRecord } from "./supervisor-store.js";
 import { createPermissionRequest, getPermissionRequestByRequestId, getPermissionRequestForThread, listPermissionRequests, reconcilePermissionRequests, resolvePermissionRequest, type PermissionRequestRecord } from "./permission-store.js";
-import { resolveInstalledAgentLaunch } from "../agents/store.js";
+import { getInstalledAgent, resolveInstalledAgentLaunch } from "../agents/store.js";
+import { launchWithResolvedEnvironment } from "../agents/launch-environment.js";
 import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
 import type { EventBus } from "../daemon/bus.js";
 import type { PermissionPolicy } from "../workflows/types.js";
 import type { HistoricalAgentProvenance } from "../agents/provenance.js";
+import { StructuredAcpFailureError, structuredAcpError } from "./errors.js";
 
 export interface SupervisorOptions { root?: string; machineDir?: string; bus?: EventBus; agent?: Agent; permissionPolicy?: PermissionPolicy; workflow?: boolean; permissionMode?: SpawnOptions["permissionMode"]; onEvent?: (session: AcpSessionRecord, event: AgentEvent) => void; onPermission?: (request: PermissionRequestRecord) => void }
 interface Runtime { record: AcpSessionRecord; session: AgentSession; agent: Agent; prompt?: AcpPromptRecord; }
@@ -21,15 +23,16 @@ export class AcpSessionSupervisor {
   }
   events(id: string) { return listSessionEvents(id, this.options.root); }
   async start(ownerType: string, ownerId: string, cwd: string, agentId: string, agentVersion: string, config: { model?: string | null; mode?: string | null; sessionName?: string; agentProvenance?: HistoricalAgentProvenance } = {}): Promise<{ record: AcpSessionRecord; session: AgentSession }> {
-    const launch = this.options.agent ? null : resolveInstalledAgentLaunch(agentId, agentVersion, this.options.machineDir);
-    const agent = this.options.agent ?? new SdkAcpAgentAdapter({ commands: [{ id: agentId, command: launch!.command, args: launch!.args }] });
+    const installed = this.options.agent ? null : getInstalledAgent(agentId, agentVersion, this.options.machineDir, config.agentProvenance?.installation_id ?? undefined);
+    const launch = installed ? launchWithResolvedEnvironment(installed, this.options.machineDir) : this.options.agent ? null : resolveInstalledAgentLaunch(agentId, agentVersion, this.options.machineDir);
+    const agent = this.options.agent ?? new SdkAcpAgentAdapter({ commands: [{ id: agentId, command: launch!.command, args: launch!.args, env: launch!.env }] });
     const record = createSession({ ownerType, ownerId, agentId, agentVersion, agentProvenance: config.agentProvenance, recoveryMetadata: { resumable: false } }, this.options.root);
     try {
       const session = await withTimeout(agent.spawn(cwd, agentId, { permissionMode: this.options.permissionMode ?? (this.options.workflow ? "deny-all" : "interactive"), model: config.model ?? undefined, sessionName: config.sessionName ?? `marshal-${ownerId}` }), 30_000, "ACP session startup timed out");
       const updated = updateSession(record.id, { acp_session_id: session.recordId ?? null, status: "idle", started_at: new Date().toISOString(), capabilities: { image: session.supportsImages === true }, recovery_metadata: { resumable: false, session_name: session.name } }, this.options.root);
       this.runtimes.set(record.id, { record: updated, session, agent });
       return { record: updated, session };
-    } catch (err) { updateSession(record.id, { status: "failed", diagnostic: errorMessage(err), ended_at: new Date().toISOString() }, this.options.root); throw err; }
+    } catch (err) { const failure = structuredAcpError(err); updateSession(record.id, { status: failure.kind === "authentication_required" ? "authentication_required" : "failed", diagnostic: failure.message, failure, ended_at: new Date().toISOString() }, this.options.root); throw new StructuredAcpFailureError(failure); }
   }
   permissions(threadId: string): PermissionRequestRecord[] { return listPermissionRequests(threadId, this.options.root); }
   decidePermission(threadId: string, requestId: string, action: "approve" | "deny"): PermissionRequestRecord {
@@ -44,10 +47,9 @@ export class AcpSessionSupervisor {
     if (!option) throw new Error(`Permission request does not offer ${kind}`);
     return resolvePermissionRequest(request.id, action === "approve" ? "approved" : "denied", option.optionId, action, null, this.options.root);
   }
-  async prompt(id: string, content: string | AgentPromptPart[], _legacyPermission?: (request: AgentPermissionRequest) => Promise<string | undefined>, onEvent?: (event: AgentEvent) => void): Promise<void> {
+  async prompt(id: string, content: string | AgentPromptPart[], _legacyPermission?: (request: AgentPermissionRequest) => Promise<string | undefined>, onEvent?: (event: AgentEvent) => void, durable?: { messageId?: number; resubmissionOf?: string }): Promise<void> {
     const runtime = this.runtimes.get(id); if (!runtime) throw new Error(`ACP session is not active: ${id}`);
-    const text = typeof content === "string" ? content : content.map((part) => part.type === "text" ? part.text : "[image]").join("");
-    const prompt = createPrompt(id, text, this.options.root); runtime.prompt = prompt; updateSession(id, { status: "running" }, this.options.root);
+    const prompt = createPrompt(id, content, this.options.root, durable); runtime.prompt = prompt; updateSession(id, { status: "running", failure: null, diagnostic: null }, this.options.root);
     try {
        const onPermission = async (request: AgentPermissionRequest): Promise<string | undefined> => {
          const policy = this.options.permissionPolicy;
@@ -72,14 +74,15 @@ export class AcpSessionSupervisor {
         this.options.onEvent?.(getSession(id, this.options.root)!, event);
         onEvent?.(event);
         void persisted;
-        if (event.type === "error") throw new Error(event.message);
+        if (event.type === "error") throw event.failure ? new StructuredAcpFailureError(event.failure) : new Error(event.message);
       }
       updatePrompt(prompt.id, { status: "completed", ended_at: new Date().toISOString() }, this.options.root); updateSession(id, { status: "idle" }, this.options.root);
-    } catch (err) { const cancelled = errorMessage(err).toLowerCase().includes("cancel"); reconcilePermissionRequests(id, cancelled ? "cancelled" : "interrupted", errorMessage(err), this.options.root); updatePrompt(prompt.id, { status: cancelled ? "cancelled" : "failed", diagnostic: errorMessage(err), ended_at: new Date().toISOString() }, this.options.root); updateSession(id, { status: cancelled ? "cancelled" : "failed", diagnostic: errorMessage(err), ended_at: new Date().toISOString() }, this.options.root); throw err; }
+    } catch (err) { const failure = structuredAcpError(err); const cancelled = failure.kind === "cancelled"; const authRequired = failure.kind === "authentication_required"; reconcilePermissionRequests(id, cancelled ? "cancelled" : "interrupted", failure.message, this.options.root); updatePrompt(prompt.id, { status: authRequired ? "authentication_required" : cancelled ? "cancelled" : "failed", diagnostic: failure.message, failure, ended_at: new Date().toISOString() }, this.options.root); updateSession(id, { status: authRequired ? "authentication_required" : cancelled ? "cancelled" : "failed", diagnostic: failure.message, failure, ended_at: new Date().toISOString() }, this.options.root); if (authRequired) await this.disposeRuntime(id); throw new StructuredAcpFailureError(failure); }
   }
   async cancel(id: string): Promise<void> { const runtime = this.runtimes.get(id); if (!runtime) return; if (runtime.prompt) updatePrompt(runtime.prompt.id, { cancellation_requested_at: new Date().toISOString() }, this.options.root); reconcilePermissionRequests(id, "cancelled", "ACP session cancelled", this.options.root); updateSession(id, { status: "cancelling" }, this.options.root); await withTimeout(runtime.agent.cancel(runtime.session), 10_000, "ACP cancellation timed out"); }
   async close(id: string): Promise<void> { const runtime = this.runtimes.get(id); if (!runtime) return; reconcilePermissionRequests(id, "cancelled", "ACP session closed", this.options.root); await withTimeout(runtime.agent.close(runtime.session), 10_000, "ACP shutdown timed out"); updateSession(id, { status: "closed", ended_at: new Date().toISOString() }, this.options.root); this.runtimes.delete(id); }
   async shutdown(): Promise<void> { await Promise.all([...this.runtimes.keys()].map((id) => this.close(id).catch(() => undefined))); }
+  private async disposeRuntime(id: string): Promise<void> { const runtime = this.runtimes.get(id); if (!runtime) return; this.runtimes.delete(id); await runtime.agent.close(runtime.session).catch(() => undefined); }
 }
 function errorMessage(err: unknown): string { return err instanceof Error ? err.message : String(err); }
 async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> { let timer: NodeJS.Timeout | undefined; try { return await Promise.race([promise, new Promise<T>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); })]); } finally { if (timer) clearTimeout(timer); } }

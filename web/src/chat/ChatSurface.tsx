@@ -40,6 +40,7 @@ import {
   useDirectorySuggestionsQuery,
   usePermissionMutation,
   useRegisterRepositoryMutation,
+  useResubmitChatMutation,
   useRepositoriesQuery,
   useSelectRepositoryMutation,
   useSendChatMutation,
@@ -248,7 +249,8 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
   const files = filesQuery.data ?? [];
   const permissions = permissionsQuery.data ?? [];
   const attachments = attachmentsQuery.data ?? [];
-  const supportsImages = Boolean(thread && agentsQuery.data?.find((agent) => agent.id === thread.agent_id && agent.version === thread.agent_version)?.capabilities?.prompt.image);
+  const installedAgent = thread ? agentsQuery.data?.find((agent) => agent.id === thread.agent_id && agent.version === thread.agent_version && (!thread.agent_provenance?.installation_id || agent.installation_id === thread.agent_provenance.installation_id)) : undefined;
+  const supportsImages = Boolean(installedAgent?.capabilities?.prompt.image);
   const [filesOpen, setFilesOpen] = useState(false);
 
   const visiblePermissions = (busPermissions.length > 0 ? busPermissions : permissions).filter((request) => request.status === "pending");
@@ -286,6 +288,7 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
         permissions={visiblePermissions}
         attachments={attachments}
         supportsImages={supportsImages}
+        authMethods={installedAgent?.auth_methods ?? []}
         onAttachments={(items) => queryClient.setQueryData(["thread", thread?.id, "attachments"], items)}
         onPermission={decide}
         loading={loading}
@@ -475,13 +478,14 @@ function formatClock(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function ChatPane({ thread, seeded, live, permissions, attachments, supportsImages, onAttachments, onPermission, loading, loadError, onRetryLoad, onBack, draft, onDraftChange, sending: externalSending, filesOpen, onToggleFiles }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; permissions: PendingPermission[]; attachments: ChatAttachment[]; supportsImages: boolean; onAttachments: (items: ChatAttachment[]) => void; onPermission: (requestId: string, action: "approve" | "deny") => Promise<void>; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void; draft: string; onDraftChange: (value: string) => void; sending: boolean; filesOpen: boolean; onToggleFiles: () => void }): JSX.Element {
+function ChatPane({ thread, seeded, live, permissions, attachments, supportsImages, authMethods, onAttachments, onPermission, loading, loadError, onRetryLoad, onBack, draft, onDraftChange, sending: externalSending, filesOpen, onToggleFiles }: { thread: ChatThread | null; seeded: ChatMessage[]; live: ChatMessage[]; permissions: PendingPermission[]; attachments: ChatAttachment[]; supportsImages: boolean; authMethods: InstalledAgent["auth_methods"]; onAttachments: (items: ChatAttachment[]) => void; onPermission: (requestId: string, action: "approve" | "deny") => Promise<void>; loading: boolean; loadError: string | null; onRetryLoad: () => void; onBack: () => void; draft: string; onDraftChange: (value: string) => void; sending: boolean; filesOpen: boolean; onToggleFiles: () => void }): JSX.Element {
   const pushError = useToastStore((state) => state.pushError);
   const applyChatEvent = useChatStore((state) => state.applyChatEvent);
   const [draftSending, setDraftSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const sendMutation = useSendChatMutation();
+  const resubmitMutation = useResubmitChatMutation();
   const uploadMutation = useUploadAttachmentMutation();
   const cancelMutation = useCancelChatMutation();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -509,7 +513,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
     try {
       const result = await sendMutation.mutateAsync({ id: thread.id, content, attachmentIds: attachments.map((attachment) => attachment.id) });
       applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.userMessage }, timestamp: new Date().toISOString() });
-      applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.assistantMessage }, timestamp: new Date().toISOString() });
+      if (result.assistantMessage) applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.assistantMessage }, timestamp: new Date().toISOString() });
     } catch (error) {
       const message = error instanceof Error ? error.message : "The agent could not complete the turn.";
       setSendError(message);
@@ -517,6 +521,13 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
     } finally {
       setDraftSending(false);
     }
+  };
+  const resubmit = async (message: ChatMessage): Promise<void> => {
+    if (!thread || draftSending || externalSending) return;
+    setDraftSending(true); setSendError(null);
+    try { const result = await resubmitMutation.mutateAsync({ id: thread.id, messageId: message.id }); applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.userMessage }, timestamp: new Date().toISOString() }); if (result.assistantMessage) applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.assistantMessage }, timestamp: new Date().toISOString() }); }
+    catch (error) { setSendError(error instanceof Error ? error.message : "The prompt could not be resubmitted."); }
+    finally { setDraftSending(false); }
   };
 
   const upload = async (files: FileList | File[]): Promise<void> => {
@@ -585,6 +596,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
               <div className={cn(message.role === "user" && "rounded-2xl rounded-tr-md border border-primary/15 bg-accent px-4 py-2.5 text-accent-foreground")}>
                 {message.attachment_ids.map((id) => <img key={id} src={chatAttachmentUrl(message.thread_id, id)} alt="Attached image" className="mb-2 max-h-64 rounded-lg border object-contain" />)}
                 <MarkdownWithCode className="text-sm" src={message.content} />
+                {message.prompt_status === "authentication_required" && <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-warn-border bg-warn-bg px-3 py-2 text-xs text-warn"><span>Sign in is required. This prompt was preserved and has not been replayed.</span><Button type="button" size="xs" variant="outline" onClick={() => void resubmit(message)} disabled={busy}>Resubmit</Button></div>}
               </div>
             </article>
           ))}
@@ -599,6 +611,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
       </ScrollArea>
       <div className="shrink-0 border-t border-border bg-panel p-3 md:px-4">
         <div className="mx-auto max-w-3xl">
+          {thread.status === "authentication_required" && <div className="mb-2 rounded-lg border border-warn-border bg-warn-bg px-3 py-2 text-xs text-warn"><p className="font-medium">Sign in required</p><p className="mt-1">Authenticate {thread.agent_id} from the <Link href="/agents" className="underline">Agents page</Link>. Marshal will refresh the session, but will never replay the failed prompt automatically.</p>{authMethods.length > 0 && <p className="mt-1">Available methods: {authMethods.map((method) => method.name).join(", ")}.</p>}</div>}
           {(sendError || thread.status === "error") && (
             <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">
               <span className="min-w-0">{sendError ?? "The last turn failed."}</span>

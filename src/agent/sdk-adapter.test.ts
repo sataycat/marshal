@@ -21,7 +21,8 @@ rl.on('line', (line) => {
       agentCapabilities: { sessionCapabilities: { close: {} } },
     } });
   } else if (msg.method === 'session/new') {
-    send({ jsonrpc: '2.0', id: msg.id, result: { sessionId } });
+    if (process.env.MARSHAL_EXPECT_ENV && process.env.MARSHAL_ENV_CONSISTENCY !== process.env.MARSHAL_EXPECT_ENV) send({ jsonrpc: '2.0', id: msg.id, error: { code: -32001, message: 'launch environment mismatch' } });
+    else send({ jsonrpc: '2.0', id: msg.id, result: { sessionId } });
   } else if (msg.method === 'session/prompt') {
     global.pendingPromptId = msg.id;
     if (process.env.FAKE_ACP_HANG === '1') return;
@@ -86,6 +87,13 @@ function makeAdapter(env?: Record<string, string>): SdkAcpAgentAdapter {
 }
 
 describe("SdkAcpAgentAdapter", () => {
+  it("uses the same resolved launch environment for normal sessions", async () => {
+    const adapter = makeAdapter({ MARSHAL_ENV_CONSISTENCY: "session-value", MARSHAL_EXPECT_ENV: "session-value" });
+    const cwd = mkdtempSync(join(tmpdir(), "marshal-sdk-env-"));
+    const session = await adapter.spawn(cwd, "fake");
+    expect(session.recordId).toBeTruthy();
+    await adapter.close(session);
+  });
   it("initializes and creates a direct ACP session", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "marshal-sdk-cwd-"));
     const adapter = makeAdapter();

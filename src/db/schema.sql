@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS runs (
   operation_id TEXT,
   verification_status TEXT,
   verification_output TEXT,
+  failure TEXT,
+  auth_recovery_resolved_at DATETIME,
+  superseded_by_run_id INTEGER,
   FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
 
@@ -64,6 +67,8 @@ CREATE TABLE IF NOT EXISTS spec_messages (
   task_id INTEGER NOT NULL,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
+  prompt_status TEXT,
+  failure TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
@@ -88,6 +93,7 @@ CREATE TABLE IF NOT EXISTS chat_threads (
   last_message_at DATETIME,
   scratch_markdown TEXT NOT NULL DEFAULT '',
   agent_provenance TEXT NOT NULL DEFAULT '{}',
+  failure TEXT,
   FOREIGN KEY (task_slug) REFERENCES tasks(slug)
 );
 
@@ -100,6 +106,8 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   attachment_ids TEXT NOT NULL DEFAULT '[]',
+  prompt_status TEXT,
+  failure TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE
 );
@@ -137,6 +145,7 @@ CREATE TABLE IF NOT EXISTS acp_sessions (
   started_at DATETIME,
   ended_at DATETIME,
   agent_provenance TEXT NOT NULL DEFAULT '{}'
+  ,failure TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_acp_sessions_owner ON acp_sessions(owner_type, owner_id);
 
@@ -149,6 +158,10 @@ CREATE TABLE IF NOT EXISTS acp_prompts (
   diagnostic TEXT,
   started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ended_at DATETIME,
+  content TEXT NOT NULL DEFAULT '{}',
+  failure TEXT,
+  message_id INTEGER,
+  resubmission_of TEXT,
   FOREIGN KEY (session_id) REFERENCES acp_sessions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_acp_prompts_session ON acp_prompts(session_id, started_at);
@@ -202,6 +215,8 @@ CREATE TABLE IF NOT EXISTS spec_author_sessions (
   supervisor_session_id TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   agent_provenance TEXT NOT NULL DEFAULT '{}',
+  failure TEXT,
+  message_id INTEGER,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (task_id) REFERENCES tasks(id)
@@ -214,6 +229,7 @@ CREATE TABLE IF NOT EXISTS spec_author_operations (
   operation TEXT NOT NULL,
   status TEXT NOT NULL,
   diagnostic TEXT,
+  failure TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (author_session_id) REFERENCES spec_author_sessions(id) ON DELETE CASCADE
 );

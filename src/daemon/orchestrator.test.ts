@@ -35,6 +35,7 @@ import {
   runOnce,
   validateTask,
 } from "./orchestrator.js";
+import { RequestError } from "@agentclientprotocol/sdk";
 
 function initGitRepo(root: string): void {
   execSync("git init -b main", { cwd: root, stdio: "ignore" });
@@ -776,6 +777,25 @@ describe("validateTask", () => {
 
     expect(result.status).toBe("validation_failed");
     expect(result.reason).toBe("no gate decision emitted");
+  });
+
+  it("stops a workflow run on typed AuthRequired without retrying unattended work", async () => {
+    createValidatedReadyTask("gate-auth", "## Goal\nDo it.\n", repoRoot, manager);
+    const worktree = manager.create("gate-auth"); execSync("git add -A && git commit -m 'build: gate-auth' --allow-empty", { cwd: worktree.path, stdio: "ignore" });
+    const buildCommit = execSync("git rev-parse HEAD", { cwd: worktree.path, encoding: "utf8" }).trim(); const log = new RunLog(repoRoot); const task = getTask("gate-auth", repoRoot); const buildRun = log.startRun(task.id, "builder", "opencode", "build prompt"); log.finishRun(buildRun, "done", { commitSha: buildCommit });
+    const failure = { kind: "authentication_required" as const, message: "Sign in required", protocol_code: RequestError.authRequired().code, data: { methodId: "login" } };
+    const agent = new FakeAgent({ events: [{ type: "error", message: failure.message, code: failure.protocol_code, failure }] });
+    const result = await validateTask("gate-auth", { root: repoRoot, agent, manager, trunkRef: "main" });
+    expect(result.status).toBe("authentication_required"); expect(agent.promptCalls).toHaveLength(1);
+    expect(new RunLog(repoRoot).getRun(result.runId)).toMatchObject({ status: "authentication_required", prompt: expect.stringContaining("gate-auth"), failure });
+    expect(await runOnce({ root: repoRoot, agent, manager })).toBeNull();
+    expect(agent.promptCalls).toHaveLength(1);
+  });
+  it("redispatches a builder only after explicit authentication recovery and links the superseding attempt", async () => {
+    const task = createTask({ slug: "builder-auth-recover", title: "Builder recovery", specMarkdown: "## Goal\nDo it.\n" }, repoRoot); transitionTask(task.slug, "ready", repoRoot); freezeTask(task.slug, repoRoot, manager); const auth = { kind: "authentication_required" as const, message: "Sign in", protocol_code: RequestError.authRequired().code, data: null }; const blockedAgent = new FakeAgent({ events: [{ type: "error", message: auth.message, code: auth.protocol_code, failure: auth }] });
+    const blocked = await runOnce({ root: repoRoot, agent: blockedAgent, manager }); expect(blocked?.status).toBe("authentication_required"); expect(getTask("builder-auth-recover", repoRoot).status).toBe("building"); expect(await runOnce({ root: repoRoot, agent: blockedAgent, manager })).toBeNull();
+    const log = new RunLog(repoRoot); log.resolveAuthenticationRequired(blocked!.runId); expect(getTask("builder-auth-recover", repoRoot).status).toBe("ready");
+    const recovered = await runOnce({ root: repoRoot, agent: new FakeAgent(), manager }); expect(recovered?.status).toBe("built"); expect(log.getRun(blocked!.runId)).toMatchObject({ status: "authentication_required", failure: auth, supersededByRunId: recovered!.runId });
   });
 
   it("returns validation_failed when the agent emits an error event", async () => {

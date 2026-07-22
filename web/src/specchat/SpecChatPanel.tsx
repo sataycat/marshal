@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Send, Snowflake } from "lucide-react";
-import { useFreezeTaskMutation, useSendSpecMessageMutation, useSpecAuthorSessionsQuery, useSpecMessagesQuery, useUpdateTaskSpecMutation } from "../api/queries";
+import { useFreezeTaskMutation, useResubmitSpecMessageMutation, useSendSpecMessageMutation, useSpecAuthorSessionsQuery, useSpecMessagesQuery, useUpdateTaskSpecMutation } from "../api/queries";
 import { extractMarshalSpec, MARSHAL_SPEC_FENCE } from "./marshalSpec";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
 import { useTaskStore, selectSpecMessages } from "../state/taskStore";
@@ -21,6 +21,7 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
   const streamed = useTaskStore(useShallow(selectSpecMessages(slug)));
   const applyTaskEvent = useTaskStore((state) => state.applyTaskEvent);
   const sendSpecMessage = useSendSpecMessageMutation();
+  const resubmitSpecMessage = useResubmitSpecMessageMutation();
   const updateTaskSpec = useUpdateTaskSpecMutation();
   const freezeTask = useFreezeTaskMutation();
   const pushError = useToastStore((state) => state.pushError);
@@ -69,7 +70,7 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
     try {
       const res = await sendSpecMessage.mutateAsync({ slug, content: text });
       applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.userMessage }, timestamp: new Date().toISOString() });
-      applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.assistantMessage }, timestamp: new Date().toISOString() });
+      if (res.assistantMessage) applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.assistantMessage }, timestamp: new Date().toISOString() });
     } catch (err) {
       pushError(err instanceof Error ? err.message : String(err));
       setDraft(text);
@@ -77,6 +78,7 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
       setSending(false);
     }
   };
+  const resubmit = async (message: SpecMessage): Promise<void> => { if (sending) return; setSending(true); try { const res = await resubmitSpecMessage.mutateAsync({ slug, messageId: message.id }); applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.userMessage }, timestamp: new Date().toISOString() }); if (res.assistantMessage) applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.assistantMessage }, timestamp: new Date().toISOString() }); await evidenceQuery.refetch(); } catch (err) { pushError(err instanceof Error ? err.message : String(err)); } finally { setSending(false); } };
 
   const applySpec = async (): Promise<void> => {
     if (proposedSpec === null || applying) return;
@@ -130,6 +132,7 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
                 {m.role === "assistant" ? "Spec author" : "You"}
               </span>
               <MarkdownWithCode className="text-sm" src={m.content} />
+              {m.prompt_status === "authentication_required" && <div className="mt-2 flex items-center justify-between gap-2 rounded border border-warn-border bg-warn-bg px-2 py-1.5 text-xs text-warn"><span>Sign in is required. This exact input was preserved and has not been replayed.</span><Button type="button" size="xs" variant="outline" onClick={() => void resubmit(m)} disabled={sending}>Resubmit</Button></div>}
             </div>
           ))}
         </div>

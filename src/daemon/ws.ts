@@ -18,6 +18,10 @@ export interface WebSocketBridgeOptions {
   dropAfterMs?: number;
   authenticate?: (req: import("node:http").IncomingMessage) => boolean;
   allowedOrigins?: string[];
+  terminal?: {
+    pathPrefix: string;
+    attach(operationId: string, socket: WebSocket): boolean;
+  };
 }
 
 export interface WebSocketBridgeHandle {
@@ -44,11 +48,14 @@ export function attachWebSocket(
   const dropAfterMs = options.dropAfterMs ?? DEFAULT_DROP_AFTER_MS;
 
   const wss = new WebSocketServer({ noServer: true });
+  const terminalWss = new WebSocketServer({ noServer: true });
   const clients = new Map<WebSocket, ClientState>();
 
   function onUpgrade(req: import("node:http").IncomingMessage, socket: import("node:net").Socket, head: Buffer): void {
     const requestUrl = new URL(req.url ?? "", "http://127.0.0.1");
-    if (requestUrl.pathname !== path) {
+    const terminalPrefix = options.terminal?.pathPrefix;
+    const terminalOperationId = terminalPrefix && requestUrl.pathname.startsWith(`${terminalPrefix}/`) ? decodeURIComponent(requestUrl.pathname.slice(terminalPrefix.length + 1)) : null;
+    if (requestUrl.pathname !== path && !terminalOperationId) {
       socket.destroy();
       return;
     }
@@ -70,8 +77,13 @@ export function attachWebSocket(
       socket.destroy();
       return;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req);
+    const target = terminalOperationId ? terminalWss : wss;
+    target.handleUpgrade(req, socket, head, (ws) => {
+      if (terminalOperationId && !options.terminal?.attach(terminalOperationId, ws)) {
+        ws.close(1008, "Unknown, non-terminal, or completed operation");
+        return;
+      }
+      target.emit("connection", ws, req);
     });
   }
 
@@ -182,6 +194,7 @@ export function attachWebSocket(
         }
         clients.clear();
         wss.close(() => resolve());
+        terminalWss.close();
       });
     },
   };

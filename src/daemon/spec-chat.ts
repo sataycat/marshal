@@ -3,6 +3,9 @@ import { logger } from "../logger.js";
 import { getTask } from "../tasks/store.js";
 import {
   appendSpecMessage,
+  clearSpecMessagePromptFailure,
+  getSpecMessage,
+  markSpecMessageAuthenticationRequired,
   listSpecMessages,
   type SpecMessage,
   type SpecMessageRole,
@@ -12,6 +15,7 @@ import { createSpecAuthorSession, updateSpecAuthorSession, appendSpecAuthorOpera
 import { getWorkflowProfile } from "../workflows/store.js";
 import { historicalProvenance } from "../agents/provenance.js";
 import { getSelectedRepository } from "../repositories/store.js";
+import { StructuredAcpFailureError, structuredAcpError } from "../acp/errors.js";
 
 const SPEC_AUTHOR_TIMEOUT_SECONDS = 600;
 export const DEFAULT_SPEC_CHAT_BUDGET_CHARS = 24_000;
@@ -131,7 +135,7 @@ export function collectAgentText(events: Iterable<AgentEvent>): string {
     if (event.type === "text") {
       text += event.text;
     } else if (event.type === "error") {
-      throw new Error(event.message);
+      throw event.failure ? new StructuredAcpFailureError(event.failure) : new Error(event.message);
     }
   }
   return text;
@@ -154,13 +158,14 @@ export interface RunSpecAuthorTurnOptions {
 
 export interface SpecAuthorTurnResult {
   userMessage: SpecMessage;
-  assistantMessage: SpecMessage;
+  assistantMessage: SpecMessage | null;
 }
 
 export async function runSpecAuthorTurn(
   slug: string,
   userContent: string,
   options: RunSpecAuthorTurnOptions = {},
+  recoveryMessageId?: number,
 ): Promise<SpecAuthorTurnResult> {
   const root = options.root;
   const task = getTask(slug, root);
@@ -168,7 +173,9 @@ export async function runSpecAuthorTurn(
     throw new SpecChatClosedError(slug, task.status);
   }
 
-  const userMessage = appendSpecMessage(slug, "user", userContent, root);
+  const existingMessage = recoveryMessageId === undefined ? undefined : getSpecMessage(recoveryMessageId, root);
+  if (recoveryMessageId !== undefined && (!existingMessage || existingMessage.task_id !== task.id || existingMessage.role !== "user" || existingMessage.prompt_status !== "authentication_required" || existingMessage.content !== userContent)) throw new Error("Only the preserved authentication-required spec message can be resubmitted");
+  const userMessage = existingMessage ?? appendSpecMessage(slug, "user", userContent, root);
 
   const selectedRepository = getSelectedRepository(options.machineDir);
   const profile = task.workflow_profile_id && selectedRepository
@@ -187,32 +194,34 @@ export async function runSpecAuthorTurn(
 
   let assistantText = "";
   const authorRecord = profile && assignment && selectedRepository
-     ? createSpecAuthorSession({ taskId: task.id, repositoryId: selectedRepository.id, workflowProfileId: profile.id, assignmentId: assignment.id, agentId: assignment.agent_id, agentVersion: assignment.agent_version, agentProvenance: assignment.agent_provenance ?? historicalProvenance(assignment.agent_id, assignment.agent_version), assignmentConfig: { model: assignment.model, mode: assignment.mode, permission_policy: profile.permission_policy } }, root)
+      ? createSpecAuthorSession({ taskId: task.id, repositoryId: selectedRepository.id, workflowProfileId: profile.id, assignmentId: assignment.id, agentId: assignment.agent_id, agentVersion: assignment.agent_version, agentProvenance: assignment.agent_provenance ?? historicalProvenance(assignment.agent_id, assignment.agent_version), assignmentConfig: { model: assignment.model, mode: assignment.mode, permission_policy: profile.permission_policy }, messageId: userMessage.id }, root)
     : undefined;
   try {
     if (!authorRecord) {
       // Injected agents remain a test seam; production always uses the profile path.
       const events: AgentEvent[] = [];
       const session = await options.agent!.spawn(root ?? process.cwd(), agentId, { sessionName: `marshal-${slug}-spec`, permissionMode: "approve-reads", timeoutSeconds: SPEC_AUTHOR_TIMEOUT_SECONDS });
-      for await (const event of options.agent!.prompt(session, prompt, { permissionMode: "approve-reads" })) { events.push(event); if (event.type === "error") throw new Error(event.message); }
+      for await (const event of options.agent!.prompt(session, prompt, { permissionMode: "approve-reads" })) { events.push(event); if (event.type === "error") throw event.failure ? new StructuredAcpFailureError(event.failure) : new Error(event.message); }
       assistantText = collectAgentText(events);
       await options.agent!.close(session);
     } else {
       appendSpecAuthorOperation(authorRecord.id, "author", "running", null, root);
       const supervisor = new AcpSessionSupervisor({ root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: profile!.permission_policy });
-      const started = await supervisor.start("spec-author", authorRecord.id, root ?? process.cwd(), assignment!.agent_id, assignment!.agent_version);
+      const started = await supervisor.start("spec-author", authorRecord.id, root ?? process.cwd(), assignment!.agent_id, assignment!.agent_version, { agentProvenance: authorRecord.agent_provenance });
       updateSpecAuthorSession(authorRecord.id, { supervisorSessionId: started.record.id, acpSessionId: started.record.acp_session_id, capabilities: started.record.capabilities }, root);
       const events: AgentEvent[] = [];
-      await supervisor.prompt(started.record.id, prompt, undefined, (event) => events.push(event));
+      await supervisor.prompt(started.record.id, prompt, undefined, (event) => events.push(event), { messageId: userMessage.id, ...(recoveryMessageId === undefined ? {} : { resubmissionOf: String(recoveryMessageId) }) });
       assistantText = collectAgentText(events);
       await supervisor.close(started.record.id);
       appendSpecAuthorOperation(authorRecord.id, "author", "succeeded", null, root);
       updateSpecAuthorSession(authorRecord.id, { status: "completed" }, root);
     }
   } catch (err) {
-    if (authorRecord) { appendSpecAuthorOperation(authorRecord.id, "author", "failed", err instanceof Error ? err.message : String(err), root); updateSpecAuthorSession(authorRecord.id, { status: "failed" }, root); }
+    const failure = structuredAcpError(err);
+    if (failure.kind === "authentication_required") markSpecMessageAuthenticationRequired(userMessage.id, failure, root);
+    if (authorRecord) { appendSpecAuthorOperation(authorRecord.id, "author", failure.kind === "authentication_required" ? "authentication_required" : "failed", failure.message, root, failure); updateSpecAuthorSession(authorRecord.id, { status: failure.kind === "authentication_required" ? "authentication_required" : "failed", failure }, root); }
     logger.error({ err, slug }, "Spec authoring prompt stream failed");
-    throw new Error(`spec author agent failed: ${err instanceof Error ? err.message : String(err)}`);
+    throw new StructuredAcpFailureError(failure);
   }
 
   const assistantMessage = appendSpecMessage(
@@ -221,5 +230,8 @@ export async function runSpecAuthorTurn(
     assistantText,
     root,
   );
-  return { userMessage, assistantMessage };
+  const finalUserMessage = recoveryMessageId !== undefined ? clearSpecMessagePromptFailure(userMessage.id, root) : userMessage;
+  return { userMessage: finalUserMessage, assistantMessage };
 }
+
+export function resubmitSpecAuthorTurn(slug: string, messageId: number, options: RunSpecAuthorTurnOptions = {}): Promise<SpecAuthorTurnResult> { const message = getSpecMessage(messageId, options.root); if (!message) throw new Error("Spec message not found"); return runSpecAuthorTurn(slug, message.content, options, messageId); }

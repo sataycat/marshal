@@ -1,6 +1,7 @@
 import { logger } from "../logger.js";
 import type { SpecMessage } from "../tasks/spec-store.js";
 import type { ChatMessage, ChatThread } from "../chat/store.js";
+import type { StructuredAcpError } from "../acp/errors.js";
 
 export interface BusEvent<P = unknown> {
   type: string;
@@ -84,6 +85,7 @@ export interface RunPayload {
   startedAt: string;
   endedAt: string | null;
   error: string | null;
+  failure?: StructuredAcpError | null;
 }
 
 export interface RunEventPayload {

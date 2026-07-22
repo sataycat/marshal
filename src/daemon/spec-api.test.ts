@@ -14,6 +14,7 @@ import type {
   SpawnOptions,
 } from "../agent/types.js";
 import { openDb } from "../db/index.js";
+import { RequestError } from "@agentclientprotocol/sdk";
 import {
   extractMarshalSpec,
   renderSpecAuthoringPrompt,
@@ -283,6 +284,22 @@ describe("spec chat HTTP contract", () => {
     const list = await req(app, "GET", `/api/tasks/${slug}/spec-messages`);
     const messages = (list.body as { messages: { role: string; content: string }[] }).messages;
     expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+  it("preserves typed AuthRequired spec input and only retries through explicit resubmit", async () => {
+    const failure = { kind: "authentication_required" as const, message: "Sign in required", protocol_code: RequestError.authRequired().code, data: { methodId: "login" } };
+    agent = new FakeSpecAgent([{ type: "error", message: failure.message, code: failure.protocol_code, failure }]); app = buildApp("0.0.1", { ...options, bus, specAgent: agent });
+    const slug = await createBacklogTask("Auth spec"); const failed = await req(app, "POST", `/api/tasks/${slug}/spec-messages`, { content: "exact spec input" });
+    expect(failed).toMatchObject({ status: 409, body: { code: "authentication_required", failure } });
+    const messages = (await req(app, "GET", `/api/tasks/${slug}/spec-messages`)).body as { messages: Array<{ id: number; content: string; prompt_status: string; failure: unknown }> };
+    expect(messages.messages[0]).toMatchObject({ content: "exact spec input", prompt_status: "authentication_required", failure }); expect(agent.promptCalls).toHaveLength(1);
+    agent = new FakeSpecAgent([{ type: "text", text: "recovered" }, { type: "done", stopReason: "end_turn" }]); app = buildApp("0.0.1", { ...options, bus, specAgent: agent });
+    const resubmitted = await req(app, "POST", `/api/tasks/${slug}/spec-messages/${messages.messages[0].id}/resubmit`);
+    expect(resubmitted).toMatchObject({ status: 201, body: { userMessage: { content: "exact spec input", prompt_status: null }, assistantMessage: { content: "recovered" } } }); expect(agent.promptCalls).toHaveLength(1);
+  });
+  it("keeps ordinary auth-like spec errors generic", async () => {
+    agent = new FakeSpecAgent([{ type: "error", message: "run /login" }]); app = buildApp("0.0.1", { ...options, bus, specAgent: agent }); const slug = await createBacklogTask("Generic auth prose");
+    const failed = await req(app, "POST", `/api/tasks/${slug}/spec-messages`, { content: "exact" }); expect(failed).toMatchObject({ status: 500, body: { code: "internal_error" } });
+    const messages = (await req(app, "GET", `/api/tasks/${slug}/spec-messages`)).body as { messages: Array<{ prompt_status: string | null }> }; expect(messages.messages[0].prompt_status).toBeNull();
   });
 
   it("rejects chat on a non-backlog task with 409 spec_chat_closed", async () => {

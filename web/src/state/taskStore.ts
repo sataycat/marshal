@@ -32,7 +32,7 @@ interface TaskStore {
   freezeTask: (slug: string, previous: TaskCard, specMarkdown?: string) => Promise<TaskDetail | null>;
   transitionTask: (slug: string, to: TaskStatus, previous: TaskCard) => Promise<TaskDetail | null>;
   mergeTask: (slug: string, previous: TaskCard) => Promise<TaskDetail | null>;
-  sendSpecMessage: (slug: string, content: string) => Promise<{ userMessage: SpecMessage; assistantMessage: SpecMessage } | null>;
+  sendSpecMessage: (slug: string, content: string) => Promise<{ userMessage: SpecMessage; assistantMessage: SpecMessage | null } | null>;
   updateTaskSpec: (slug: string, specMarkdown: string) => Promise<TaskDetail | null>;
 }
 
@@ -109,7 +109,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
       const result = await apiSendSpecMessage(slug, content);
       const apply = useTaskStore.getState().applyTaskEvent;
       apply({ type: "spec.message", payload: { taskSlug: slug, message: result.userMessage }, timestamp: nowIso() });
-      apply({ type: "spec.message", payload: { taskSlug: slug, message: result.assistantMessage }, timestamp: nowIso() });
+      if (result.assistantMessage) apply({ type: "spec.message", payload: { taskSlug: slug, message: result.assistantMessage }, timestamp: nowIso() });
       return result;
     } catch (error) {
       reportError(error);

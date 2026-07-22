@@ -12,6 +12,9 @@ import type {
   PromptOptions,
   SpawnOptions,
 } from "./types.js";
+import { structuredAcpError } from "../acp/errors.js";
+import { MARSHAL_CLIENT_CAPABILITIES } from "../acp/client-capabilities.js";
+import type { AgentLaunchSpec } from "../agents/types.js";
 
 interface QueueItem {
   event?: AgentEvent;
@@ -52,6 +55,7 @@ interface SessionState {
 
 export interface SdkAcpAgentAdapterOptions {
   commands: AgentCommand[];
+  machineDir?: string;
 }
 
 export class SdkAcpAgentAdapter implements Agent {
@@ -132,7 +136,8 @@ export class SdkAcpAgentAdapter implements Agent {
       })
       .catch((err: unknown) => {
         if (!timedOut) {
-          queue.push({ event: { type: "error", message: errorMessage(err) } });
+          const failure = structuredAcpError(err);
+          queue.push({ event: { type: "error", message: failure.message, ...(failure.protocol_code === null ? {} : { code: failure.protocol_code }), failure } });
           queue.push({ terminal: true });
         }
       });
@@ -227,7 +232,7 @@ export class SdkAcpAgentAdapter implements Agent {
     const context = connection.agent;
     const initialized = await context.request(acp.methods.agent.initialize, {
       protocolVersion: acp.PROTOCOL_VERSION,
-      clientCapabilities: {},
+      clientCapabilities: MARSHAL_CLIENT_CAPABILITIES,
       clientInfo: { name: "marshal", version: "0.0.1" },
     });
     if (initialized.protocolVersion !== acp.PROTOCOL_VERSION) {

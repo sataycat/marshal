@@ -484,6 +484,17 @@ describe("WebSocket event bus", () => {
     }
   });
 
+  it("applies authentication and origin protection to terminal WebSocket channels", async () => {
+    const handle = await startHttpServer({ root: repoRoot, host: "127.0.0.1", port: 0, version: "0.0.1", uiPassword: "secret" });
+    try {
+      await expectRejectedSocket(`ws://127.0.0.1:${handle.port}/ws/terminal/unknown`);
+      const login = await fetch(`http://127.0.0.1:${handle.port}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "secret" }) });
+      const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+      await expectRejectedSocket(`ws://127.0.0.1:${handle.port}/ws/terminal/unknown`, { Cookie: cookie, Origin: "https://evil.example" });
+      await expectPolicyClosedSocket(`ws://127.0.0.1:${handle.port}/ws/terminal/unknown`, { Cookie: cookie });
+    } finally { await handle.close(); }
+  });
+
   it("rejects a browser origin that is neither its own nor trusted", async () => {
     const handle = await startHttpServer({
       root: repoRoot,
@@ -518,5 +529,14 @@ function expectRejectedSocket(url: string, headers?: Record<string, string>): Pr
       clearTimeout(timer);
       resolve();
     });
+  });
+}
+
+function expectPolicyClosedSocket(url: string, headers?: Record<string, string>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url, { headers });
+    const timer = setTimeout(() => { ws.terminate(); reject(new Error("terminal WebSocket was not policy-closed")); }, 2000);
+    ws.once("close", (code) => { clearTimeout(timer); code === 1008 ? resolve() : reject(new Error(`unexpected close code ${code}`)); });
+    ws.once("error", () => { /* close carries the policy result */ });
   });
 }

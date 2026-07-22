@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, portFilePath, startHttpServer } from "./http.js";
 import { loadGlobalConfig } from "../worktree/config.js";
 import { EventBus } from "./bus.js";
@@ -21,6 +21,8 @@ import {
   getInstallationOperation,
   getInstalledAgent,
   beginAgentAuthentication,
+  getAgentAuthenticationOperation,
+  setAgentReadiness,
   updateInstallationPhase,
 } from "../agents/store.js";
 import { completeRegistryRefresh, beginRegistryRefresh } from "../registry/store.js";
@@ -123,6 +125,38 @@ describe("buildApp /api/health", () => {
 });
 
 describe("installation operation API durability", () => {
+  const agentAuthFixture = (machineDir: string, reprobe: "ready" | "authentication_required" | "failed") => {
+    const agentPath = join(machineDir, `auth-${reprobe}.cjs`);
+    writeFileSync(agentPath, `const fs = require("node:fs"); const readline = require("node:readline"); const rl = readline.createInterface({ input: process.stdin }); const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n"); rl.on("line", (line) => { const message = JSON.parse(line); if (message.method === "initialize") send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: message.params.protocolVersion, agentCapabilities: { sessionCapabilities: { close: {} } }, authMethods: [{ id: "login", name: "Browser login" }] } }); else if (message.method === "authenticate") { fs.writeFileSync(${JSON.stringify(join(machineDir, "authenticated"))}, "yes"); send({ jsonrpc: "2.0", id: message.id, result: {} }); } else if (message.method === "session/new") { if (${JSON.stringify(reprobe)} === "ready") send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "fresh-session" } }); else if (${JSON.stringify(reprobe)} === "authentication_required") send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "Still signed out", data: { methodId: "login" } } }); else send({ jsonrpc: "2.0", id: message.id, error: { code: -32001, message: "Provider setup failed", data: { retryable: false } } }); } else if (message.method === "session/close") send({ jsonrpc: "2.0", id: message.id, result: {} }); });`);
+    chmodSync(agentPath, 0o755);
+    const created = createInstallation({ id: `agent-auth-${reprobe}`, version: "1.0.0", source: "registry", license: "MIT", distribution: "npx", package_specifier: "fixture", launch: { command: "node", args: [agentPath] }, registry_snapshot_fetched_at: "fixture", integrity_status: "not_applicable", status: "installing", readiness_status: "authentication_required", readiness_error: "Sign in", protocol_version: 1, capabilities: null, auth_methods: [], raw_initialize: null, probed_at: new Date().toISOString(), installation_id: `install-${reprobe}` }, `install-op-${reprobe}`, machineDir);
+    finishInstallation(created.id, "installed", null, machineDir);
+    return setAgentReadiness(`agent-auth-${reprobe}`, "1.0.0", { readiness_status: "authentication_required", readiness_error: "Sign in", protocol_version: 1, capabilities: null, auth_methods: [{ id: "login", type: "agent", name: "Browser login", description: null, vars: [], link: null, args: [], env: {}, meta: null, raw: { id: "login", name: "Browser login" } }], raw_initialize: {}, probed_at: new Date().toISOString() }, machineDir, `install-${reprobe}`);
+  };
+
+  for (const reprobe of ["ready", "authentication_required", "failed"] as const) it(`does not complete agent authentication until the fresh ${reprobe} reprobe finishes`, async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), `marshal-agent-auth-${reprobe}-`));
+    const installed = agentAuthFixture(machineDir, reprobe);
+    const app = buildApp("0.0.1", { machineDir });
+    const response = await app.request(`/api/agents/${installed.id}/auth?version=1.0.0&installation_id=${installed.installation_id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ method_id: "login" }) });
+    expect(response.status).toBe(202);
+    const operation = (await response.json() as { authentication: { id: string; status: string } }).authentication;
+    expect(operation.status).toBe("authenticating");
+    await vi.waitFor(() => expect(getAgentAuthenticationOperation(operation.id, machineDir)?.status).not.toBe("authenticating"));
+    const finished = getAgentAuthenticationOperation(operation.id, machineDir)!;
+    const refreshed = getInstalledAgent(installed.id, installed.version, machineDir, installed.installation_id)!;
+    if (reprobe === "ready") {
+      expect(finished).toMatchObject({ status: "succeeded", error: null, failure: null });
+      expect(refreshed.readiness_status).toBe("ready");
+    } else if (reprobe === "authentication_required") {
+      expect(finished).toMatchObject({ status: "failed", error: "Still signed out", failure: { kind: "authentication_required", protocol_code: -32000, data: { methodId: "login" } } });
+      expect(refreshed).toMatchObject({ readiness_status: "authentication_required", readiness_error: "Still signed out", readiness_failure: { kind: "authentication_required" } });
+    } else {
+      expect(finished).toMatchObject({ status: "failed", error: "Provider setup failed", failure: { kind: "agent_internal_error", protocol_code: -32001, data: { retryable: false } } });
+      expect(refreshed).toMatchObject({ readiness_status: "failed", readiness_error: "Provider setup failed", readiness_failure: { kind: "agent_internal_error" } });
+    }
+  });
+
   it("routes readiness checks to the requested side-by-side installation", async () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-installation-routing-"));
     const agentPath = join(machineDir, "ready-agent.cjs");

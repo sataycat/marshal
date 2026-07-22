@@ -8,6 +8,7 @@ export const queryKeys = {
   tasks: (repositoryId: string | null = null) => ["tasks", repositoryId] as const,
   task: (slug: string, repositoryId: string | null = null) => repositoryId ? ["task", repositoryId, slug] as const : ["task", slug] as const,
   taskDiff: (slug: string) => ["task", slug, "diff"] as const,
+  taskRuns: (slug: string) => ["task", slug, "runs"] as const,
   specMessages: (slug: string) => ["task", slug, "spec-messages"] as const,
   threads: (archived: boolean, repositoryId: string | null = null) => repositoryId ? ["threads", repositoryId, { archived }] as const : ["threads", { archived }] as const,
   thread: (id: string, repositoryId: string | null = null) => repositoryId ? ["thread", repositoryId, id] as const : ["thread", id] as const,

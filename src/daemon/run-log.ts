@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { openDb } from "../db/index.js";
 import type { AgentEvent } from "../agent/types.js";
 import type { HistoricalAgentProvenance } from "../agents/provenance.js";
+import type { StructuredAcpError } from "../acp/errors.js";
 import {
   publishRunEvent,
   publishRunFinished,
@@ -11,7 +12,7 @@ import {
   type RunPayload,
 } from "./bus.js";
 
-export type RunStatus = "running" | "done" | "error";
+export type RunStatus = "running" | "done" | "authentication_required" | "error";
 export type RunRole = "builder" | "validator";
 
 export class RunNotFoundError extends Error {
@@ -40,6 +41,9 @@ export interface RunRecord {
   verificationStatus?: "pass" | "fail" | null;
   verificationOutput?: string | null;
   agentProvenance?: HistoricalAgentProvenance;
+  failure?: StructuredAcpError | null;
+  authRecoveryResolvedAt?: string | null;
+  supersededByRunId?: number | null;
 }
 
 export interface RunEventRecord {
@@ -54,6 +58,7 @@ export interface RunEventRecord {
 export interface FinishRunOptions {
   commitSha?: string;
   error?: string;
+  failure?: StructuredAcpError;
 }
 
 export interface GetEventsOptions {
@@ -83,6 +88,9 @@ interface RunRow {
   verification_status: string | null;
   verification_output: string | null;
   agent_provenance: string;
+  failure: string | null;
+  auth_recovery_resolved_at: string | null;
+  superseded_by_run_id: number | null;
 }
 
 interface RunEventRow {
@@ -95,7 +103,7 @@ interface RunEventRow {
 }
 
 function asRunStatus(value: string): RunStatus {
-  if (value === "running" || value === "done" || value === "error") {
+  if (value === "running" || value === "done" || value === "authentication_required" || value === "error") {
     return value;
   }
   throw new Error(`Unknown run status: ${value}`);
@@ -128,6 +136,9 @@ function rowToRun(row: RunRow): RunRecord {
     verificationStatus: row.verification_status === "pass" || row.verification_status === "fail" ? row.verification_status : null,
     verificationOutput: row.verification_output,
     agentProvenance: parseJson(row.agent_provenance, {}) as HistoricalAgentProvenance,
+    failure: parseJson(row.failure, null) as StructuredAcpError | null,
+    authRecoveryResolvedAt: row.auth_recovery_resolved_at,
+    supersededByRunId: row.superseded_by_run_id,
   };
 }
 
@@ -158,6 +169,7 @@ export class RunLog {
       )
       .run(taskId, role, agentId, prompt, provenance.agentVersion ?? "legacy", JSON.stringify(provenance.agentProvenance ?? {}), JSON.stringify(provenance.assignmentConfig ?? {}), randomUUID());
     const runId = Number(info.lastInsertRowid);
+    this.db.prepare("UPDATE runs SET superseded_by_run_id = ? WHERE id = (SELECT id FROM runs WHERE task_id = ? AND role = ? AND status = 'authentication_required' AND auth_recovery_resolved_at IS NOT NULL AND superseded_by_run_id IS NULL ORDER BY id DESC LIMIT 1)").run(runId, taskId, role);
     const operationId = (this.db.prepare("SELECT operation_id FROM runs WHERE id = ?").get(runId) as { operation_id: string }).operation_id;
     this.db.prepare("INSERT INTO run_operations (id, run_id, operation, status) VALUES (?, ?, ?, 'running')").run(operationId, runId, role);
     if (this.bus) {
@@ -182,23 +194,23 @@ export class RunLog {
     if (this.bus) publishRunEvent(this.bus, runId, event);
   }
 
-  finishRun(runId: number, status: "done" | "error", opts: FinishRunOptions = {}): void {
+  finishRun(runId: number, status: "done" | "error" | "authentication_required", opts: FinishRunOptions = {}): void {
     if (opts.commitSha !== undefined) {
       this.db
         .prepare(
-          "UPDATE runs SET status = ?, commit_sha = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?",
+          "UPDATE runs SET status = ?, commit_sha = ?, failure = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?",
         )
-        .run(status, opts.commitSha, runId);
+        .run(status, opts.commitSha, opts.failure ? JSON.stringify(opts.failure) : null, runId);
     } else if (opts.error !== undefined) {
       this.db
-        .prepare("UPDATE runs SET status = ?, error = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .run(status, opts.error, runId);
+        .prepare("UPDATE runs SET status = ?, error = ?, failure = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(status, opts.error, opts.failure ? JSON.stringify(opts.failure) : null, runId);
     } else {
       this.db
-        .prepare("UPDATE runs SET status = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .run(status, runId);
+        .prepare("UPDATE runs SET status = ?, failure = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(status, opts.failure ? JSON.stringify(opts.failure) : null, runId);
     }
-    this.db.prepare("UPDATE run_operations SET status = ?, diagnostic = ?, ended_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status = 'running'").run(status === "done" ? "succeeded" : "failed", opts.error ?? null, runId);
+    this.db.prepare("UPDATE run_operations SET status = ?, diagnostic = ?, ended_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status = 'running'").run(status === "done" ? "succeeded" : status, opts.error ?? null, runId);
     if (this.bus) {
       const run = this.getRun(runId);
       if (run) publishRunFinished(this.bus, toRunPayload(run));
@@ -234,6 +246,8 @@ export class RunLog {
       .all(runId, afterSeq, limit) as RunEventRow[];
     return rows.map(rowToRunEvent);
   }
+  resolveAuthenticationRequired(runId: number): RunRecord { return this.db.transaction(() => { const run = this.getRun(runId); if (!run) throw new RunNotFoundError(runId); if (run.status !== "authentication_required" || run.authRecoveryResolvedAt || run.supersededByRunId) throw new Error("Authentication recovery is stale or already resolved"); const task = this.db.prepare("SELECT status FROM tasks WHERE id = ?").get(run.taskId) as { status: string } | undefined; if (!task) throw new Error("Owning task no longer exists"); const expected = run.role === "builder" ? "building" : "validating"; const dispatchable = run.role === "builder" ? "ready" : "validating"; if (task.status !== expected) throw new Error(`Owning task is ${task.status}; expected ${expected}`); this.db.prepare("UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = ?").run(dispatchable, run.taskId, expected); this.db.prepare("UPDATE runs SET auth_recovery_resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'authentication_required' AND auth_recovery_resolved_at IS NULL").run(runId); return this.getRun(runId)!; })(); }
+  linkSupersedingRun(runId: number, supersedingRunId: number): void { this.db.prepare("UPDATE runs SET superseded_by_run_id = ? WHERE id = ? AND status = 'authentication_required'").run(supersedingRunId, runId); }
 }
 
 function toRunPayload(run: RunRecord): RunPayload {
@@ -248,6 +262,7 @@ function toRunPayload(run: RunRecord): RunPayload {
     startedAt: run.startedAt,
     endedAt: run.endedAt,
     error: run.error,
+    failure: run.failure,
   };
 }
 

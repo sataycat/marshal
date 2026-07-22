@@ -42,10 +42,26 @@ export function openDb(root?: string): Database.Database {
     db.exec("ALTER TABLE chat_threads ADD COLUMN agent_version TEXT NOT NULL DEFAULT 'legacy'");
   }
   if (!threadColumns.some((column) => column.name === "agent_provenance")) db.exec("ALTER TABLE chat_threads ADD COLUMN agent_provenance TEXT NOT NULL DEFAULT '{}'");
+  if (!threadColumns.some((column) => column.name === "failure")) db.exec("ALTER TABLE chat_threads ADD COLUMN failure TEXT");
+  if (!messageColumns.some((column) => column.name === "prompt_status")) db.exec("ALTER TABLE chat_messages ADD COLUMN prompt_status TEXT");
+  if (!messageColumns.some((column) => column.name === "failure")) db.exec("ALTER TABLE chat_messages ADD COLUMN failure TEXT");
+  const specMessageColumns = db.prepare("PRAGMA table_info(spec_messages)").all() as { name: string }[];
+  if (!specMessageColumns.some((column) => column.name === "prompt_status")) db.exec("ALTER TABLE spec_messages ADD COLUMN prompt_status TEXT");
+  if (!specMessageColumns.some((column) => column.name === "failure")) db.exec("ALTER TABLE spec_messages ADD COLUMN failure TEXT");
   const sessionColumns = db.prepare("PRAGMA table_info(acp_sessions)").all() as { name: string }[];
   if (!sessionColumns.some((column) => column.name === "agent_provenance")) db.exec("ALTER TABLE acp_sessions ADD COLUMN agent_provenance TEXT NOT NULL DEFAULT '{}'");
+  if (!sessionColumns.some((column) => column.name === "failure")) db.exec("ALTER TABLE acp_sessions ADD COLUMN failure TEXT");
+  const promptColumns = db.prepare("PRAGMA table_info(acp_prompts)").all() as { name: string }[];
+  if (!promptColumns.some((column) => column.name === "content")) db.exec("ALTER TABLE acp_prompts ADD COLUMN content TEXT NOT NULL DEFAULT '{}'");
+  if (!promptColumns.some((column) => column.name === "failure")) db.exec("ALTER TABLE acp_prompts ADD COLUMN failure TEXT");
+  if (!promptColumns.some((column) => column.name === "message_id")) db.exec("ALTER TABLE acp_prompts ADD COLUMN message_id INTEGER");
+  if (!promptColumns.some((column) => column.name === "resubmission_of")) db.exec("ALTER TABLE acp_prompts ADD COLUMN resubmission_of TEXT");
   const authorColumns = db.prepare("PRAGMA table_info(spec_author_sessions)").all() as { name: string }[];
   if (!authorColumns.some((column) => column.name === "agent_provenance")) db.exec("ALTER TABLE spec_author_sessions ADD COLUMN agent_provenance TEXT NOT NULL DEFAULT '{}'");
+  if (!authorColumns.some((column) => column.name === "failure")) db.exec("ALTER TABLE spec_author_sessions ADD COLUMN failure TEXT");
+  if (!authorColumns.some((column) => column.name === "message_id")) db.exec("ALTER TABLE spec_author_sessions ADD COLUMN message_id INTEGER");
+  const authorOperationColumns = db.prepare("PRAGMA table_info(spec_author_operations)").all() as { name: string }[];
+  if (!authorOperationColumns.some((column) => column.name === "failure")) db.exec("ALTER TABLE spec_author_operations ADD COLUMN failure TEXT");
   const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
   if (!taskColumns.some((column) => column.name === "repository_id")) db.exec("ALTER TABLE tasks ADD COLUMN repository_id TEXT");
   if (!taskColumns.some((column) => column.name === "workflow_profile_id")) db.exec("ALTER TABLE tasks ADD COLUMN workflow_profile_id TEXT");
@@ -61,6 +77,9 @@ export function openDb(root?: string): Database.Database {
     ["verification_status", "TEXT"],
     ["verification_output", "TEXT"],
     ["agent_provenance", "TEXT NOT NULL DEFAULT '{}'"],
+    ["failure", "TEXT"],
+    ["auth_recovery_resolved_at", "DATETIME"],
+    ["superseded_by_run_id", "INTEGER"],
   ];
   for (const [name, definition] of runMigrations) {
     if (!runColumns.some((column) => column.name === name)) db.exec(`ALTER TABLE runs ADD COLUMN ${name} ${definition}`);

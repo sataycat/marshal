@@ -15,9 +15,18 @@ rl.on('line', (line) => {
     send({ jsonrpc: '2.0', id: msg.id, result: {
       protocolVersion: msg.params.protocolVersion,
       agentCapabilities: { promptCapabilities: { image: true }, sessionCapabilities: { close: {} } },
-      authMethods: process.env.FAKE_PROBE_AUTH === '1' ? [{ id: 'login', name: 'Browser login' }] : [],
+      authMethods: process.env.FAKE_PROBE_AUTH === '1' ? [
+        { id: 'login', name: 'Browser login', description: 'Use the browser', _meta: { fixture: true }, futureField: { retained: true } },
+        { id: 'key', type: 'env_var', name: 'API key', description: 'Paste a key', vars: [{ name: 'API_KEY', label: 'API key', secret: true, optional: false, _meta: { input: 'token' }, futureVar: 1 }, { name: 'PROFILE', secret: false, optional: true }], link: 'https://example.test/keys', _meta: { fixture: 'env' }, futureEnv: true },
+        { id: 'terminal', type: 'terminal', name: 'Terminal login', args: ['login'], env: { MODE: 'auth' }, _meta: { fixture: 'terminal' }, futureTerminal: true }
+      ] : [],
+      _meta: { fixture: 'initialize' },
     } });
-  } else if (msg.method === 'session/new') send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'probe-session' } });
+  } else if (msg.method === 'session/new') {
+    if (process.env.FAKE_PROBE_SESSION_ERROR === 'auth') send({ jsonrpc: '2.0', id: msg.id, error: { code: -32000, message: 'Sign in through the agent', data: { methodId: 'login' } } });
+    else if (process.env.FAKE_PROBE_SESSION_ERROR === 'ordinary') send({ jsonrpc: '2.0', id: msg.id, error: { code: -32001, message: 'Authentication required is only prose here', data: { retryable: false } } });
+    else send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'probe-session' } });
+  }
   else if (msg.method === 'session/close') send({ jsonrpc: '2.0', id: msg.id, result: {} });
 });
 `;
@@ -40,12 +49,57 @@ describe("ACP readiness probe", () => {
     expect(result.error).toBeNull();
   });
 
-  it("reports authentication-required agents without creating a session", async () => {
+  it("creates a session when authentication methods are advertised", async () => {
     process.env.FAKE_PROBE_AUTH = "1";
     const result = await probeAgent(mkdtempSync(join(tmpdir(), "marshal-probe-auth-cwd-")), { command: "node" as "npx", args: [fakeAgentPath] });
     delete process.env.FAKE_PROBE_AUTH;
-    expect(result.status).toBe("authentication_required");
+    expect(result.status).toBe("ready");
     expect(result.auth_methods[0]).toMatchObject({ id: "login", type: "agent" });
+    expect(result.auth_methods).toMatchObject([
+      { id: "login", meta: { fixture: true }, raw: { futureField: { retained: true } } },
+      { id: "key", type: "env_var", link: "https://example.test/keys", vars: [{ name: "API_KEY", label: "API key", secret: true, optional: false, meta: { input: "token" }, raw: { futureVar: 1 } }, { name: "PROFILE", secret: false, optional: true }], raw: { futureEnv: true } },
+      { id: "terminal", type: "terminal", args: ["login"], env: { MODE: "auth" }, raw: { futureTerminal: true } },
+    ]);
+    expect(result.raw_initialize).toMatchObject({ _meta: { fixture: "initialize" } });
+  });
+
+  it("maps only typed AuthRequired and preserves initialization and error metadata", async () => {
+    process.env.FAKE_PROBE_AUTH = "1";
+    process.env.FAKE_PROBE_SESSION_ERROR = "auth";
+    try {
+      const result = await probeAgent(mkdtempSync(join(tmpdir(), "marshal-probe-auth-required-cwd-")), { command: "node" as "npx", args: [fakeAgentPath] });
+      expect(result).toMatchObject({
+        status: "authentication_required",
+        protocol_version: expect.any(Number),
+        capabilities: { prompt: { image: true } },
+        auth_methods: expect.any(Array),
+        raw_initialize: { _meta: { fixture: "initialize" } },
+        failure: { kind: "authentication_required", protocol_code: -32000, message: "Sign in through the agent", data: { methodId: "login" } },
+      });
+      expect(result.auth_methods[0]).toMatchObject({ id: "login", name: "Browser login" });
+    } finally {
+      delete process.env.FAKE_PROBE_AUTH;
+      delete process.env.FAKE_PROBE_SESSION_ERROR;
+    }
+  });
+
+  it("does not infer authentication from error prose and preserves non-auth failure metadata", async () => {
+    process.env.FAKE_PROBE_AUTH = "1";
+    process.env.FAKE_PROBE_SESSION_ERROR = "ordinary";
+    try {
+      const result = await probeAgent(mkdtempSync(join(tmpdir(), "marshal-probe-session-failure-cwd-")), { command: "node" as "npx", args: [fakeAgentPath] });
+      expect(result).toMatchObject({
+        status: "failed",
+        protocol_version: expect.any(Number),
+        auth_methods: expect.any(Array),
+        raw_initialize: { _meta: { fixture: "initialize" } },
+        failure: { kind: "agent_internal_error", protocol_code: -32001, message: "Authentication required is only prose here", data: { retryable: false } },
+      });
+      expect(result.auth_methods[0]).toMatchObject({ id: "login" });
+    } finally {
+      delete process.env.FAKE_PROBE_AUTH;
+      delete process.env.FAKE_PROBE_SESSION_ERROR;
+    }
   });
 
   it("returns actionable protocol and startup failures", async () => {

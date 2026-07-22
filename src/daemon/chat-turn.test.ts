@@ -7,6 +7,7 @@ import type { Agent, AgentEvent, AgentSession } from "../agent/types.js";
 import { EventBus } from "./bus.js";
 import { buildApp } from "./http.js";
 import { createInstallation, finishInstallation, setAgentReadiness } from "../agents/store.js";
+import { RequestError } from "@agentclientprotocol/sdk";
 
 class FakeAgent implements Agent {
   spawnCount = 0;
@@ -64,6 +65,14 @@ class PermissionAgent implements Agent {
 
   async cancel(): Promise<void> {}
   async close(): Promise<void> {}
+}
+
+class RecoveringAuthAgent implements Agent {
+  spawnCount = 0; promptCount = 0; closeCount = 0; authenticated = false;
+  async spawn(cwd: string, agentId: string): Promise<AgentSession> { this.spawnCount += 1; return { cwd, agentId, name: `auth-${this.spawnCount}`, recordId: `auth-${this.spawnCount}` }; }
+  async *prompt(): AsyncIterable<AgentEvent> { this.promptCount += 1; if (!this.authenticated) { const failure = { kind: "authentication_required" as const, message: "Sign in required", protocol_code: RequestError.authRequired().code, data: { methodId: "login" } }; yield { type: "error", message: failure.message, code: failure.protocol_code, failure }; return; } yield { type: "text", text: "recovered" }; yield { type: "done", stopReason: "end_turn" }; }
+  async cancel(): Promise<void> {}
+  async close(): Promise<void> { this.closeCount += 1; }
 }
 
 function initGitRepo(root: string): void {
@@ -194,5 +203,49 @@ describe("chat turns", () => {
     expect((await req(app, "POST", `/api/threads/${id}/permissions/${pending.requestId}`, { action: "approve" })).status).toBe(200);
     expect((await sending).body.assistantMessage.content).toBe("continued");
     expect((await req(app, "POST", `/api/threads/${id}/permissions/unknown`, { action: "approve" })).status).toBe(409);
+  });
+  it("preserves typed AuthRequired prompts and only replays through explicit resubmit on a replacement session", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-chat-auth-recovery-")); initGitRepo(root);
+    const agent = new RecoveringAuthAgent(); const app = buildApp("0.0.1", { root, bus: new EventBus(), chatAgent: agent });
+    const created = await req(app, "POST", "/api/threads", { agent_id: "fake", agent_version: "test" }); const id = created.body.thread.id;
+    const failed = await req(app, "POST", `/api/threads/${id}/send`, { content: "exact prompt" });
+    expect(failed).toMatchObject({ status: 409, body: { error: "Sign in required", code: "authentication_required", failure: { kind: "authentication_required", protocol_code: RequestError.authRequired().code, message: "Sign in required", data: { methodId: "login" } } } });
+    const detail = await req(app, "GET", `/api/threads/${id}`);
+    expect(detail.body.thread).toMatchObject({ status: "authentication_required", failure: { kind: "authentication_required", protocol_code: RequestError.authRequired().code } });
+    expect(detail.body.messages[0]).toMatchObject({ content: "exact prompt", prompt_status: "authentication_required" });
+    expect(agent.promptCount).toBe(1); expect(agent.closeCount).toBe(1);
+    agent.authenticated = true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(agent.promptCount).toBe(1);
+    const replay = await req(app, "POST", `/api/threads/${id}/messages/${detail.body.messages[0].id}/resubmit`);
+    expect(replay.status).toBe(201); expect(replay.body.assistantMessage.content).toBe("recovered");
+    expect(agent.spawnCount).toBe(2); expect(agent.promptCount).toBe(2);
+  });
+  it("does not reinterpret an ordinary auth-like message as AuthRequired", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-chat-generic-auth-error-")); initGitRepo(root);
+    const agent: Agent = { async spawn(cwd, agentId) { return { cwd, agentId, name: "generic" }; }, async *prompt() { yield { type: "error", message: "please run /login" }; }, async cancel() {}, async close() {} };
+    const app = buildApp("0.0.1", { root, bus: new EventBus(), chatAgent: agent }); const created = await req(app, "POST", "/api/threads", { agent_id: "fake", agent_version: "test" });
+    const failed = await req(app, "POST", `/api/threads/${created.body.thread.id}/send`, { content: "hello" }); const detail = await req(app, "GET", `/api/threads/${created.body.thread.id}`);
+    expect(failed).toEqual({ status: 500, body: { error: "Internal server error", code: "internal_error" } });
+    expect(detail.body.thread.status).toBe("error"); expect(detail.body.thread.failure.kind).toBe("agent_internal_error"); expect(detail.body.messages[0].prompt_status).toBeNull();
+  });
+  it("maps typed AuthRequired during session creation without losing ACP metadata", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-chat-session-auth-")); initGitRepo(root);
+    const failure = { kind: "authentication_required" as const, message: "Choose an account", protocol_code: RequestError.authRequired().code, data: { methodId: "browser", reason: "expired" } };
+    const agent: Agent = { async spawn() { throw RequestError.authRequired(failure.data, "Choose an account"); }, async *prompt() {}, async cancel() {}, async close() {} };
+    const app = buildApp("0.0.1", { root, bus: new EventBus(), chatAgent: agent });
+    const created = await req(app, "POST", "/api/threads", { agent_id: "fake", agent_version: "test" });
+    const failed = await req(app, "POST", `/api/threads/${created.body.thread.id}/send`, { content: "hello" });
+    expect(failed).toMatchObject({ status: 409, body: { code: "authentication_required", failure: { kind: "authentication_required", protocol_code: failure.protocol_code, data: failure.data } } });
+    expect(failed.body.error).toContain("Choose an account");
+  });
+  it("preserves structured non-auth ACP errors at the HTTP boundary", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-chat-protocol-error-")); initGitRepo(root);
+    const failure = { kind: "agent_internal_error" as const, message: "Provider request failed", protocol_code: -32001, data: { requestId: "req-1", retryable: false } };
+    const agent: Agent = { async spawn(cwd, agentId) { return { cwd, agentId, name: "protocol-error" }; }, async *prompt() { yield { type: "error", message: failure.message, code: failure.protocol_code, failure }; }, async cancel() {}, async close() {} };
+    const app = buildApp("0.0.1", { root, bus: new EventBus(), chatAgent: agent });
+    const created = await req(app, "POST", "/api/threads", { agent_id: "fake", agent_version: "test" });
+    const failed = await req(app, "POST", `/api/threads/${created.body.thread.id}/send`, { content: "hello" });
+    expect(failed).toEqual({ status: 502, body: { error: failure.message, code: failure.kind, failure } });
   });
 });

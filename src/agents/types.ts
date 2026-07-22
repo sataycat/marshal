@@ -1,3 +1,5 @@
+import type { StructuredAcpError } from "../acp/errors.js";
+
 export type InstalledAgentStatus = "installing" | "installed" | "failed" | "interrupted";
 export type InstallationPhase = "resolving" | "downloading" | "verifying" | "extracting" | "publishing" | "completed" | "failed" | "interrupted";
 export type AgentActivationStatus = "not_started" | "checking" | "authentication_required" | "ready" | "failed" | "interrupted";
@@ -14,9 +16,15 @@ export interface AgentCapabilities {
 
 export interface AgentAuthMethod {
   id: string;
-  type: "agent" | "terminal" | "env_var";
+  type: "agent" | "terminal" | "env_var" | string;
   name: string;
   description: string | null;
+  vars: Array<{ name: string; label: string | null; secret: boolean; optional: boolean; meta: Record<string, unknown> | null; raw: Record<string, unknown> }>;
+  link: string | null;
+  args: string[];
+  env: Record<string, string>;
+  meta: Record<string, unknown> | null;
+  raw: Record<string, unknown>;
 }
 
 export interface AgentLaunchSpec {
@@ -68,6 +76,7 @@ export interface InstalledAgent {
   failure: string | null;
   readiness_status: AgentReadinessStatus;
   readiness_error: string | null;
+  readiness_failure: StructuredAcpError | null;
   protocol_version: number | null;
   capabilities: AgentCapabilities | null;
   auth_methods: AgentAuthMethod[];
@@ -110,10 +119,17 @@ export interface AgentAuthenticationOperation {
   installation_id: string;
   method_id: string;
   method_name: string;
+  method_type: string;
   status: AgentAuthenticationStatus;
   started_at: string;
   finished_at: string | null;
   error: string | null;
+  failure: StructuredAcpError | null;
+  terminal_exit_code: number | null;
+  terminal_signal: number | null;
+  terminal_output_truncated: boolean;
+  terminal_last_activity_at: string | null;
+  terminal_diagnostic: { code: string; message: string; action: string } | null;
 }
 
 export interface AgentRemovalReference { type: "active_session" | "recoverable_session" | "authentication" | "activation" | "installation" | "workflow_assignment" | "default"; id: string; detail: string }

@@ -3,8 +3,9 @@ import { relative, resolve } from "node:path";
 import { openDb } from "../db/index.js";
 import { getSelectedRepository, repositoryRoot } from "../repositories/store.js";
 import type { HistoricalAgentProvenance } from "../agents/provenance.js";
+import type { StructuredAcpError } from "../acp/errors.js";
 
-export type ChatThreadStatus = "draft" | "active" | "closed" | "error";
+export type ChatThreadStatus = "draft" | "active" | "authentication_required" | "closed" | "error";
 export type ChatMessageRole = "user" | "assistant";
 
 export interface ChatThread {
@@ -24,6 +25,7 @@ export interface ChatThread {
   last_message_at: string | null;
   scratch_markdown: string;
   agent_provenance: HistoricalAgentProvenance;
+  failure: StructuredAcpError | null;
 }
 
 export interface ChatMessage {
@@ -33,6 +35,8 @@ export interface ChatMessage {
   content: string;
   created_at: string;
   attachment_ids: string[];
+  prompt_status: "authentication_required" | null;
+  failure: StructuredAcpError | null;
 }
 
 export interface CreateChatThreadInput {
@@ -50,6 +54,7 @@ export interface UpdateChatThreadInput {
   archived?: boolean;
   pinned?: boolean;
   scratchMarkdown?: string;
+  failure?: StructuredAcpError | null;
 }
 
 export class ChatThreadNotFoundError extends Error {
@@ -59,7 +64,7 @@ export class ChatThreadNotFoundError extends Error {
   }
 }
 
-const STATUSES = new Set<ChatThreadStatus>(["draft", "active", "closed", "error"]);
+const STATUSES = new Set<ChatThreadStatus>(["draft", "active", "authentication_required", "closed", "error"]);
 
 export function isChatThreadStatus(value: string): value is ChatThreadStatus {
   return STATUSES.has(value as ChatThreadStatus);
@@ -80,13 +85,14 @@ function rowToThread(row: Record<string, unknown>): ChatThread {
     archived: row.archived === 1,
     pinned: row.pinned === 1,
     agent_provenance: provenance,
+    failure: row.failure ? JSON.parse(String(row.failure)) as StructuredAcpError : null,
   };
 }
 
 function rowToMessage(row: Record<string, unknown>): ChatMessage {
   let attachmentIds: string[] = [];
   try { attachmentIds = JSON.parse(String(row.attachment_ids ?? "[]")) as string[]; } catch { attachmentIds = []; }
-  return { ...(row as unknown as ChatMessage), role: row.role as ChatMessageRole, attachment_ids: attachmentIds };
+  return { ...(row as unknown as ChatMessage), role: row.role as ChatMessageRole, attachment_ids: attachmentIds, prompt_status: row.prompt_status === "authentication_required" ? "authentication_required" : null, failure: row.failure ? JSON.parse(String(row.failure)) as StructuredAcpError : null };
 }
 
 export function listChatThreads(root?: string, includeArchived = false): ChatThread[] {
@@ -127,9 +133,9 @@ export function updateChatThread(id: string, input: UpdateChatThreadInput, root?
   const current = getChatThread(id, root);
   const updated = db
     .prepare(
-      "UPDATE chat_threads SET title = ?, status = ?, archived = ?, pinned = ?, scratch_markdown = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND repo_root = ?",
+      "UPDATE chat_threads SET title = ?, status = ?, archived = ?, pinned = ?, scratch_markdown = ?, failure = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND repo_root = ?",
     )
-    .run(input.title?.trim() || current.title, input.status ?? current.status, input.archived === undefined ? Number(current.archived) : Number(input.archived), input.pinned === undefined ? Number(current.pinned) : Number(input.pinned), input.scratchMarkdown ?? current.scratch_markdown, id, repoRoot(root));
+    .run(input.title?.trim() || current.title, input.status ?? current.status, input.archived === undefined ? Number(current.archived) : Number(input.archived), input.pinned === undefined ? Number(current.pinned) : Number(input.pinned), input.scratchMarkdown ?? current.scratch_markdown, input.failure === undefined ? (current.failure ? JSON.stringify(current.failure) : null) : input.failure ? JSON.stringify(input.failure) : null, id, repoRoot(root));
   if (updated.changes === 0) throw new ChatThreadNotFoundError(id);
   return getChatThread(id, root);
 }
@@ -165,3 +171,7 @@ export function updateChatMessage(id: number, content: string, root?: string): C
   if (!row) throw new Error(`Chat message not found: ${id}`);
   return rowToMessage(row);
 }
+
+export function markChatMessageAuthenticationRequired(id: number, failure: StructuredAcpError, root?: string): ChatMessage { const db = openDb(root); db.prepare("UPDATE chat_messages SET prompt_status = 'authentication_required', failure = ? WHERE id = ? AND role = 'user'").run(JSON.stringify(failure), id); const row = db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(id) as Record<string, unknown> | undefined; if (!row) throw new Error(`Chat message not found: ${id}`); return rowToMessage(row); }
+export function clearChatMessagePromptFailure(id: number, root?: string): ChatMessage { const db = openDb(root); db.prepare("UPDATE chat_messages SET prompt_status = NULL, failure = NULL WHERE id = ? AND role = 'user'").run(id); const row = db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(id) as Record<string, unknown> | undefined; if (!row) throw new Error(`Chat message not found: ${id}`); return rowToMessage(row); }
+export function getChatMessage(id: number, root?: string): ChatMessage | undefined { const row = openDb(root).prepare("SELECT * FROM chat_messages WHERE id = ?").get(id) as Record<string, unknown> | undefined; return row ? rowToMessage(row) : undefined; }

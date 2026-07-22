@@ -1,3 +1,5 @@
+import type { StructuredAcpError } from "../acp/errors.js";
+
 export type AgentId = string;
 
 export interface AgentCommand {
@@ -41,7 +43,7 @@ export type AgentEvent =
   | { type: "permission"; tool: string; granted: boolean; requestId?: string }
   | { type: "log"; stream: "stdout" | "stderr"; text: string }
   | { type: "done"; stopReason: string }
-  | { type: "error"; message: string; code?: number };
+  | { type: "error"; message: string; code?: number; failure?: StructuredAcpError };
 
 export interface SpawnOptions {
   permissionMode?: "approve-all" | "approve-reads" | "deny-all" | "interactive";

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp, type BuildAppOptions } from "./http.js";
-import { createTask } from "../tasks/store.js";
+import { createTask, getTask, transitionTask } from "../tasks/store.js";
 import { RunLog } from "./run-log.js";
 import type { AgentEvent } from "../agent/types.js";
 
@@ -111,6 +111,16 @@ describe("run history API", () => {
       },
     });
   });
+  it("explicitly resolves an auth-required run while retaining immutable evidence", async () => {
+    transitionTask("build-thing", "ready", repoRoot); transitionTask("build-thing", "building", repoRoot);
+    const failure = { kind: "authentication_required" as const, message: "Sign in", protocol_code: -32000, data: null }; log.finishRun(runId, "authentication_required", { error: failure.message, failure });
+    const recovered = await req(app, "POST", `/api/runs/${runId}/recover-authentication`); expect(recovered).toMatchObject({ status: 200, body: { run: { id: runId, status: "authentication_required", failure, auth_recovery_resolved_at: expect.any(String), superseded_by_run_id: null } } });
+    expect(getTask("build-thing", repoRoot).status).toBe("ready");
+    const superseding = log.startRun(taskId, "builder", "opencode", "new explicit attempt"); expect(log.getRun(runId)).toMatchObject({ status: "authentication_required", prompt: "build prompt", failure, supersededByRunId: superseding });
+  });
+  it("preserves validator dispatch state during explicit authentication recovery", async () => { log.finishRun(runId, "done"); transitionTask("build-thing", "ready", repoRoot); transitionTask("build-thing", "building", repoRoot); transitionTask("build-thing", "validating", repoRoot); const validator = log.startRun(taskId, "validator", "pi", "validate"); log.finishRun(validator, "authentication_required", { error: "Sign in", failure: { kind: "authentication_required", message: "Sign in", protocol_code: -32000, data: null } }); const result = await req(app, "POST", `/api/runs/${validator}/recover-authentication`); expect(result.status).toBe(200); expect(getTask("build-thing", repoRoot).status).toBe("validating"); });
+  it("rejects stale recovery when the owning task moved", async () => { transitionTask("build-thing", "ready", repoRoot); transitionTask("build-thing", "building", repoRoot); log.finishRun(runId, "authentication_required", { error: "Sign in", failure: { kind: "authentication_required", message: "Sign in", protocol_code: -32000, data: null } }); transitionTask("build-thing", "backlog", repoRoot); const result = await req(app, "POST", `/api/runs/${runId}/recover-authentication`); expect(result).toMatchObject({ status: 409, body: { code: "run_not_authentication_required" } }); });
+  it("rejects recovery for an ordinary run", async () => { const result = await req(app, "POST", `/api/runs/${runId}/recover-authentication`); expect(result).toMatchObject({ status: 409, body: { code: "run_not_authentication_required" } }); });
 
   it("GET /api/runs/:id returns 404 for an unknown run", async () => {
     const { status, body } = await req(app, "GET", "/api/runs/99999");

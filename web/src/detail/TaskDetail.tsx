@@ -9,7 +9,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { useTaskDetailQuery, useTaskDiffQuery } from "../api/queries";
+import { useRecoverRunAuthenticationMutation, useTaskDetailQuery, useTaskDiffQuery, useTaskRunsQuery } from "../api/queries";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
 import { useTaskStore } from "../state/taskStore";
 import { queryKeys } from "../api/queryKeys";
@@ -18,6 +18,7 @@ import { useConfirmContext } from "../components/ConfirmDialog";
 import { TaskStatusBadge } from "../components/status";
 import { actionsForStatus, confirmMessage, type BoardAction } from "../board/actions";
 import type { TaskDetail } from "../types";
+import { workflowAuthRecoveryAvailable, workflowAuthRecoveryCopy } from "../workflows/authRecovery";
 import { DiffView } from "../diff/DiffView";
 import { parseUnifiedDiff } from "../diff/parseDiff";
 import { SpecChatPanel } from "../specchat/SpecChatPanel";
@@ -35,6 +36,8 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
   const queryClient = useQueryClient();
   const { confirm } = useConfirmContext();
   const detailQuery = useTaskDetailQuery(slug);
+  const runsQuery = useTaskRunsQuery(slug);
+  const recoverRun = useRecoverRunAuthenticationMutation();
   const detail = detailQuery.data ?? null;
   const [localDetail, setLocalDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,6 +45,8 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
   const diffQuery = useTaskDiffQuery(slug, effectiveDetail?.status === "review");
   const diff = diffQuery.data?.diff ?? null;
   const diffStats = diffQuery.data?.stats ?? null;
+  const blockedRun = runsQuery.data?.find(workflowAuthRecoveryAvailable) ?? null;
+  const recoverAuthentication = async (): Promise<void> => { if (!blockedRun || busy) return; setBusy(true); try { await recoverRun.mutateAsync(blockedRun.id); await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.task(slug) }), queryClient.invalidateQueries({ queryKey: queryKeys.taskRuns(slug) }), queryClient.invalidateQueries({ queryKey: queryKeys.tasks() })]); const refreshed = await detailQuery.refetch(); if (refreshed.data) setLocalDetail(refreshed.data); } finally { setBusy(false); } };
 
   const runAction = async (action: BoardAction): Promise<void> => {
     if (effectiveDetail === null || busy) return;
@@ -132,6 +137,7 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
                   </pre>
                 </details>
               )}
+              {blockedRun && <section className="rounded-lg border border-warn-border bg-warn-bg p-3 text-xs text-warn"><p className="font-semibold">{blockedRun.role === "builder" ? "Builder" : "Validator"} sign-in required</p><p className="mt-1">{workflowAuthRecoveryCopy(blockedRun.role)}</p><Button type="button" className="mt-2" size="sm" variant="outline" onClick={() => void recoverAuthentication()} disabled={busy}>Authorize new attempt</Button></section>}
               <section>
                 <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Spec</h3>
                 <MarkdownWithCode className="spec" src={effectiveDetail.spec_markdown} />

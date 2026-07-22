@@ -12,7 +12,7 @@ function send(message) { process.stdout.write(JSON.stringify(message) + '\\n'); 
 rl.on('line', (line) => {
   const msg = JSON.parse(line);
   if (msg.method === 'initialize') send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: msg.params.protocolVersion, agentCapabilities: { sessionCapabilities: { close: {} } }, authMethods: process.env.FAKE_ACTIVATION_AUTH === '1' ? [{ id: 'login', name: 'Browser login' }] : [] } });
-  else if (msg.method === 'session/new') send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'activation-session' } });
+  else if (msg.method === 'session/new') process.env.FAKE_ACTIVATION_AUTH_REQUIRED === '1' ? send({ jsonrpc: '2.0', id: msg.id, error: { code: -32000, message: 'Sign in required', data: { methodId: 'login' } } }) : send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'activation-session' } });
   else if (msg.method === 'session/close') send({ jsonrpc: '2.0', id: msg.id, result: {} });
 });
 `;
@@ -83,13 +83,15 @@ describe("guided agent activation", () => {
     });
   });
 
-  it("stops at sign-in required and keeps the activation operation durable", async () => {
+  it("stops at typed sign-in required and keeps initialization metadata durable", async () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-activation-auth-"));
     const operation = createInstalled(machineDir, "activation-auth", "auth-install");
     process.env.FAKE_ACTIVATION_AUTH = "1";
+    process.env.FAKE_ACTIVATION_AUTH_REQUIRED = "1";
     try {
       const agent = await activateInstalledAgent("activation-agent", "1.0.0", machineDir, undefined, operation.id, "auth-install");
       expect(agent.readiness_status).toBe("authentication_required");
+      expect(agent).toMatchObject({ protocol_version: expect.any(Number), auth_methods: [{ id: "login" }], raw_initialize: { authMethods: [{ id: "login" }] }, readiness_failure: { kind: "authentication_required", protocol_code: -32000, data: { methodId: "login" } } });
       expect(getInstallationOperation(operation.id, machineDir)).toMatchObject({
         status: "installed",
         activation_status: "authentication_required",
@@ -97,6 +99,7 @@ describe("guided agent activation", () => {
       });
     } finally {
       delete process.env.FAKE_ACTIVATION_AUTH;
+      delete process.env.FAKE_ACTIVATION_AUTH_REQUIRED;
     }
   });
 

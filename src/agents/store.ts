@@ -7,6 +7,7 @@ import { resolve, relative } from "node:path";
 import { listRepositories } from "../repositories/store.js";
 import { openDb } from "../db/index.js";
 import type { AgentRemovalOperation, AgentRemovalReference } from "./types.js";
+import { deleteAgentCredentials } from "./credentials.js";
 
 function tables(machineDir?: string) {
   const db = openMachineDb(machineDir);
@@ -47,7 +48,8 @@ function tables(machineDir?: string) {
       status TEXT NOT NULL,
       started_at TEXT NOT NULL,
       finished_at TEXT,
-       error TEXT
+       error TEXT,
+       failure TEXT
        ,error_code TEXT
         ,diagnostic TEXT
        ,activation_status TEXT NOT NULL DEFAULT 'not_started'
@@ -63,11 +65,18 @@ function tables(machineDir?: string) {
       version TEXT NOT NULL,
       installation_id TEXT NOT NULL DEFAULT '',
       method_id TEXT NOT NULL,
-      method_name TEXT NOT NULL,
+       method_name TEXT NOT NULL,
+       method_type TEXT NOT NULL DEFAULT 'agent',
       status TEXT NOT NULL,
       started_at TEXT NOT NULL,
-      finished_at TEXT,
-      error TEXT
+       finished_at TEXT,
+       error TEXT,
+       failure TEXT,
+       terminal_exit_code INTEGER,
+       terminal_signal INTEGER,
+       terminal_output_truncated INTEGER NOT NULL DEFAULT 0,
+       terminal_last_activity_at TEXT,
+       terminal_diagnostic TEXT
      );
      CREATE TABLE IF NOT EXISTS agent_removal_operations (
        id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, version TEXT NOT NULL, installation_id TEXT NOT NULL,
@@ -85,6 +94,7 @@ function tables(machineDir?: string) {
     "ALTER TABLE installed_agents ADD COLUMN installation_root TEXT",
     "ALTER TABLE installed_agents ADD COLUMN readiness_status TEXT NOT NULL DEFAULT 'unknown'",
     "ALTER TABLE installed_agents ADD COLUMN readiness_error TEXT",
+    "ALTER TABLE installed_agents ADD COLUMN readiness_failure TEXT",
     "ALTER TABLE installed_agents ADD COLUMN protocol_version INTEGER",
     "ALTER TABLE installed_agents ADD COLUMN capabilities TEXT",
     "ALTER TABLE installed_agents ADD COLUMN auth_methods TEXT NOT NULL DEFAULT '[]'",
@@ -107,7 +117,14 @@ function tables(machineDir?: string) {
      "ALTER TABLE installation_operations ADD COLUMN activation_error TEXT",
      "ALTER TABLE installation_operations ADD COLUMN activation_error_code TEXT",
      "ALTER TABLE installation_operations ADD COLUMN activation_diagnostic TEXT",
-     "ALTER TABLE agent_authentication_operations ADD COLUMN installation_id TEXT NOT NULL DEFAULT ''",
+      "ALTER TABLE agent_authentication_operations ADD COLUMN installation_id TEXT NOT NULL DEFAULT ''",
+      "ALTER TABLE agent_authentication_operations ADD COLUMN failure TEXT",
+      "ALTER TABLE agent_authentication_operations ADD COLUMN method_type TEXT NOT NULL DEFAULT 'agent'",
+      "ALTER TABLE agent_authentication_operations ADD COLUMN terminal_exit_code INTEGER",
+      "ALTER TABLE agent_authentication_operations ADD COLUMN terminal_signal INTEGER",
+      "ALTER TABLE agent_authentication_operations ADD COLUMN terminal_output_truncated INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE agent_authentication_operations ADD COLUMN terminal_last_activity_at TEXT",
+      "ALTER TABLE agent_authentication_operations ADD COLUMN terminal_diagnostic TEXT",
   ]) { try { db.exec(statement); } catch (error) { if (!(error instanceof Error) || !error.message.includes("duplicate column name")) throw error; } }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_installed_agents_identity ON installed_agents(id, version, distribution, installation_id)");
   return db;
@@ -115,7 +132,7 @@ function tables(machineDir?: string) {
 
 export function interruptActiveAgentAuthentications(machineDir?: string): void {
   const db = tables(machineDir);
-  db.prepare("UPDATE agent_authentication_operations SET status = 'interrupted', finished_at = ?, error = COALESCE(error, 'Authentication was interrupted by a daemon restart') WHERE status = 'authenticating'").run(new Date().toISOString());
+  db.prepare("UPDATE agent_authentication_operations SET status = 'interrupted', finished_at = ?, error = COALESCE(error, 'Authentication was interrupted by a daemon restart'), failure = COALESCE(failure, ?), terminal_diagnostic = CASE WHEN method_type = 'terminal' THEN COALESCE(terminal_diagnostic, ?) ELSE terminal_diagnostic END WHERE status = 'authenticating'").run(new Date().toISOString(), JSON.stringify({ kind: "cancelled", message: "Authentication was interrupted by a daemon restart", protocol_code: null, data: null }), JSON.stringify({ code: "terminal_daemon_restart", message: "The setup terminal process cannot be resumed after a daemon restart.", action: "Start terminal setup again." }));
 }
 
 function agent(row: Record<string, unknown>): InstalledAgent {
@@ -134,7 +151,7 @@ function agent(row: Record<string, unknown>): InstalledAgent {
     registry_snapshot_fetched_at: row.registry_snapshot_fetched_at == null ? null : String(row.registry_snapshot_fetched_at), integrity_status: String(row.integrity_status) as InstalledAgent["integrity_status"],
     status: String(row.status) as InstalledAgent["status"], created_at: String(row.created_at), updated_at: String(row.updated_at),
     failure: row.failure === null || row.failure === undefined ? null : String(row.failure),
-    readiness_status: String(row.readiness_status ?? "unknown") as InstalledAgent["readiness_status"], readiness_error: row.readiness_error ? String(row.readiness_error) : null,
+    readiness_status: String(row.readiness_status ?? "unknown") as InstalledAgent["readiness_status"], readiness_error: row.readiness_error ? String(row.readiness_error) : null, readiness_failure: row.readiness_failure ? JSON.parse(String(row.readiness_failure)) : null,
     protocol_version: row.protocol_version == null ? null : Number(row.protocol_version), capabilities: row.capabilities ? JSON.parse(String(row.capabilities)) : null,
      auth_methods: row.auth_methods ? JSON.parse(String(row.auth_methods)) : [], raw_initialize: row.raw_initialize ? JSON.parse(String(row.raw_initialize)) : null, probed_at: row.probed_at ? String(row.probed_at) : null, is_default: Number(row.is_default ?? 0) === 1,
   };
@@ -145,7 +162,7 @@ function operation(row: Record<string, unknown>): InstallationOperation {
 }
 
 function authenticationOperation(row: Record<string, unknown>): AgentAuthenticationOperation {
-  return { id: String(row.id), agent_id: String(row.agent_id), version: String(row.version), installation_id: String(row.installation_id ?? ""), method_id: String(row.method_id), method_name: String(row.method_name), status: String(row.status) as AgentAuthenticationOperation["status"], started_at: String(row.started_at), finished_at: row.finished_at ? String(row.finished_at) : null, error: row.error ? String(row.error) : null };
+  return { id: String(row.id), agent_id: String(row.agent_id), version: String(row.version), installation_id: String(row.installation_id ?? ""), method_id: String(row.method_id), method_name: String(row.method_name), method_type: String(row.method_type ?? "agent"), status: String(row.status) as AgentAuthenticationOperation["status"], started_at: String(row.started_at), finished_at: row.finished_at ? String(row.finished_at) : null, error: row.error ? String(row.error) : null, failure: row.failure ? JSON.parse(String(row.failure)) : null, terminal_exit_code: row.terminal_exit_code == null ? null : Number(row.terminal_exit_code), terminal_signal: row.terminal_signal == null ? null : Number(row.terminal_signal), terminal_output_truncated: Number(row.terminal_output_truncated ?? 0) === 1, terminal_last_activity_at: row.terminal_last_activity_at ? String(row.terminal_last_activity_at) : null, terminal_diagnostic: row.terminal_diagnostic ? JSON.parse(String(row.terminal_diagnostic)) : null };
 }
 function removalOperation(row: Record<string, unknown>): AgentRemovalOperation { return { id: String(row.id), agent_id: String(row.agent_id), version: String(row.version), installation_id: String(row.installation_id), status: String(row.status) as AgentRemovalOperation["status"], started_at: String(row.started_at), finished_at: row.finished_at ? String(row.finished_at) : null, error: row.error ? String(row.error) : null, error_code: row.error_code ? String(row.error_code) : null, diagnostic: row.diagnostic ? JSON.parse(String(row.diagnostic)) : null, references: JSON.parse(String(row.references_json ?? "[]")) as AgentRemovalReference[] }; }
 
@@ -166,7 +183,7 @@ export function getLatestInstallationOperation(id: string, version: string, mach
   return row ? operation(row) : undefined;
 }
 
-export function createInstallation(input: Omit<InstalledAgent, "created_at" | "updated_at" | "failure" | "provenance" | "installation_id" | "installation_root" | "is_default"> & Partial<Pick<InstalledAgent, "provenance" | "installation_id" | "installation_root" | "is_default">>, operationId: string, machineDir?: string, metadata: Partial<Pick<InstallationOperation, "phase" | "temporary_root" | "published_root" | "recovery_metadata">> = {}): InstallationOperation {
+export function createInstallation(input: Omit<InstalledAgent, "created_at" | "updated_at" | "failure" | "provenance" | "installation_id" | "installation_root" | "is_default" | "readiness_failure"> & Partial<Pick<InstalledAgent, "provenance" | "installation_id" | "installation_root" | "is_default" | "readiness_failure">>, operationId: string, machineDir?: string, metadata: Partial<Pick<InstallationOperation, "phase" | "temporary_root" | "published_root" | "recovery_metadata">> = {}): InstallationOperation {
   const db = tables(machineDir);
   const now = new Date().toISOString();
   const installationRoot = input.installation_root ?? "";
@@ -303,16 +320,22 @@ export function getAgentAuthenticationOperation(id: string, machineDir?: string)
   return row ? authenticationOperation(row) : undefined;
 }
 
-export function beginAgentAuthentication(input: Pick<AgentAuthenticationOperation, "id" | "agent_id" | "version" | "installation_id" | "method_id" | "method_name">, machineDir?: string): AgentAuthenticationOperation {
+export function beginAgentAuthentication(input: Pick<AgentAuthenticationOperation, "id" | "agent_id" | "version" | "installation_id" | "method_id" | "method_name"> & Partial<Pick<AgentAuthenticationOperation, "method_type">>, machineDir?: string): AgentAuthenticationOperation {
   const db = tables(machineDir);
   const startedAt = new Date().toISOString();
-  db.prepare("INSERT INTO agent_authentication_operations (id, agent_id, version, installation_id, method_id, method_name, status, started_at) VALUES (?, ?, ?, ?, ?, ?, 'authenticating', ?)").run(input.id, input.agent_id, input.version, input.installation_id, input.method_id, input.method_name, startedAt);
+  db.prepare("INSERT INTO agent_authentication_operations (id, agent_id, version, installation_id, method_id, method_name, method_type, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'authenticating', ?)").run(input.id, input.agent_id, input.version, input.installation_id, input.method_id, input.method_name, input.method_type ?? "agent", startedAt);
   return getAgentAuthenticationOperation(input.id, machineDir)!;
 }
 
-export function finishAgentAuthentication(id: string, status: Exclude<AgentAuthenticationOperation["status"], "authenticating">, error: string | null, machineDir?: string): AgentAuthenticationOperation {
+export function finishAgentAuthentication(id: string, status: Exclude<AgentAuthenticationOperation["status"], "authenticating">, error: string | null, machineDir?: string, failure: AgentAuthenticationOperation["failure"] = null): AgentAuthenticationOperation {
   const db = tables(machineDir);
-  db.prepare("UPDATE agent_authentication_operations SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status = 'authenticating'").run(status, new Date().toISOString(), error, id);
+  db.prepare("UPDATE agent_authentication_operations SET status = ?, finished_at = ?, error = ?, failure = ? WHERE id = ? AND status = 'authenticating'").run(status, new Date().toISOString(), error, failure ? JSON.stringify(failure) : null, id);
+  return getAgentAuthenticationOperation(id, machineDir)!;
+}
+
+export function updateTerminalAuthentication(id: string, input: { exitCode?: number | null; signal?: number | null; outputTruncated?: boolean; lastActivityAt?: string; diagnostic?: AgentAuthenticationOperation["terminal_diagnostic"] }, machineDir?: string): AgentAuthenticationOperation {
+  const db = tables(machineDir);
+  db.prepare("UPDATE agent_authentication_operations SET terminal_exit_code = COALESCE(?, terminal_exit_code), terminal_signal = COALESCE(?, terminal_signal), terminal_output_truncated = COALESCE(?, terminal_output_truncated), terminal_last_activity_at = COALESCE(?, terminal_last_activity_at), terminal_diagnostic = COALESCE(?, terminal_diagnostic) WHERE id = ?").run(input.exitCode ?? null, input.signal ?? null, input.outputTruncated === undefined ? null : Number(input.outputTruncated), input.lastActivityAt ?? null, input.diagnostic ? JSON.stringify(input.diagnostic) : null, id);
   return getAgentAuthenticationOperation(id, machineDir)!;
 }
 
@@ -360,6 +383,7 @@ export function executeAgentRemoval(operationId: string, machineDir?: string): A
     const root = String(row.installation_root ?? ""); const base = resolve(machineDir ?? GLOBAL_DIR, "agents");
     if (root && (resolve(root) === base || relative(base, root).startsWith(".."))) throw new Error("Installation payload is outside Marshal's owned agents directory");
     if (root) rmSync(root, { recursive: true, force: true });
+    deleteAgentCredentials(op.installation_id, machineDir);
     db.transaction(() => {
       db.prepare("INSERT OR REPLACE INTO agent_removal_tombstones (installation_id, agent_id, version, provenance, removed_at, removal_operation_id) VALUES (?, ?, ?, ?, ?, ?)").run(op.installation_id, op.agent_id, op.version, String(row.provenance ?? "{}"), new Date().toISOString(), operationId);
       db.prepare("DELETE FROM installed_agents WHERE id = ? AND version = ? AND installation_id = ?").run(op.agent_id, op.version, op.installation_id);
@@ -370,8 +394,8 @@ export function executeAgentRemoval(operationId: string, machineDir?: string): A
   return getAgentRemovalOperation(operationId, machineDir)!;
 }
 
-export function setAgentReadiness(id: string, version: string, result: { readiness_status: InstalledAgent["readiness_status"]; readiness_error: string | null; protocol_version: number | null; capabilities: unknown; auth_methods: unknown; raw_initialize: unknown; probed_at: string }, machineDir?: string, installationId?: string): InstalledAgent {
+export function setAgentReadiness(id: string, version: string, result: { readiness_status: InstalledAgent["readiness_status"]; readiness_error: string | null; readiness_failure?: InstalledAgent["readiness_failure"]; protocol_version: number | null; capabilities: unknown; auth_methods: unknown; raw_initialize: unknown; probed_at: string }, machineDir?: string, installationId?: string): InstalledAgent {
   const db = tables(machineDir);
-  db.prepare(installationId ? "UPDATE installed_agents SET readiness_status = ?, readiness_error = ?, protocol_version = ?, capabilities = ?, auth_methods = ?, raw_initialize = ?, probed_at = ?, updated_at = ? WHERE id = ? AND version = ? AND installation_id = ?" : "UPDATE installed_agents SET readiness_status = ?, readiness_error = ?, protocol_version = ?, capabilities = ?, auth_methods = ?, raw_initialize = ?, probed_at = ?, updated_at = ? WHERE id = ? AND version = ?").run(...(installationId ? [result.readiness_status, result.readiness_error, result.protocol_version, result.capabilities ? JSON.stringify(result.capabilities) : null, JSON.stringify(result.auth_methods), result.raw_initialize ? JSON.stringify(result.raw_initialize) : null, result.probed_at, result.probed_at, id, version, installationId] : [result.readiness_status, result.readiness_error, result.protocol_version, result.capabilities ? JSON.stringify(result.capabilities) : null, JSON.stringify(result.auth_methods), result.raw_initialize ? JSON.stringify(result.raw_initialize) : null, result.probed_at, result.probed_at, id, version]));
+  db.prepare(installationId ? "UPDATE installed_agents SET readiness_status = ?, readiness_error = ?, readiness_failure = ?, protocol_version = ?, capabilities = ?, auth_methods = ?, raw_initialize = ?, probed_at = ?, updated_at = ? WHERE id = ? AND version = ? AND installation_id = ?" : "UPDATE installed_agents SET readiness_status = ?, readiness_error = ?, readiness_failure = ?, protocol_version = ?, capabilities = ?, auth_methods = ?, raw_initialize = ?, probed_at = ?, updated_at = ? WHERE id = ? AND version = ?").run(...(installationId ? [result.readiness_status, result.readiness_error, result.readiness_failure ? JSON.stringify(result.readiness_failure) : null, result.protocol_version, result.capabilities ? JSON.stringify(result.capabilities) : null, JSON.stringify(result.auth_methods), result.raw_initialize ? JSON.stringify(result.raw_initialize) : null, result.probed_at, result.probed_at, id, version, installationId] : [result.readiness_status, result.readiness_error, result.readiness_failure ? JSON.stringify(result.readiness_failure) : null, result.protocol_version, result.capabilities ? JSON.stringify(result.capabilities) : null, JSON.stringify(result.auth_methods), result.raw_initialize ? JSON.stringify(result.raw_initialize) : null, result.probed_at, result.probed_at, id, version]));
   return getInstalledAgent(id, version, machineDir, installationId)!;
 }

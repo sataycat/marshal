@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Download, ExternalLink, RefreshCw, Search, ShieldCheck, Wrench } from "lucide-react";
+import { Check, Download, ExternalLink, MessageSquare, RefreshCw, Search, ShieldCheck, Wrench } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button } from "../components/ui/button";
+import { Button, buttonVariants } from "../components/ui/button";
+import { Link } from "wouter";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { PageHeader } from "../components/PageHeader";
@@ -24,9 +25,12 @@ import {
   useSetDefaultInstalledAgentMutation,
   useUpdateRegistryAgentMutation,
 } from "../api/queries";
-import { fetchInstallCandidate, type InstallCandidate } from "../api/client";
-import type { InstalledAgent, InstallationOperation, RegistryAgent } from "../types";
+import { connectTerminalAuthentication, fetchInstallCandidate, fetchTerminalAuthentication, type InstallCandidate } from "../api/client";
+import type { AgentAuthenticationOperation, InstalledAgent, InstallationOperation, RegistryAgent, TerminalAuthSnapshot } from "../types";
 import { useToastStore } from "../state/toastStore";
+import { cn } from "../lib/utils";
+import { installedCardState, installedCardStateLabel } from "../agents/installedCardState";
+import { authMethodSupport } from "../agents/authMethodSupport";
 
 const featuredAgentNames = ["claude", "codex", "devin", "copilot", "opencode", "gemini", "amp", "zed"];
 
@@ -119,11 +123,12 @@ export function AgentsRoute(): JSX.Element {
     await client.invalidateQueries({ queryKey: queryKeys.installedAgents });
   };
   const probeAgent = async (entry: InstalledAgent): Promise<void> => { await probe.mutateAsync({ agentId: entry.id, version: entry.version, installationId: entry.installation_id }); await client.invalidateQueries({ queryKey: queryKeys.installedAgents }); };
-  const authenticateAgent = async (entry: InstalledAgent, methodId: string): Promise<void> => {
+  const authenticateAgent = async (entry: InstalledAgent, methodId: string, values?: Record<string, string>): Promise<AgentAuthenticationOperation | InstalledAgent | undefined> => {
     try {
-      await authenticate.mutateAsync({ agentId: entry.id, version: entry.version, methodId, installationId: entry.installation_id });
+      const result = await authenticate.mutateAsync({ agentId: entry.id, version: entry.version, methodId, installationId: entry.installation_id, values });
       await client.invalidateQueries({ queryKey: queryKeys.agentAuthentication(entry.id, entry.version, entry.installation_id) });
       await client.invalidateQueries({ queryKey: queryKeys.installedAgents });
+      return result;
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to start authentication.");
     }
@@ -181,7 +186,7 @@ export function AgentsRoute(): JSX.Element {
                   ? () => void requestInstall(registryMatchFor(entry)!, "update")
                   : null}
                 onDefault={(installationId) => void setDefault.mutateAsync({ agentId: entry.id, installationId })}
-                onAuthenticate={(methodId) => void authenticateAgent(entry, methodId)}
+                onAuthenticate={(methodId, values) => authenticateAgent(entry, methodId, values)}
                 busy={busy}
                 preparing={preparingId !== null}
               />
@@ -314,7 +319,7 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
   onRemove: () => void;
   onUpdate: (() => void) | null;
   onDefault: (installationId: string) => void;
-  onAuthenticate: (methodId: string) => void;
+  onAuthenticate: (methodId: string, values?: Record<string, string>) => Promise<AgentAuthenticationOperation | InstalledAgent | undefined>;
   busy: boolean;
   preparing: boolean;
 }): JSX.Element {
@@ -323,6 +328,37 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
   const auth = authentication.data?.authentication;
   const name = registryAgent?.name ?? entry.id;
   const activationBusy = entry.readiness_status === "probing" || activationOperation?.activation_status === "checking";
+  const cardState = installedCardState(entry.status, entry.readiness_status, auth?.status);
+  const signInMethod = entry.auth_methods.find((method) => method.type === "agent");
+  const [authValues, setAuthValues] = useState<Record<string, string>>({});
+  const [terminal, setTerminal] = useState<TerminalAuthSnapshot | null>(null);
+  const [terminalInput, setTerminalInput] = useState("");
+  const terminalSocket = useRef<ReturnType<typeof connectTerminalAuthentication> | null>(null);
+
+  useEffect(() => () => terminalSocket.current?.close(), []);
+  useEffect(() => {
+    if (auth?.method_type !== "terminal" || auth.status !== "authenticating" || terminal?.operation.id === auth.id) return;
+    let cancelled = false;
+    void fetchTerminalAuthentication(auth.id).then((snapshot) => {
+      if (cancelled) return;
+      setTerminal(snapshot);
+      terminalSocket.current?.close();
+      terminalSocket.current = connectTerminalAuthentication(auth.id, (message) => {
+        if (message.type === "terminal.snapshot" || message.type === "terminal.state") setTerminal(message.payload as TerminalAuthSnapshot);
+        if (message.type === "terminal.output") setTerminal((current) => current ? applyTerminalOutput(current, message.payload) : current);
+      });
+    }).catch(() => { /* polling will expose a reconciled terminal operation state */ });
+    return () => { cancelled = true; };
+  }, [auth?.id, auth?.method_type, auth?.status, terminal?.operation.id]);
+  const openTerminal = async (methodId: string): Promise<void> => {
+    const result = await onAuthenticate(methodId);
+    if (!result || !("method_type" in result) || result.method_type !== "terminal") return;
+    terminalSocket.current?.close();
+    terminalSocket.current = connectTerminalAuthentication(result.id, (message) => {
+      if (message.type === "terminal.snapshot" || message.type === "terminal.state") setTerminal(message.payload as TerminalAuthSnapshot);
+      if (message.type === "terminal.output") setTerminal((current) => current ? applyTerminalOutput(current, message.payload) : current);
+    });
+  };
 
   return (
     <article className="flex flex-col rounded-xl border border-border bg-panel p-4">
@@ -336,20 +372,38 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
           <p className="mt-0.5 font-mono text-xs text-muted-foreground">{entry.id}@{entry.version}</p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <ReadinessBadge status={entry.readiness_status} />
+          {cardState === "signing_in" ? <Badge tone="accent">{installedCardStateLabel(cardState)}</Badge> : <ReadinessBadge status={entry.readiness_status} />}
         </div>
       </div>
 
-      <dl className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <div className="flex gap-1.5"><dt>Distribution</dt><dd className="font-medium text-text">{entry.distribution}</dd></div>
-        <div className="flex gap-1.5"><dt>Integrity</dt><dd className={entry.integrity_status === "verified" ? "font-medium text-success" : entry.integrity_status === "mismatch" ? "font-medium text-error" : "font-medium text-text"}>{entry.integrity_status.replaceAll("_", " ")}</dd></div>
-        {entry.protocol_version !== null && <div className="flex gap-1.5"><dt>ACP</dt><dd className="font-medium text-text">v{entry.protocol_version}</dd></div>}
-        {entry.capabilities && <div className="flex gap-1.5"><dt>Images</dt><dd className="font-medium text-text">{entry.capabilities.prompt.image ? "supported" : "no"}</dd></div>}
-      </dl>
-
       {entry.status === "failed" && <p className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">Installation failed: {entry.failure ?? "unknown error"}</p>}
-      {entry.status === "installed" && entry.readiness_status === "probing" && <p className="mt-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">Checking agent startup, ACP negotiation, and a temporary session.</p>}
+      {entry.status === "installed" && entry.readiness_status === "probing" && <p className="mt-3 text-sm text-muted-foreground">Marshal is getting this agent ready.</p>}
       {entry.readiness_status === "authentication_required" && <p className="mt-3 rounded-lg border border-warn-border bg-warn-bg px-3 py-2 text-xs text-warn">Sign in to this agent, then Marshal will check readiness again automatically.</p>}
+      {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "env_var").map((method) => (
+        <form key={method.id} className="mt-3 rounded-lg border border-border bg-inset p-3" onSubmit={(event) => { event.preventDefault(); onAuthenticate(method.id, authValues); }}>
+          <p className="text-sm font-medium">{method.name}</p>
+          {method.description && <p className="mt-1 text-xs text-muted-foreground">{method.description}</p>}
+          {method.link && <a className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline" href={method.link} target="_blank" rel="noreferrer">Get credentials <ExternalLink className="size-3" /></a>}
+          <div className="mt-3 space-y-2">
+            {method.vars.map((variable) => <label key={variable.name} className="block text-xs"><span className="mb-1 block font-medium text-text">{variable.label ?? variable.name}{variable.optional ? " (optional)" : ""}</span><Input type={variable.secret ? "password" : "text"} name={variable.name} autoComplete="off" required={!variable.optional} value={authValues[variable.name] ?? ""} onChange={(event) => setAuthValues((current) => ({ ...current, [variable.name]: event.target.value }))} /></label>)}
+          </div>
+          <Button className="mt-3" size="sm" type="submit" disabled={busy || activationBusy}><ShieldCheck aria-hidden />Save and check setup</Button>
+        </form>
+      ))}
+      {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "terminal" && authMethodSupport(method).supported).map((method) => (
+        <div key={method.id} className="mt-3 rounded-lg border border-border bg-inset p-3">
+          <p className="text-sm font-medium">{method.name}</p>
+          {method.description && <p className="mt-1 text-xs text-muted-foreground">{method.description}</p>}
+          <p className="mt-2 rounded border border-warn-border bg-warn-bg px-2 py-1.5 text-xs text-warn">This agent setup terminal executes on the Marshal daemon host, not in your browser. It runs the pinned installed agent command with the advertised terminal setup metadata; it is not a general shell.</p>
+          {!terminal && <Button className="mt-3" size="sm" onClick={() => void openTerminal(method.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Open setup terminal</Button>}
+          {terminal && terminal.operation.method_id === method.id && <div className="mt-3">
+            <div className="mb-2 flex items-center justify-between text-xs"><span>{terminal.phase === "running" ? "Connected to setup" : terminal.phase === "reprobing" ? "Checking readiness…" : `Setup ${terminal.operation.status}`}</span><span className="text-muted-foreground">{terminal.host}</span></div>
+            <pre className="h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-black p-3 font-mono text-xs text-green-300">{terminal.output || "Waiting for terminal output…"}{terminal.output_truncated ? "\n[older output truncated]" : ""}</pre>
+            {terminal.phase === "running" && <form className="mt-2 flex gap-2" onSubmit={(event) => { event.preventDefault(); terminalSocket.current?.send(`${terminalInput}\r`); setTerminalInput(""); }}><Input aria-label="Setup terminal input" autoComplete="off" value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} placeholder="Type setup input and press Enter" /><Button type="submit" size="sm">Send</Button><Button type="button" variant="outline" size="sm" onClick={() => void cancel.mutateAsync(terminal.operation.id)}>Cancel</Button></form>}
+            {terminal.operation.terminal_diagnostic && <p className="mt-2 text-xs text-muted-foreground">{terminal.operation.terminal_diagnostic.message} {terminal.operation.terminal_diagnostic.action}</p>}
+          </div>}
+        </div>
+      ))}
       {entry.readiness_status === "failed" && (entry.readiness_error || activationOperation?.activation_diagnostic) && <div className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error"><p>Setup failed: {entry.readiness_error ?? activationOperation?.activation_diagnostic?.message}</p><p className="mt-1 text-error/80">{activationOperation?.activation_diagnostic?.action ?? "Retry the readiness check after reviewing the installation."}</p></div>}
       {auth && auth.status !== "succeeded" && (
         <div className="mt-3 rounded-lg border border-border bg-inset px-3 py-2 text-xs">
@@ -362,13 +416,31 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
-        {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "agent").map((method) => (
-          <Button key={method.id} size="sm" onClick={() => onAuthenticate(method.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Sign in with {method.name}</Button>
-        ))}
-        {onUpdate && <Button variant="outline" size="sm" onClick={onUpdate} disabled={busy || preparing}><Download aria-hidden />Update available</Button>}
-        {entry.status === "installed" && !entry.is_default && <Button variant="outline" size="sm" onClick={() => onDefault(entry.installation_id)} disabled={busy}>Use by default</Button>}
-        <Button variant="outline" size="sm" onClick={onProbe} disabled={busy || activationBusy} title="Check ACP initialization, authentication, capabilities, and a temporary session"><Wrench aria-hidden />Retry readiness check</Button>
-        <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground hover:text-error" onClick={onRemove} disabled={busy || activationBusy}>Remove</Button>
+        {cardState === "ready" && <Link href="/chat" className={cn(buttonVariants({ size: "sm" }))}><MessageSquare aria-hidden />Start chat</Link>}
+        {cardState === "sign_in_required" && signInMethod && <Button size="sm" onClick={() => onAuthenticate(signInMethod.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Sign in</Button>}
+        {cardState === "setup_needed" && <Button size="sm" onClick={onProbe} disabled={busy || activationBusy}><Wrench aria-hidden />Retry setup</Button>}
+        <details className="ml-auto text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none py-1 font-medium hover:text-text">Details</summary>
+          <div className="mt-2 min-w-72 rounded-lg border border-border bg-inset p-3">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+              <dt>Distribution</dt><dd className="font-medium text-text">{entry.distribution}</dd>
+              <dt>Integrity</dt><dd className="font-medium text-text">{entry.integrity_status.replaceAll("_", " ")}</dd>
+              <dt>ACP</dt><dd className="font-medium text-text">{entry.protocol_version === null ? "not negotiated" : `v${entry.protocol_version}`}</dd>
+              <dt>Authentication</dt><dd className="font-medium text-text">{entry.auth_methods.length === 0 ? "No methods advertised" : entry.auth_methods.map((method) => method.name).join(", ")}</dd>
+              <dt>Last check</dt><dd className="font-medium text-text">{entry.probed_at ? new Date(entry.probed_at).toLocaleString() : "not completed"}</dd>
+            </dl>
+            {entry.readiness_failure && <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-bg p-2 font-mono text-[0.6875rem] text-error">{JSON.stringify(entry.readiness_failure, null, 2)}</pre>}
+            {(entry.capabilities || entry.raw_initialize) && <details className="mt-3 border-t border-border pt-2"><summary className="cursor-pointer font-medium">Protocol diagnostics</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-bg p-2 font-mono text-[0.6875rem] text-text">{JSON.stringify({ capabilities: entry.capabilities, raw_initialize: entry.raw_initialize }, null, 2)}</pre></details>}
+            <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+              {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "agent").map((method) => <Button key={method.id} variant="outline" size="xs" onClick={() => onAuthenticate(method.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />{method.name}</Button>)}
+              {entry.auth_methods.map((method) => ({ method, support: authMethodSupport(method) })).filter(({ support }) => !support.supported).map(({ method, support }) => <div key={method.id} className="basis-full rounded border border-warn-border bg-warn-bg px-2 py-1.5 text-warn"><strong>{method.name}</strong> is advertised but unavailable: {!support.supported && support.reason}</div>)}
+              {onUpdate && <Button variant="outline" size="xs" onClick={onUpdate} disabled={busy || preparing}><Download aria-hidden />Update</Button>}
+              {entry.status === "installed" && !entry.is_default && <Button variant="outline" size="xs" onClick={() => onDefault(entry.installation_id)} disabled={busy}>Use by default</Button>}
+              <Button variant="outline" size="xs" onClick={onProbe} disabled={busy || activationBusy}><Wrench aria-hidden />Retry setup check</Button>
+              <Button variant="ghost" size="xs" className="text-muted-foreground hover:text-error" onClick={onRemove} disabled={busy || activationBusy}>Remove</Button>
+            </div>
+          </div>
+        </details>
       </div>
     </article>
   );
@@ -434,4 +506,17 @@ function activationLabel(status: InstallationOperation["activation_status"]): st
   if (status === "failed") return "Setup failed";
   if (status === "interrupted") return "Activation interrupted";
   return "Installed";
+}
+
+function applyTerminalOutput(current: TerminalAuthSnapshot, payload: unknown): TerminalAuthSnapshot {
+  const output = payload && typeof payload === "object" ? payload as { data?: unknown; output_truncated?: unknown; output_limit_bytes?: unknown } : {};
+  const data = typeof output.data === "string" ? output.data : "";
+  const limit = typeof output.output_limit_bytes === "number" && Number.isSafeInteger(output.output_limit_bytes) && output.output_limit_bytes > 0 ? output.output_limit_bytes : 256 * 1024;
+  let combined = current.output + data;
+  let locallyTruncated = false;
+  while (new TextEncoder().encode(combined).byteLength > limit && combined.length > 0) {
+    combined = combined.slice(Math.max(1, Math.floor(combined.length / 8)));
+    locallyTruncated = true;
+  }
+  return { ...current, output: combined, output_truncated: current.output_truncated || Boolean(output.output_truncated) || locallyTruncated };
 }
