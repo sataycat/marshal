@@ -1,79 +1,33 @@
-import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Menu } from "@base-ui/react/menu";
 import {
-  Activity,
-  Bot,
   Check,
   ChevronsUpDown,
   FolderGit2,
-  MessagesSquare,
-  SquareKanban,
+  Settings,
   Trash2,
-  Workflow,
 } from "lucide-react";
 import { useRepositoriesQuery, useRemoveRepositoryMutation, useSelectRepositoryMutation } from "../api/queries";
 import { queryKeys } from "../api/queryKeys";
-import { ThemeSettings } from "../components/ThemeSettings";
 import { useConfirmContext } from "../components/ConfirmDialog";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import { useTaskStore } from "../state/taskStore";
 import { MarshalMark } from "../components/MarshalMark";
-import { ROUTES, type StaticPath } from "../routes/routes";
+import { NAV_ITEMS, ROUTES, type StaticPath } from "../routes/routes";
 import { cn } from "@/lib/utils";
-
-const tools: Array<{ path: StaticPath; label: string; icon: typeof Bot }> = [
-  { path: ROUTES.chat, label: "Threads", icon: MessagesSquare },
-  { path: ROUTES.board, label: "Tasks", icon: SquareKanban },
-  { path: ROUTES.agents, label: "Agents", icon: Bot },
-  { path: ROUTES.workflows, label: "Workflows", icon: Workflow },
-  { path: ROUTES.diagnostics, label: "Diagnostics", icon: Activity },
-];
 
 export function AppShell({ children, onboarding = false }: { children: React.ReactNode; onboarding?: boolean }): JSX.Element {
   const socketStatus = useTaskStore((state) => state.socketStatus);
 
   return (
-    <div className="flex h-svh overflow-hidden bg-bg text-text">
-      <aside className="hidden w-16 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar py-3 text-sidebar-foreground md:flex">
-        <Link
-          href={ROUTES.home}
-          className="mb-6 flex size-10 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground transition-transform hover:scale-[1.04]"
-          aria-label="Marshal home"
-        >
-          <MarshalMark className="size-5" />
-        </Link>
-        <nav className="flex flex-1 flex-col items-center gap-1" aria-label="Primary tools">
-          {tools.map((item, index) => (
-            <ToolLink key={item.path} {...item} separated={index === 2 || index === 4} disabled={onboarding && item.path !== ROUTES.agents} />
-          ))}
-        </nav>
-        <div className="flex flex-col items-center gap-3">
-          <ThemeSettings />
-          <span
-            className={cn(
-              "size-2 rounded-full",
-              socketStatus === "open" ? "bg-success" : socketStatus === "connecting" ? "bg-warn" : "bg-error",
-            )}
-            title={socketStatus === "open" ? "Daemon connected" : socketStatus === "connecting" ? "Connecting to daemon" : "Daemon disconnected"}
-          />
-        </div>
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Header socketStatus={socketStatus} />
-        <main className="flex min-h-0 flex-1 flex-col pb-14 md:pb-0">{children}</main>
-      </div>
-
-      <nav className="fixed inset-x-0 bottom-0 z-50 flex h-14 items-center justify-around border-t border-sidebar-border bg-sidebar/95 px-2 text-sidebar-foreground backdrop-blur-xl md:hidden" aria-label="Primary tools">
-        {tools.map((item) => <ToolLink key={item.path} {...item} mobile disabled={onboarding && item.path !== ROUTES.agents} />)}
-      </nav>
+    <div className="flex h-svh min-w-0 flex-col overflow-hidden bg-bg text-text">
+      <Header socketStatus={socketStatus} onboarding={onboarding} />
+      <main className="flex min-h-0 flex-1 flex-col">{children}</main>
     </div>
   );
 }
 
-function Header({ socketStatus }: { socketStatus: "open" | "connecting" | "closed" }): JSX.Element {
+function Header({ socketStatus, onboarding }: { socketStatus: "open" | "connecting" | "closed"; onboarding: boolean }): JSX.Element {
   const repositories = useRepositoriesQuery();
   const select = useSelectRepositoryMutation();
   const remove = useRemoveRepositoryMutation();
@@ -101,15 +55,32 @@ function Header({ socketStatus }: { socketStatus: "open" | "connecting" | "close
   };
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-panel px-3 md:px-4">
-      <Link href={ROUTES.home} className="flex items-center gap-2 md:hidden" aria-label="Marshal home">
-        <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <MarshalMark className="size-4" />
-        </span>
-        <span className="text-sm font-semibold tracking-tight">Marshal</span>
-      </Link>
+    <header className="relative shrink-0 border-b border-border bg-panel">
+      <div className="flex h-14 items-center gap-2 px-3 md:gap-5 md:px-5">
+        <Link href={ROUTES.home} className="flex shrink-0 items-center gap-2" aria-label="Marshal home">
+          <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <MarshalMark className="size-[1.1rem]" />
+          </span>
+          <span className="hidden text-base font-semibold tracking-[-0.02em] sm:inline">Marshal</span>
+        </Link>
 
-      <Menu.Root>
+        <nav className="flex h-full items-center gap-1" aria-label="Primary navigation">
+          {NAV_ITEMS.map((item) => (
+            <HeaderLink key={item.path} {...item} disabled={onboarding && item.path === ROUTES.chat} />
+          ))}
+        </nav>
+
+        <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
+          <span className="hidden items-center gap-1.5 text-xs text-muted-foreground lg:flex" title="Local daemon connection">
+            <span className={cn("size-1.5 rounded-full", socketStatus === "open" ? "bg-success" : socketStatus === "connecting" ? "bg-warn" : "bg-error")} />
+            {socketStatus === "open" ? "daemon online" : socketStatus === "connecting" ? "connecting" : "daemon offline"}
+          </span>
+          <SettingsLink />
+        </div>
+      </div>
+
+      <div className="flex h-11 min-w-0 items-center gap-2 border-t border-border/70 px-3 md:absolute md:top-0 md:left-1/2 md:h-14 md:max-w-[40vw] md:-translate-x-1/2 md:border-0 md:px-0">
+        <Menu.Root>
         <Menu.Trigger
           aria-label="Switch repository"
           className="flex h-8 min-w-0 items-center gap-2 rounded-lg border border-transparent px-2 text-sm font-medium text-text transition-colors hover:border-border hover:bg-secondary focus-visible:outline-2 focus-visible:outline-ring data-[popup-open]:border-border data-[popup-open]:bg-secondary"
@@ -153,49 +124,49 @@ function Header({ socketStatus }: { socketStatus: "open" | "connecting" | "close
             </Menu.Popup>
           </Menu.Positioner>
         </Menu.Portal>
-      </Menu.Root>
+        </Menu.Root>
 
-      {selected && <span className="hidden max-w-72 truncate font-mono text-[0.6875rem] text-muted-foreground lg:inline">{selected.path}</span>}
-
-      <div className="ml-auto flex items-center gap-3">
-        <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex" title="Local daemon connection">
-          <span className={cn("size-1.5 rounded-full", socketStatus === "open" ? "bg-success" : socketStatus === "connecting" ? "bg-warn" : "bg-error")} />
-          {socketStatus === "open" ? "daemon online" : socketStatus === "connecting" ? "connecting" : "daemon offline"}
-        </span>
-        <div className="md:hidden"><ThemeSettings /></div>
+        {selected && <span className="min-w-0 truncate font-mono text-[0.6875rem] text-muted-foreground md:max-w-60">{selected.path}</span>}
       </div>
     </header>
   );
 }
 
-function ToolLink({ path, label, icon: Icon, disabled = false, mobile = false, separated = false }: { path: StaticPath; label: string; icon: typeof Bot; disabled?: boolean; mobile?: boolean; separated?: boolean }): JSX.Element {
+function HeaderLink({ path, label, disabled = false }: { path: StaticPath; label: string; disabled?: boolean }): JSX.Element {
   const [location] = useLocation();
   const isActive = location === path || (path === ROUTES.chat && location.startsWith(`${ROUTES.chat}/`));
-  const onEnter = useCallback(() => { if (path === ROUTES.chat) void import("../routes/ChatRoute"); }, [path]);
-  const content = (
-    <>
-      <Icon aria-hidden className={cn("size-[1.15rem]", isActive && "text-sidebar-primary")} />
-      <span className={mobile ? "text-[0.6rem]" : "sr-only"}>{label}</span>
-    </>
-  );
-  const divider = separated && !mobile ? <div aria-hidden className="my-2 h-px w-6 bg-sidebar-border" /> : null;
-  if (disabled) return <>{divider}<span className={cn("flex cursor-not-allowed flex-col items-center gap-1 opacity-30", mobile ? "px-2 py-1" : "size-10 justify-center")}>{content}</span></>;
-  const link = (
+  if (disabled) return <span className="flex h-9 cursor-not-allowed items-center rounded-lg px-3 text-sm font-medium text-muted-foreground opacity-45">{label}</span>;
+  return (
     <Link
       href={path}
-      onMouseEnter={onEnter}
-      onFocus={onEnter}
+      onMouseEnter={() => { if (path === ROUTES.chat) void import("../routes/ChatRoute"); }}
+      onFocus={() => { if (path === ROUTES.chat) void import("../routes/ChatRoute"); }}
       aria-current={isActive ? "page" : undefined}
       className={cn(
-        "relative flex items-center justify-center text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
-        mobile ? "min-w-12 flex-col gap-1 rounded-lg px-2 py-1" : "size-10 rounded-xl",
-        isActive && "bg-sidebar-accent text-sidebar-foreground",
-        isActive && !mobile && "after:absolute after:-left-3 after:h-5 after:w-0.5 after:rounded-r after:bg-sidebar-primary",
+        "relative flex h-9 items-center rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-text",
+        isActive && "bg-accent text-accent-foreground after:absolute after:inset-x-3 after:-bottom-[0.625rem] after:h-0.5 after:rounded-full after:bg-primary",
       )}
     >
-      {content}
+      {label}
     </Link>
   );
-  if (mobile) return link;
-  return <>{divider}<TooltipProvider><Tooltip><TooltipTrigger render={<span />}>{link}</TooltipTrigger><TooltipContent side="right">{label}</TooltipContent></Tooltip></TooltipProvider></>;
+}
+
+function SettingsLink(): JSX.Element {
+  const [location] = useLocation();
+  const isActive = location === ROUTES.settings;
+  return (
+    <Link
+      href={ROUTES.settings}
+      aria-label="Settings"
+      aria-current={isActive ? "page" : undefined}
+      className={cn(
+        "flex h-9 items-center gap-2 rounded-lg px-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-text sm:px-3",
+        isActive && "bg-accent text-accent-foreground",
+      )}
+    >
+      <Settings aria-hidden className="size-4" />
+      <span className="hidden sm:inline">Settings</span>
+    </Link>
+  );
 }

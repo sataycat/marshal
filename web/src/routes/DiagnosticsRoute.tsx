@@ -3,18 +3,24 @@ import { useDiagnosticsQuery } from "../api/queries";
 import { PageHeader } from "../components/PageHeader";
 import { Badge } from "../components/ui/badge";
 
-export function DiagnosticsRoute(): JSX.Element {
+export function DiagnosticsRoute({ embedded = false }: { embedded?: boolean }): JSX.Element {
   const query = useDiagnosticsQuery();
-  if (query.isPending) return <div className="mx-auto w-full max-w-5xl px-4 py-8 text-sm text-muted-foreground">Loading diagnostics…</div>;
-  if (query.isError) return <div className="mx-auto w-full max-w-5xl px-4 py-8 text-sm text-error">Diagnostics unavailable: {query.error.message}</div>;
+  if (query.isPending) return <div className="text-sm text-muted-foreground">Loading diagnostics…</div>;
+  if (query.isError) return <div className="text-sm text-error">Diagnostics unavailable: {query.error.message}</div>;
   const data = query.data;
-  return (
-    <div className="mx-auto w-full max-w-5xl overflow-y-auto px-4 py-6 md:px-8">
-      <PageHeader
+  const content = (
+    <section aria-labelledby={embedded ? "diagnostics-heading" : undefined}>
+      {embedded ? (
+        <div>
+          <p className="eyebrow">System</p>
+          <h2 id="diagnostics-heading" className="mt-1.5 text-lg font-semibold tracking-[-0.015em]">Diagnostics</h2>
+          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">Daemon, repository, and registry health with stable machine codes and next actions.</p>
+        </div>
+      ) : <PageHeader
         eyebrow="System"
         title="Diagnostics"
         description="Daemon, repository, and registry health with stable machine codes and next actions."
-      />
+      />}
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
         <StatusCard
           icon={Activity}
@@ -63,8 +69,10 @@ export function DiagnosticsRoute(): JSX.Element {
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
+  if (embedded) return content;
+  return <div className="mx-auto w-full max-w-5xl overflow-y-auto px-4 py-6 md:px-8">{content}</div>;
 }
 
 function StatusCard({ icon: Icon, title, value, detail, ok }: { icon: typeof Activity; title: string; value: string; detail: string; ok: boolean }): JSX.Element {

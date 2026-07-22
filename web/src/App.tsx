@@ -8,7 +8,6 @@ import { ConfirmProvider } from "./components/ConfirmDialog";
 import { AuthGate } from "./auth/AuthGate";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { useInstalledAgentsQuery, useRepositoriesQuery } from "./api/queries";
-import { BoardRoute } from "./routes/BoardRoute";
 import { ThemeProvider } from "./theme";
 
 const ChatRoute = lazy(() =>
@@ -21,8 +20,7 @@ const NotFoundRoute = lazy(() =>
   import("./routes/NotFoundRoute").then((m) => ({ default: m.NotFoundRoute })),
 );
 const AgentsRoute = lazy(() => import("./routes/AgentsRoute").then((m) => ({ default: m.AgentsRoute })));
-const WorkflowsRoute = lazy(() => import("./routes/WorkflowsRoute").then((m) => ({ default: m.WorkflowsRoute })));
-const DiagnosticsRoute = lazy(() => import("./routes/DiagnosticsRoute").then((m) => ({ default: m.DiagnosticsRoute })));
+const SettingsRoute = lazy(() => import("./routes/SettingsRoute").then((m) => ({ default: m.SettingsRoute })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -56,9 +54,9 @@ export function App(): JSX.Element {
               <Route path={ROUTES.agents}>
                 <AgentsRoute />
               </Route>
-              <Route path={ROUTES.workflows}>{hasReadyAgent ? <WorkflowsRoute /> : <Redirect to={ROUTES.agents} />}</Route>
-              <Route path={ROUTES.board}>{hasReadyAgent ? <BoardRoute /> : <Redirect to={ROUTES.agents} />}</Route>
-              <Route path={ROUTES.diagnostics}>{hasReadyAgent ? <DiagnosticsRoute /> : <Redirect to={ROUTES.agents} />}</Route>
+              <Route path={ROUTES.settings}>
+                <SettingsRoute />
+              </Route>
               <Route path="/chat/:threadId">
                 {(params) => hasReadyAgent ? <ChatThreadRoute threadId={params.threadId ?? ""} /> : <Redirect to={ROUTES.agents} />}
               </Route>

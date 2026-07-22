@@ -9,7 +9,7 @@ Use this skill for Marshal development verification, not for implementing Marsha
 
 ## Rules
 
-- Read `docs/ARCHITECTURE.md` and `docs/PROJECT.md` before choosing assertions. Check `docs/HUMAN-TESTING-GUIDE.md` when it exists.
+- Read `docs/ARCHITECTURE.md` and `docs/PROJECT.md` before choosing assertions.
 - Inspect the current diff and affected modules. Reproduce before editing when feasible.
 - Test the narrowest boundary first, then the end-to-end flow.
 - For web/daemon behavior, prove both sides. A successful click is not proof of API success or persistence.

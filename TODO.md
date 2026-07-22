@@ -99,7 +99,6 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 - [x] Show installed versions that are absent from the current registry snapshot.
 - [x] Keep launch internals limited to scoped diagnostics rather than ordinary product configuration.
 - [x] Verify capability and readiness controls continue to work for binary, `npx`, and `uvx` installations.
-- [x] Update `docs/HUMAN-TESTING-GUIDE.md` with install, integrity, update, restart-recovery, side-by-side, and removal-conflict flows.
 
 ### 11. Verify the complete ADR lifecycle
 

@@ -29,7 +29,6 @@ The web application is the complete product interface. Normal agent discovery, i
 
 - `docs/ARCHITECTURE.md` — canonical target architecture (read first)
 - `docs/PROJECT.md` — product vision and design tenets
-- `docs/HUMAN-TESTING-GUIDE.md` — manual QA guide; update it when product flows change
 
 # Toolchain
 
