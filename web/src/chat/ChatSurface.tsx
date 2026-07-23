@@ -72,6 +72,7 @@ import { cn } from "@/lib/utils";
 import type { ChatAttachment, ChatMessage, ChatThread, InstalledAgent, PendingPermission, RegistryAgent, SessionConfigGroup, SessionConfigOption } from "../types";
 import { FilesSidebar } from "./FilesSidebar";
 import { groupThreadsByProject } from "./sidebar";
+import { shouldInitializeDraftSession } from "./draft";
 
 export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Element {
   const threads = useChatStore(useShallow(selectThreads));
@@ -363,8 +364,13 @@ function ThreadActions({ thread, onMutate, onDiscard }: { thread: ChatThread; on
 
 function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onStarted: (session: ChatThread) => void }): JSX.Element {
   const [sending, setSending] = useState(false);
+  const [draftSession, setDraftSession] = useState<ChatThread | null>(null);
+  const draftSessionRequestKeyRef = useRef<string | null>(null);
   const createMutation = useCreateThreadMutation();
   const sendMutation = useSendChatMutation();
+  const initializeSessionMutation = useInitializeChatSessionMutation();
+  const setConfigOptionMutation = useSetChatSessionConfigOptionMutation();
+  const setModeMutation = useSetChatSessionModeMutation();
   const pushError = useToastStore((state) => state.pushError);
   const composerDrafts = useChatStore((state) => state.composerDraftsByProject);
   const updateComposerDraft = useChatStore((state) => state.updateComposerDraft);
@@ -388,6 +394,8 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
   const defaultAgent = agents[0] ? `${agents[0].id}@${agents[0].version}` : "";
   const agent = composerDraft?.agent || defaultAgent;
   const value = composerDraft?.content ?? "";
+  const draftSessionKey = project && agent ? `${project}:${agent}` : null;
+  const initializedSessionKey = draftSession ? `${draftSession.cwd}:${draftSession.agent_id}@${draftSession.agent_version}` : null;
   useEffect(() => {
     if (project && agent && !agents.some((item) => `${item.id}@${item.version}` === agent)) {
       updateComposerDraft(project, { agent: defaultAgent });
@@ -400,6 +408,26 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
     if (directoryQuery.data?.display_path === "~") setHomePath(directoryQuery.data.path);
   }, [directoryQuery.data]);
   useEffect(() => setHighlightedDirectory(0), [projectPath, projectSearch]);
+  useEffect(() => {
+    if (!shouldInitializeDraftSession(draftSessionKey, initializedSessionKey, draftSessionRequestKeyRef.current)) return;
+    draftSessionRequestKeyRef.current = draftSessionKey;
+    const requestKey = draftSessionKey;
+    const [agentId, agentVersion] = agent.split("@");
+    void createMutation.mutateAsync({ agent_id: agentId, agent_version: agentVersion, cwd: project ?? undefined })
+      .then((created) => {
+        if (draftSessionRequestKeyRef.current !== requestKey) return null;
+        setDraftSession(created);
+        return initializeSessionMutation.mutateAsync(created.id);
+      })
+      .then((initialized) => {
+        if (initialized && draftSessionRequestKeyRef.current === requestKey) setDraftSession(initialized);
+      })
+      .catch((error) => {
+        if (draftSessionRequestKeyRef.current === requestKey) {
+          pushError(error instanceof Error ? error.message : "Unable to inspect the agent session capabilities.");
+        }
+      });
+  }, [agent, createMutation, draftSessionKey, initializeSessionMutation, initializedSessionKey, project, pushError]);
   const breadcrumbItems = (() => {
     const normalized = currentProjectPath.replaceAll("\\", "/");
     const normalizedHome = homePath?.replaceAll("\\", "/").replace(/\/$/, "");
@@ -425,6 +453,7 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
       await select.mutateAsync(repo.id);
       setProject(path);
       setProjectPath(path);
+      setDraftSession(null);
     } catch (error) {
       setProject(null);
       setProjectPickerOpen(true);
@@ -442,12 +471,13 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
   };
   const send = async (): Promise<void> => {
     const content = value.trim();
-    if (!content || !agent || !project || sending) return;
+    if (!content || !agent || !project || sending || createMutation.isPending || initializeSessionMutation.isPending) return;
     setSending(true);
     let created: ChatThread | null = null;
     try {
-      const [agentId, agentVersion] = agent.split("@");
-      created = await createMutation.mutateAsync({ agent_id: agentId, agent_version: agentVersion, cwd: project });
+      created = draftSession && initializedSessionKey === draftSessionKey
+        ? draftSession
+        : await createMutation.mutateAsync({ agent_id: agent.split("@")[0], agent_version: agent.split("@")[1], cwd: project });
       await sendMutation.mutateAsync({ id: created.id, content });
       clearComposerDraft(project);
       onStarted(created);
@@ -461,7 +491,26 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
   };
 
   const changeAgent = (nextAgent: string): void => {
+    setDraftSession(null);
     if (project) updateComposerDraft(project, { agent: nextAgent });
+  };
+
+  const setConfigOption = async (option: SessionConfigOption, nextValue: string | boolean): Promise<void> => {
+    if (!draftSession) return;
+    try {
+      setDraftSession(await setConfigOptionMutation.mutateAsync({ id: draftSession.id, configId: option.id, value: nextValue }));
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : `Unable to change ${option.name}.`);
+    }
+  };
+
+  const setMode = async (modeId: string): Promise<void> => {
+    if (!draftSession) return;
+    try {
+      setDraftSession(await setModeMutation.mutateAsync({ id: draftSession.id, modeId }));
+    } catch (error) {
+      pushError(error instanceof Error ? error.message : "Unable to change the session mode.");
+    }
   };
 
   return (
@@ -493,9 +542,18 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
                 registryAgents={registry.data?.agents ?? []}
                 disabled={sending || agents.length === 0}
               />
+              {(draftSession?.session_config_options.length ?? 0) > 0 || draftSession?.session_modes ? (
+                <SessionConfigurationControls
+                  options={draftSession?.session_config_options ?? []}
+                  modes={draftSession?.session_modes ?? null}
+                  disabled={sending || setConfigOptionMutation.isPending || setModeMutation.isPending}
+                  onOptionChange={setConfigOption}
+                  onModeChange={setMode}
+                />
+              ) : null}
             </div>
-            <Button type="button" size="icon" className="size-9 shrink-0 rounded-full" onClick={() => void send()} disabled={sending || agents.length === 0 || !project || value.trim().length === 0} aria-label="Start session" title="Start session">
-              {sending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Send aria-hidden />}
+            <Button type="button" size="icon" className="size-9 shrink-0 rounded-full" onClick={() => void send()} disabled={sending || createMutation.isPending || initializeSessionMutation.isPending || agents.length === 0 || !project || value.trim().length === 0} aria-label="Start session" title="Start session">
+              {sending || createMutation.isPending || initializeSessionMutation.isPending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Send aria-hidden />}
             </Button>
           </div>
         </div>
