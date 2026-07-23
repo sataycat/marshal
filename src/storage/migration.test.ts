@@ -9,7 +9,7 @@ describe("database migrations", () => {
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tasks'").get(),
     ).toBeTruthy();
-    expect(db.prepare("SELECT id FROM __drizzle_migrations").get()).toEqual({ id: 0 });
+    expect(db.prepare("SELECT MAX(id) AS id FROM __drizzle_migrations").get()).toEqual({ id: 2 });
     expect(db.pragma("integrity_check")).toEqual([{ integrity_check: "ok" }]);
   });
 
@@ -50,5 +50,39 @@ describe("database migrations", () => {
       title: "Kept task",
     });
     expect(db.prepare("SELECT repository_id FROM tasks").get()).toEqual({ repository_id: null });
+  });
+
+  it("renames the legacy default chat title without changing custom titles", () => {
+    const db = new Database(":memory:");
+    migrateDatabase(db, "repository");
+    db.prepare(
+      "INSERT INTO chat_threads (id, repo_root, cwd, agent_id, title) VALUES (?, '/', '/', 'agent', ?)",
+    ).run("legacy", "New thread");
+    db.prepare(
+      "INSERT INTO chat_threads (id, repo_root, cwd, agent_id, title) VALUES (?, '/', '/', 'agent', ?)",
+    ).run("custom", "Investigate login");
+    db.prepare("DELETE FROM __drizzle_migrations WHERE id = 1").run();
+
+    migrateDatabase(db, "repository");
+
+    expect(db.prepare("SELECT title FROM chat_threads WHERE id = 'legacy'").get()).toEqual({
+      title: "New session",
+    });
+    expect(db.prepare("SELECT title FROM chat_threads WHERE id = 'custom'").get()).toEqual({
+      title: "Investigate login",
+    });
+  });
+
+  it("removes leaked draft sessions", () => {
+    const db = new Database(":memory:");
+    migrateDatabase(db, "repository");
+    db.prepare(
+      "INSERT INTO chat_threads (id, repo_root, cwd, agent_id, title, status) VALUES (?, '/', '/', 'agent', 'Leaked', 'draft')",
+    ).run("draft");
+    db.prepare("DELETE FROM __drizzle_migrations WHERE id = 2").run();
+
+    migrateDatabase(db, "repository");
+
+    expect(db.prepare("SELECT id FROM chat_threads WHERE id = 'draft'").get()).toBeUndefined();
   });
 });

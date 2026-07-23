@@ -14,7 +14,6 @@ const TASK_STATUS: Record<TaskStatus, { tone: Tone; label: string }> = {
 };
 
 const THREAD_STATUS: Record<ChatThreadStatus, { tone: Tone; label: string }> = {
-  draft: { tone: "neutral", label: "Draft" },
   active: { tone: "success", label: "Active" },
   authentication_required: { tone: "warn", label: "Sign-in required" },
   closed: { tone: "neutral", label: "Closed" },

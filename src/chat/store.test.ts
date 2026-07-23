@@ -2,14 +2,22 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { appendChatMessage, createChatThread, deleteChatThread, getChatThread, listChatMessages, listChatThreads, updateChatThread } from "./store.js";
+import {
+  appendChatMessage,
+  createChatThread,
+  deleteChatThread,
+  getChatThread,
+  listChatMessages,
+  listChatThreads,
+  updateChatThread,
+} from "./store.js";
 
-describe("chat thread store", () => {
-  it("creates a draft, persists messages, and activates on the first message", () => {
+describe("chat session store", () => {
+  it("creates an active session and persists messages", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-chat-store-"));
     const thread = createChatThread({ agentId: "agent-a", agentVersion: "1.0.0" }, root);
     expect(thread.id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(thread.status).toBe("draft");
+    expect(thread.status).toBe("active");
     expect(listChatMessages(thread.id, root)).toEqual([]);
 
     const message = appendChatMessage(thread.id, "user", "Hello", root);
@@ -20,10 +28,18 @@ describe("chat thread store", () => {
 
   it("updates lifecycle metadata and hides archived threads by default", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-chat-store-"));
-    const thread = createChatThread({ agentId: "agent-a", agentVersion: "1.0.0", title: "Keep me" }, root);
+    const thread = createChatThread(
+      { agentId: "agent-a", agentVersion: "1.0.0", title: "Keep me" },
+      root,
+    );
     updateChatThread(thread.id, { status: "closed", archived: true, pinned: true }, root);
     expect(listChatThreads(root)).toEqual([]);
-    expect(listChatThreads(root, true)[0]).toMatchObject({ id: thread.id, status: "closed", archived: true, pinned: true });
+    expect(listChatThreads(root, true)[0]).toMatchObject({
+      id: thread.id,
+      status: "closed",
+      archived: true,
+      pinned: true,
+    });
   });
 
   it("persists a per-thread scratch markdown buffer", () => {
@@ -37,7 +53,7 @@ describe("chat thread store", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-chat-store-"));
     const otherRoot = mkdtempSync(join(tmpdir(), "marshal-chat-store-"));
     const thread = createChatThread({ agentId: "agent-a", agentVersion: "1.0.0" }, root);
-    expect(() => getChatThread(thread.id, otherRoot)).toThrow("Chat thread not found");
+    expect(() => getChatThread(thread.id, otherRoot)).toThrow("Chat session not found");
   });
 
   it("deletes a thread and its messages", () => {
@@ -46,6 +62,6 @@ describe("chat thread store", () => {
     appendChatMessage(thread.id, "user", "discard me", root);
     deleteChatThread(thread.id, root);
     expect(listChatThreads(root, true)).toEqual([]);
-    expect(() => getChatThread(thread.id, root)).toThrow("Chat thread not found");
+    expect(() => getChatThread(thread.id, root)).toThrow("Chat session not found");
   });
 });

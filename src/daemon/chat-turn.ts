@@ -28,7 +28,7 @@ import type { AgentSessionConfigOption, AgentSessionModeState } from "../agent/t
 
 export class ChatTurnBusyError extends Error {
   constructor(threadId: string) {
-    super(`Chat thread is already processing a message: ${threadId}`);
+    super(`Chat session is already processing a message: ${threadId}`);
     this.name = "ChatTurnBusyError";
   }
 }
@@ -143,7 +143,7 @@ export class ChatTurnRunner {
     const thread = getChatThread(threadId, this.root);
     if (this.active.has(threadId) || this.starting.has(threadId))
       throw new ChatTurnBusyError(threadId);
-    if (thread.status === "closed") throw new Error(`Chat thread is closed: ${threadId}`);
+    if (thread.status === "closed") throw new Error(`Chat session is closed: ${threadId}`);
     if (thread.status === "authentication_required")
       throw new Error(
         "Authenticate the installed agent, then explicitly resubmit the preserved prompt before sending another message",
@@ -384,9 +384,7 @@ export class ChatTurnRunner {
     return this.configuredAgent!;
   }
 
-  private async ensureSession(
-    threadId: string,
-  ): Promise<{
+  private async ensureSession(threadId: string): Promise<{
     record: import("../acp/supervisor-store.js").AcpSessionRecord;
     session: AgentSession;
   }> {

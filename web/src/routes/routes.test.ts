@@ -7,7 +7,7 @@ describe("ROUTES", () => {
     expect(ROUTES.chat).toBe("/chat");
   });
 
-  it("builds a chat thread path with the given id", () => {
+  it("builds a chat session path with the given id", () => {
     expect(ROUTES.chatThread("abc-123")).toBe("/chat/abc-123");
   });
 });
@@ -26,7 +26,7 @@ describe("NAV_ITEMS", () => {
 });
 
 describe("matchChatPath", () => {
-  it("extracts the thread id from a /chat/:id path", () => {
+  it("extracts the session id from a /chat/:id path", () => {
     expect(matchChatPath("/chat/abc-123")).toBe("abc-123");
   });
 
@@ -55,7 +55,7 @@ describe("preload helpers", () => {
     expect(() => preloadStatic(ROUTES.chat)).not.toThrow();
   });
 
-  it("preloadThread kicks off the chat thread lazy import", () => {
+  it("preloadThread kicks off the chat session lazy import", () => {
     expect(() => preloadThread()).not.toThrow();
   });
 });

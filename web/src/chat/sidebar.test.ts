@@ -10,7 +10,7 @@ function thread(id: string, repoRoot: string): ChatThread {
     agent_id: "builder",
     agent_version: "1.0.0",
     title: id,
-    status: "draft",
+    status: "active",
     archived: false,
     pinned: false,
     task_slug: null,
@@ -30,7 +30,7 @@ describe("chat sidebar grouping", () => {
     expect(projectName("C:\\code\\openchamber")).toBe("openchamber");
   });
 
-  it("groups threads by repo while preserving first-seen order", () => {
+  it("groups sessions by repo while preserving first-seen order", () => {
     const groups = groupThreadsByProject([
       thread("marshal-1", "/code/marshal"),
       thread("codex-1", "/code/codex"),

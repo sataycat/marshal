@@ -10,7 +10,7 @@ function thread(id: string): ChatThread {
     agent_id: "builder",
     agent_version: "1.0.0",
     title: id,
-    status: "draft",
+    status: "active",
     archived: false,
     pinned: false,
     task_slug: null,
@@ -37,7 +37,12 @@ function message(id: number): ChatMessage {
 
 describe("chatStore", () => {
   beforeEach(() =>
-    useChatStore.setState({ threadsById: {}, liveMessagesByThread: {}, permissionsByThread: {} }),
+    useChatStore.setState({
+      threadsById: {},
+      liveMessagesByThread: {},
+      permissionsByThread: {},
+      composerDraftsByProject: {},
+    }),
   );
 
   it("replaces threads and merges duplicate live messages by id", () => {
@@ -55,5 +60,22 @@ describe("chatStore", () => {
     });
     expect(Object.keys(useChatStore.getState().threadsById)).toEqual(["new"]);
     expect(useChatStore.getState().liveMessagesByThread.thread[2]?.content).toBe("updated");
+  });
+
+  it("keeps one non-durable composer draft per project", () => {
+    const store = useChatStore.getState();
+    store.updateComposerDraft("/repo-a", { agent: "builder@1.0.0", content: "First" });
+    store.updateComposerDraft("/repo-a", { content: "Updated" });
+    store.updateComposerDraft("/repo-b", { content: "Other" });
+
+    expect(useChatStore.getState().composerDraftsByProject).toEqual({
+      "/repo-a": { agent: "builder@1.0.0", content: "Updated" },
+      "/repo-b": { agent: "", content: "Other" },
+    });
+
+    store.clearComposerDraft("/repo-a");
+    expect(useChatStore.getState().composerDraftsByProject).toEqual({
+      "/repo-b": { agent: "", content: "Other" },
+    });
   });
 });

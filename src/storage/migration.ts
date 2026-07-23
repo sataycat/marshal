@@ -89,6 +89,8 @@ function adoptLegacy(db: Database.Database, scope: "machine" | "repository"): vo
           [
             "chat_threads",
             "repository_id TEXT",
+            "title TEXT NOT NULL DEFAULT 'New session'",
+            "status TEXT NOT NULL DEFAULT 'active'",
             "agent_version TEXT NOT NULL DEFAULT 'legacy'",
             "agent_provenance TEXT NOT NULL DEFAULT '{}'",
             "session_config_options TEXT NOT NULL DEFAULT '[]'",
@@ -104,14 +106,23 @@ function adoptLegacy(db: Database.Database, scope: "machine" | "repository"): vo
             "failure TEXT",
           ],
           ["spec_messages", "prompt_status TEXT", "failure TEXT"],
-          ["acp_sessions", "agent_provenance TEXT NOT NULL DEFAULT '{}'", "failure TEXT"],
+          [
+            "acp_sessions",
+            "owner_type TEXT",
+            "owner_id TEXT",
+            "agent_provenance TEXT NOT NULL DEFAULT '{}'",
+            "failure TEXT",
+          ],
           [
             "acp_prompts",
             "content TEXT NOT NULL DEFAULT '{}'",
             "failure TEXT",
             "message_id INTEGER",
             "resubmission_of TEXT",
+            "session_id TEXT",
           ],
+          ["acp_events", "session_id TEXT"],
+          ["permission_requests", "thread_id TEXT"],
           [
             "spec_author_sessions",
             "agent_provenance TEXT NOT NULL DEFAULT '{}'",

@@ -25,7 +25,6 @@ import {
   Send,
   ShieldAlert,
   Square,
-  Trash2,
   X,
 } from "lucide-react";
 import { chatAttachmentUrl } from "../api/client";
@@ -87,6 +86,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
   const agentsQuery = useChatAgentsQuery();
   const archivedQuery = useChatThreadsQuery(true);
   const [showArchived, setShowArchived] = useState(false);
+  const [newSessionOpen, setNewSessionOpen] = useState(false);
   const agents = (agentsQuery.data ?? []).filter((agent) => agent.status === "installed" && agent.readiness_status === "ready");
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [switcherQuery, setSwitcherQuery] = useState("");
@@ -110,7 +110,10 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const openNewThread = (): void => { void navigate("/chat"); };
+  const openNewThread = (): void => {
+    setNewSessionOpen(true);
+    void navigate("/chat");
+  };
 
   const allThreads = showArchived ? [...threads, ...(archivedQuery.data ?? []).filter((archived) => !threads.some((thread) => thread.id === archived.id))] : threads;
   const visibleThreads = allThreads.filter((thread) => showArchived || !thread.archived);
@@ -141,7 +144,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
 
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-      <aside className={cn("flex w-full shrink-0 flex-col border-b border-border bg-panel md:w-76 md:border-r md:border-b-0", selectedId && "hidden md:flex")}>
+      <aside className={cn("flex w-full shrink-0 flex-col border-b border-border bg-panel md:w-76 md:border-r md:border-b-0", (selectedId || newSessionOpen) && "hidden md:flex")}>
           <div className="border-b border-border px-3 py-3">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
@@ -206,10 +209,10 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
           </div>
         </ScrollArea>
       </aside>
-      <section className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !selectedId && "hidden md:flex")}>
+      <section className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !selectedId && !newSessionOpen && "hidden md:flex")}>
         {selectedId
           ? <ThreadWorkspace thread={selected} seeded={threadQuery.data?.messages ?? []} live={liveMessages} loading={threadQuery.isPending} loadError={threadQuery.error?.message ?? null} onRetryLoad={() => void threadQuery.refetch()} onBack={() => void navigate("/chat")} />
-          : <NewChatComposer agents={agents} onCreated={(thread) => { applyChatEvent({ type: "thread.created", payload: { thread }, timestamp: new Date().toISOString() }); void navigate(`/chat/${thread.id}`); }} />}
+          : <NewChatComposer agents={agents} onStarted={(session) => { void navigate(`/chat/${session.id}`); }} />}
       </section>
       <Dialog open={switcherOpen} onOpenChange={setSwitcherOpen}>
         <DialogContent className="max-w-lg">
@@ -351,20 +354,21 @@ function ThreadActions({ thread, onMutate, onDiscard }: { thread: ChatThread; on
           <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-secondary" onClick={() => { setOpen(false); void onMutate(thread, { pinned: !thread.pinned }); }}><Pin aria-hidden className="size-3.5" />{thread.pinned ? "Unpin" : "Pin"}</button>
           <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-secondary" onClick={() => { setOpen(false); void onMutate(thread, { archived: !thread.archived }); }}><Archive aria-hidden className="size-3.5" />{thread.archived ? "Unarchive" : "Archive"}</button>
           {thread.status !== "closed" && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-secondary" onClick={() => { setOpen(false); void onMutate(thread, { status: "closed" }); }}><Check aria-hidden className="size-3.5" />Close</button>}
-          {thread.status === "draft" && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-error hover:bg-error-bg" onClick={() => { setOpen(false); void onDiscard(thread); }}><Trash2 aria-hidden className="size-3.5" />Discard</button>}
+          <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-error hover:bg-error-bg" onClick={() => { setOpen(false); void onDiscard(thread); }}><X aria-hidden className="size-3.5" />Discard</button>
         </div>
       )}
     </div>
   );
 }
 
-function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCreated: (thread: ChatThread) => void }): JSX.Element {
-  const [agent, setAgent] = useState(agents[0] ? `${agents[0].id}@${agents[0].version}` : "");
-  const [value, setValue] = useState("");
+function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onStarted: (session: ChatThread) => void }): JSX.Element {
   const [sending, setSending] = useState(false);
   const createMutation = useCreateThreadMutation();
   const sendMutation = useSendChatMutation();
   const pushError = useToastStore((state) => state.pushError);
+  const composerDrafts = useChatStore((state) => state.composerDraftsByProject);
+  const updateComposerDraft = useChatStore((state) => state.updateComposerDraft);
+  const clearComposerDraft = useChatStore((state) => state.clearComposerDraft);
   const registry = useRegistryQuery();
   const repositories = useRepositoriesQuery();
   const register = useRegisterRepositoryMutation();
@@ -380,9 +384,15 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
   const currentProjectPath = directoryQuery.data?.path ?? projectPath;
   const directories = directoryQuery.data?.directories ?? [];
   const selectedRepository = repositories.data?.repositories.find((item) => item.id === repositories.data?.selected_repository_id);
+  const composerDraft = project ? composerDrafts[project] : undefined;
+  const defaultAgent = agents[0] ? `${agents[0].id}@${agents[0].version}` : "";
+  const agent = composerDraft?.agent || defaultAgent;
+  const value = composerDraft?.content ?? "";
   useEffect(() => {
-    if (!agents.some((item) => `${item.id}@${item.version}` === agent)) setAgent(agents[0] ? `${agents[0].id}@${agents[0].version}` : "");
-  }, [agent, agents]);
+    if (project && agent && !agents.some((item) => `${item.id}@${item.version}` === agent)) {
+      updateComposerDraft(project, { agent: defaultAgent });
+    }
+  }, [agent, agents, defaultAgent, project, updateComposerDraft]);
   useEffect(() => {
     if (selectedRepository && !project) { setProject(selectedRepository.path); setProjectPath(selectedRepository.path); }
   }, [selectedRepository, project]);
@@ -407,14 +417,14 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
     ];
   })();
   const chooseProject = async (path: string): Promise<void> => {
-    setProject(path);
-    setProjectPath(path);
     setProjectSearch("");
     setProjectPickerOpen(false);
     try {
       const existing = repositories.data?.repositories.find((item) => item.path === path);
       const repo = existing ?? await register.mutateAsync(path);
       await select.mutateAsync(repo.id);
+      setProject(path);
+      setProjectPath(path);
     } catch (error) {
       setProject(null);
       setProjectPickerOpen(true);
@@ -432,16 +442,26 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
   };
   const send = async (): Promise<void> => {
     const content = value.trim();
-    if (!content || !project || sending) return;
+    if (!content || !agent || !project || sending) return;
     setSending(true);
+    let created: ChatThread | null = null;
     try {
       const [agentId, agentVersion] = agent.split("@");
-      const thread = await createMutation.mutateAsync({ agent_id: agentId, agent_version: agentVersion, cwd: project });
-      await sendMutation.mutateAsync({ id: thread.id, content });
-      onCreated(thread);
+      created = await createMutation.mutateAsync({ agent_id: agentId, agent_version: agentVersion, cwd: project });
+      await sendMutation.mutateAsync({ id: created.id, content });
+      clearComposerDraft(project);
+      onStarted(created);
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to start the conversation.");
+      if (created) {
+        clearComposerDraft(project);
+        onStarted(created);
+      }
     } finally { setSending(false); }
+  };
+
+  const changeAgent = (nextAgent: string): void => {
+    if (project) updateComposerDraft(project, { agent: nextAgent });
   };
 
   return (
@@ -451,30 +471,31 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
           <h1 className="text-2xl font-semibold tracking-[-0.02em]">Start a session</h1>
           <p className="mt-1.5 text-sm leading-6 text-muted-foreground">Pick a project and an agent, then describe the work. The conversation is durable — you can leave and come back.</p>
         </div>
-        <div className="rounded-2xl border border-border bg-panel shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/15">
-          <div className="p-3 pb-1">
+        <div className="rounded-2xl border border-input bg-panel shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/15">
+          <div className="p-4 pb-2">
             <Textarea
               value={value}
-              onChange={(event) => setValue(event.target.value)}
+              onChange={(event) => { if (project) updateComposerDraft(project, { content: event.target.value }); }}
               onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }}
               placeholder="Describe the task for your agent…"
               rows={4}
               disabled={sending || agents.length === 0}
               autoFocus
-              className="min-h-32 resize-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
+              className="min-h-28 resize-none border-0 bg-transparent px-0 py-0 text-base shadow-none focus-visible:ring-0"
             />
           </div>
-          <div className="flex items-center gap-2 px-3 pb-3">
-            <AgentPicker
-              value={agent}
-              onChange={setAgent}
-              agents={agents}
-              registryAgents={registry.data?.agents ?? []}
-              disabled={sending || agents.length === 0}
-            />
-            <Button type="button" className="ml-auto" onClick={() => void send()} disabled={sending || agents.length === 0 || !project || value.trim().length === 0}>
+          <div className="flex flex-wrap items-end gap-2 px-3 pb-3">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              <AgentPicker
+                value={agent}
+                onChange={changeAgent}
+                agents={agents}
+                registryAgents={registry.data?.agents ?? []}
+                disabled={sending || agents.length === 0}
+              />
+            </div>
+            <Button type="button" size="icon" className="size-9 shrink-0 rounded-full" onClick={() => void send()} disabled={sending || agents.length === 0 || !project || value.trim().length === 0} aria-label="Start session" title="Start session">
               {sending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Send aria-hidden />}
-              <span className="hidden sm:inline">Start session</span>
             </Button>
           </div>
         </div>
@@ -850,24 +871,9 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
               ))}
             </div>
           )}
-          {(thread.session_config_options.length > 0 || thread.session_modes) && (
-            <SessionConfigurationControls
-              options={thread.session_config_options}
-              modes={thread.session_modes}
-              disabled={busy || setConfigOptionMutation.isPending || setModeMutation.isPending}
-              onOptionChange={setConfigOption}
-              onModeChange={setMode}
-            />
-          )}
-          <div className="flex items-end gap-2 rounded-2xl border border-input bg-bg p-2 transition-colors focus-within:border-ring">
-            {supportsImages && (
-              <>
-                <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple className="hidden" onChange={(event) => { if (event.target.files) void upload(event.target.files); event.target.value = ""; }} />
-                <Button type="button" size="icon" variant="ghost" onClick={() => inputRef.current?.click()} disabled={uploading || busy} aria-label="Attach image" title="Attach image"><ImagePlus aria-hidden /></Button>
-              </>
-            )}
+          <div className="rounded-2xl border border-input bg-bg p-2 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/15">
             <Textarea
-              className="min-h-10 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+              className="min-h-16 resize-none border-0 bg-transparent px-2 py-1 shadow-none focus-visible:ring-0"
               value={draft}
               onChange={(event) => onDraftChange(event.target.value)}
               onDragOver={(event) => event.preventDefault()}
@@ -877,15 +883,37 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
               disabled={busy}
               rows={2}
             />
-            <Button
-              type="button"
-              className="h-9 shrink-0 rounded-xl"
-              onClick={() => void (busy ? cancel() : send())}
-              disabled={!busy && draft.trim().length === 0 && attachments.length === 0}
-              variant={busy ? "destructive" : "default"}
-            >
-              {busy ? <><Square aria-hidden />Stop</> : <><Send aria-hidden />Send</>}
-            </Button>
+            <div className="mt-1 flex items-end gap-2">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                {supportsImages && (
+                  <>
+                    <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple className="hidden" onChange={(event) => { if (event.target.files) void upload(event.target.files); event.target.value = ""; }} />
+                    <Button type="button" size="icon-sm" variant="ghost" className="rounded-full" onClick={() => inputRef.current?.click()} disabled={uploading || busy} aria-label="Attach image" title="Attach image"><ImagePlus aria-hidden /></Button>
+                  </>
+                )}
+                {(thread.session_config_options.length > 0 || thread.session_modes) && (
+                  <SessionConfigurationControls
+                    options={thread.session_config_options}
+                    modes={thread.session_modes}
+                    disabled={busy || setConfigOptionMutation.isPending || setModeMutation.isPending}
+                    onOptionChange={setConfigOption}
+                    onModeChange={setMode}
+                  />
+                )}
+              </div>
+              <Button
+                type="button"
+                size="icon"
+                className="size-9 shrink-0 rounded-full"
+                onClick={() => void (busy ? cancel() : send())}
+                disabled={!busy && draft.trim().length === 0 && attachments.length === 0}
+                variant={busy ? "destructive" : "default"}
+                aria-label={busy ? "Stop response" : "Send message"}
+                title={busy ? "Stop response" : "Send message"}
+              >
+                {busy ? <Square aria-hidden /> : <Send aria-hidden />}
+              </Button>
+            </div>
           </div>
           <p className="mt-1.5 text-right text-[0.6875rem] text-muted-foreground">Enter to send · Shift+Enter for a new line</p>
         </div>
@@ -897,7 +925,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
 function SessionConfigurationControls({ options, modes, disabled, onOptionChange, onModeChange }: { options: SessionConfigOption[]; modes: ChatThread["session_modes"]; disabled: boolean; onOptionChange: (option: SessionConfigOption, value: string | boolean) => Promise<void>; onModeChange: (modeId: string) => Promise<void> }): JSX.Element {
   const ordered = [...options].sort((a, b) => configOrder(a.category) - configOrder(b.category));
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="Agent session options">
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5" aria-label="Agent session options">
       {modes && !options.some((option) => option.category === "mode") && (
         <label className="relative">
           <span className="sr-only">Mode</span>
@@ -911,6 +939,8 @@ function SessionConfigurationControls({ options, modes, disabled, onOptionChange
         ? <button key={option.id} type="button" className={cn("inline-flex h-7 items-center gap-2 rounded-lg border border-input bg-bg px-2 text-xs font-medium hover:bg-secondary disabled:opacity-50", option.currentValue && "border-primary/40 bg-accent text-accent-foreground")} disabled={disabled} onClick={() => void onOptionChange(option, !option.currentValue)} title={option.description ?? option.name} aria-pressed={option.currentValue}>
             <span>{option.name}</span><span className={cn("relative h-4 w-7 rounded-full bg-muted transition-colors", option.currentValue && "bg-primary")}><span className={cn("absolute left-0.5 top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform", option.currentValue && "translate-x-3")} /></span>
           </button>
+        : option.category === "model"
+          ? <ModelCombobox key={option.id} option={option} disabled={disabled} onChange={(value) => onOptionChange(option, value)} />
         : <label key={option.id} className="relative">
             <span className="sr-only">{option.name}</span>
             <select className="h-7 max-w-52 appearance-none rounded-lg border border-input bg-bg py-0 pl-2 pr-7 text-xs font-medium outline-none hover:bg-secondary focus:border-ring disabled:opacity-50" value={option.currentValue} disabled={disabled} onChange={(event) => void onOptionChange(option, event.target.value)} title={option.description ?? option.name}>
@@ -920,6 +950,114 @@ function SessionConfigurationControls({ options, modes, disabled, onOptionChange
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" aria-hidden />
           </label>)}
+    </div>
+  );
+}
+
+function ModelCombobox({ option, disabled, onChange }: {
+  option: Extract<SessionConfigOption, { type: "select" }>;
+  disabled: boolean;
+  onChange: (value: string) => Promise<void>;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [highlighted, setHighlighted] = useState(0);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const values = isGroupedOptions(option.options)
+    ? option.options.flatMap((group) => group.options.map((value) => ({ ...value, group: group.name })))
+    : option.options.map((value) => ({ ...value, group: null }));
+  const selected = values.find((value) => value.value === option.currentValue);
+  const query = search.trim().toLowerCase();
+  const filtered = query
+    ? values.filter((value) => `${value.name} ${value.value} ${value.description ?? ""} ${value.group ?? ""}`.toLowerCase().includes(query))
+    : values;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent): void => {
+      if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [open]);
+
+  useEffect(() => setHighlighted(0), [search, open]);
+
+  const selectModel = async (value: string): Promise<void> => {
+    setOpen(false);
+    setSearch("");
+    if (value !== option.currentValue) await onChange(value);
+  };
+
+  return (
+    <div ref={pickerRef} className="relative min-w-0">
+      <button
+        type="button"
+        className="flex h-7 min-w-0 max-w-56 items-center gap-1.5 rounded-lg border border-input bg-bg px-2 text-xs font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+        role="combobox"
+        aria-label={option.name}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        title={selected?.description ?? option.description ?? option.name}
+      >
+        <span className="truncate">{selected?.name ?? option.currentValue}</span>
+        <ChevronDown className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} aria-hidden />
+      </button>
+      {open && (
+        <div className="absolute bottom-9 left-0 z-40 w-88 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl">
+          <div className="relative border-b border-border">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setHighlighted((current) => Math.min(current + 1, Math.max(filtered.length - 1, 0)));
+                } else if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setHighlighted((current) => Math.max(current - 1, 0));
+                } else if (event.key === "Enter" && filtered[highlighted]) {
+                  event.preventDefault();
+                  void selectModel(filtered[highlighted].value);
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  setOpen(false);
+                }
+              }}
+              placeholder="Search models…"
+              aria-label="Search models"
+              autoFocus
+              className="h-10 rounded-none border-0 bg-transparent pl-9 shadow-none focus-visible:ring-0"
+            />
+          </div>
+          <div role="listbox" aria-label="Models" className="max-h-72 overflow-y-auto p-1.5">
+            {filtered.map((value, index) => (
+              <button
+                key={`${value.group ?? ""}:${value.value}`}
+                type="button"
+                role="option"
+                aria-selected={value.value === option.currentValue}
+                className={cn("flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-secondary focus-visible:bg-secondary focus-visible:outline-none", index === highlighted && "bg-secondary")}
+                onMouseMove={() => setHighlighted(index)}
+                onClick={() => void selectModel(value.value)}
+              >
+                <span className="flex size-4 shrink-0 items-center justify-center pt-0.5">{value.value === option.currentValue && <Check className="size-3.5 text-primary" aria-hidden />}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-medium">{value.name}</span>
+                    {value.group && <span className="shrink-0 text-[0.625rem] text-muted-foreground">{value.group}</span>}
+                  </span>
+                  {(value.description || value.value !== value.name) && <span className="mt-0.5 block line-clamp-2 text-[0.6875rem] leading-4 text-muted-foreground">{value.description ?? value.value}</span>}
+                </span>
+              </button>
+            ))}
+            {filtered.length === 0 && <p className="px-3 py-8 text-center text-xs text-muted-foreground">No models match “{search}”.</p>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

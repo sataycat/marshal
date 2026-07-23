@@ -82,8 +82,8 @@ async function req(app: ReturnType<typeof buildApp>, method: string, path: strin
   return { status: res.status, body: (await res.json()) as any };
 }
 
-describe("chat thread API", () => {
-  it("returns an empty thread list before a repository is selected", async () => {
+describe("chat session API", () => {
+  it("returns an empty session list before a repository is selected", async () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-chat-machine-"));
     const app = buildApp("0.0.1", { machineDir });
 
@@ -106,7 +106,7 @@ describe("chat thread API", () => {
       agent_id: "agent-a",
       agent_version: "1.0.0",
       title: "Debug login",
-      status: "draft",
+      status: "active",
     });
 
     const scratch = await req(app, "PATCH", `/api/threads/${id}`, {
@@ -136,7 +136,7 @@ describe("chat thread API", () => {
     expect(detail.body.messages).toHaveLength(1);
   });
 
-  it("rejects unknown thread fields and missing agent IDs", async () => {
+  it("rejects unknown session fields and missing agent IDs", async () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-chat-api-"));
     initGitRepo(root);
     const app = buildApp("0.0.1", { root, chatAgent: testAgent });
@@ -207,6 +207,7 @@ describe("chat thread API", () => {
       agent_version: input.version,
     });
     expect(created.body.thread).toMatchObject({ agent_id: input.id, agent_version: input.version });
+    expect(created.body.thread.title).toBe("New session");
   });
 
   it("supports lifecycle actions and deletion", async () => {

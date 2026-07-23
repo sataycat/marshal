@@ -6,7 +6,7 @@ import type { HistoricalAgentProvenance } from "../agents/provenance.js";
 import type { StructuredAcpError } from "../acp/errors.js";
 import type { AgentSessionConfigOption, AgentSessionModeState } from "../agent/types.js";
 
-export type ChatThreadStatus = "draft" | "active" | "authentication_required" | "closed" | "error";
+export type ChatThreadStatus = "active" | "authentication_required" | "closed" | "error";
 export type ChatMessageRole = "user" | "assistant";
 
 export interface ChatThread {
@@ -66,13 +66,12 @@ export interface UpdateChatThreadInput {
 
 export class ChatThreadNotFoundError extends Error {
   constructor(id: string) {
-    super(`Chat thread not found: ${id}`);
+    super(`Chat session not found: ${id}`);
     this.name = "ChatThreadNotFoundError";
   }
 }
 
 const STATUSES = new Set<ChatThreadStatus>([
-  "draft",
   "active",
   "authentication_required",
   "closed",
@@ -168,10 +167,10 @@ export function createChatThread(input: CreateChatThreadInput, root?: string): C
   const cwd = resolve(input.cwd ?? repository);
   const cwdRelative = relative(repository, cwd).replaceAll("\\", "/");
   if (cwdRelative === ".." || cwdRelative.startsWith("../") || cwdRelative.startsWith("/")) {
-    throw new Error("Thread cwd must be inside the repository root");
+    throw new Error("Session cwd must be inside the repository root");
   }
   db.prepare(
-    "INSERT INTO chat_threads (id, repository_id, repo_root, cwd, agent_id, agent_version, title, task_slug, agent_provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO chat_threads (id, repository_id, repo_root, cwd, agent_id, agent_version, title, status, task_slug, agent_provenance) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
   ).run(
     id,
     getSelectedRepository()?.id ?? null,
@@ -179,7 +178,7 @@ export function createChatThread(input: CreateChatThreadInput, root?: string): C
     cwd,
     input.agentId,
     input.agentVersion,
-    input.title?.trim() || "New thread",
+    input.title?.trim() || "New session",
     input.taskSlug ?? null,
     JSON.stringify(
       input.agentProvenance ?? {

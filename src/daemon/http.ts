@@ -1443,7 +1443,7 @@ function registerChatRoutes(
     if (!chatAgent && (!installed || installed.status !== "installed"))
       throw new ApiError(
         409,
-        "Only an installed agent can be selected for a thread",
+        "Only an installed agent can be selected for a session",
         "agent_not_installed",
       );
     if (!chatAgent && installed?.readiness_status !== "ready")
@@ -1544,7 +1544,6 @@ function registerChatRoutes(
         {
           title: body.title as string | undefined,
           status: body.status as
-            | "draft"
             | "active"
             | "authentication_required"
             | "closed"

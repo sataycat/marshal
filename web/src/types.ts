@@ -319,7 +319,7 @@ export interface SpecMessagePayload {
   message: SpecMessage;
 }
 
-export type ChatThreadStatus = "draft" | "active" | "authentication_required" | "closed" | "error";
+export type ChatThreadStatus = "active" | "authentication_required" | "closed" | "error";
 export type ChatMessageRole = "user" | "assistant";
 
 export interface SessionConfigValue {

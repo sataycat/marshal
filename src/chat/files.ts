@@ -65,20 +65,29 @@ export function safeChatPath(cwd: string, path: string): string {
 }
 
 function gitPaths(repoRoot: string, cwd: string): string[] {
-  const raw = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
+  let raw: string;
+  try {
+    raw = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    // A thread can outlive its repository or point at a directory that is no longer a worktree.
+    return [];
+  }
   const prefix = normalize(relative(repoRoot, cwd));
-  return raw.split("\0").filter((path) => {
-    if (!path) return false;
-    const normalized = normalize(path);
-    return prefix === "" || normalized === prefix || normalized.startsWith(`${prefix}/`);
-  }).map((path) => {
-    const normalized = normalize(path);
-    return prefix === "" ? normalized : normalized.slice(prefix.length + 1);
-  });
+  return raw
+    .split("\0")
+    .filter((path) => {
+      if (!path) return false;
+      const normalized = normalize(path);
+      return prefix === "" || normalized === prefix || normalized.startsWith(`${prefix}/`);
+    })
+    .map((path) => {
+      const normalized = normalize(path);
+      return prefix === "" ? normalized : normalized.slice(prefix.length + 1);
+    });
 }
 
 function changedPaths(repoRoot: string, cwd: string): Set<string> {
@@ -102,7 +111,11 @@ function changedPaths(repoRoot: string, cwd: string): Set<string> {
   }
 }
 
-export function listChatFiles(repoRoot: string, cwd: string, touched = new Set<string>()): ChatFileEntry[] {
+export function listChatFiles(
+  repoRoot: string,
+  cwd: string,
+  touched = new Set<string>(),
+): ChatFileEntry[] {
   const files = gitPaths(repoRoot, cwd);
   const changed = changedPaths(repoRoot, cwd);
   const paths = new Set<string>(files);
@@ -110,15 +123,18 @@ export function listChatFiles(repoRoot: string, cwd: string, touched = new Set<s
     const parts = file.split("/");
     for (let i = 1; i < parts.length; i += 1) paths.add(parts.slice(0, i).join("/"));
   }
-  return [...paths].sort((a, b) => {
-    const depth = (value: string) => value.split("/").length;
-    return depth(a) - depth(b) || a.localeCompare(b);
-  }).slice(0, MAX_TREE_ENTRIES).map((path) => ({
-    path,
-    type: files.includes(path) ? "file" : "directory",
-    changed: changed.has(path) || [...changed].some((entry) => entry.startsWith(`${path}/`)),
-    touched: touched.has(path) || [...touched].some((entry) => entry.startsWith(`${path}/`)),
-  }));
+  return [...paths]
+    .sort((a, b) => {
+      const depth = (value: string) => value.split("/").length;
+      return depth(a) - depth(b) || a.localeCompare(b);
+    })
+    .slice(0, MAX_TREE_ENTRIES)
+    .map((path) => ({
+      path,
+      type: files.includes(path) ? "file" : "directory",
+      changed: changed.has(path) || [...changed].some((entry) => entry.startsWith(`${path}/`)),
+      touched: touched.has(path) || [...touched].some((entry) => entry.startsWith(`${path}/`)),
+    }));
 }
 
 export function readChatFile(cwd: string, path: string): ChatFileContent {
@@ -127,7 +143,12 @@ export function readChatFile(cwd: string, path: string): ChatFileContent {
   if (!stat.isFile()) throw new InvalidChatPathError(path);
   if (stat.size > MAX_FILE_BYTES) throw new ChatFileTooLargeError(path);
   const buffer = readFileSync(full);
-  return { path: relativePath(cwd, path), content: buffer.toString("utf8"), truncated: false, bytes: buffer.byteLength };
+  return {
+    path: relativePath(cwd, path),
+    content: buffer.toString("utf8"),
+    truncated: false,
+    bytes: buffer.byteLength,
+  };
 }
 
 const MENTION = /@([A-Za-z0-9._/-]+)/g;

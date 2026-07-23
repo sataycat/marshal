@@ -122,7 +122,7 @@ function thread(overrides: Partial<ChatThread> = {}): ChatThread {
     agent_id: "builder",
     agent_version: "1.0.0",
     title: "Thread",
-    status: "draft",
+    status: "active",
     archived: false,
     pinned: false,
     task_slug: null,
