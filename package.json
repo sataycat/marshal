@@ -23,7 +23,7 @@
   ],
   "scripts": {
     "dev": "pnpm run build && concurrently --kill-others --names daemon,web --prefix-colors blue,green \"node ./bin/marshal start --web-url http://localhost:5173\" \"pnpm --filter marshal-web exec vite --host ::\"",
-    "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
+    "build": "tsc && cp -R src/storage/migrations dist/storage/migrations",
     "build:web": "pnpm --filter marshal-web run build",
     "build:all": "pnpm run build && pnpm run build:web",
     "analyze": "pnpm --filter marshal-web run analyze",
@@ -41,6 +41,7 @@
     "@hono/node-server": "^2.0.8",
     "better-sqlite3": "^12.11.1",
     "commander": "^15.0.0",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.12.28",
     "ignore": "^7.0.5",
     "node-pty": "^1.1.0",
@@ -54,6 +55,7 @@
     "concurrently": "^9.2.1",
     "shadcn": "^4.13.0",
     "typescript": "^6.0.3",
+    "drizzle-kit": "^0.31.10",
     "vitest": "^3.0.0"
   },
   "packageManager": "pnpm@11.10.0"
