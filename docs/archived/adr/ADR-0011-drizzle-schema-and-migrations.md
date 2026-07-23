@@ -1,8 +1,9 @@
 # ADR-0011: Drizzle Schema and Migrations
 
-**Status:** Accepted  
+**Status:** Partially superseded by ADR-0012
 **Date:** 2026-07-23  
 **Related:** ARCHITECTURE.md, PROJECT.md
+**Superseded:** Sections 1, 3, 5, 7, and the corresponding implementation direction no longer apply where they require separate machine and repository databases, schemas, migration streams, or adoption paths. ADR-0012 establishes one `MARSHAL_HOME`, one `marshal.db`, and one migration stream. The Drizzle, ordered migration, forward-only compatibility, parameterized SQL, and migration-testing decisions remain accepted.
 
 ---
 

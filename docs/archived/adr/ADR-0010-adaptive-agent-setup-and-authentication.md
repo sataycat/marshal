@@ -284,13 +284,13 @@ interpretation in the runtime.
 The primary installed-agent card shows one user-facing state and one primary
 action:
 
-| Internal result | Primary state | Primary action |
-|---|---|---|
-| Installing or probing | Getting agent ready | None/cancel when supported |
-| Probe session succeeds | Ready to use | Start chat |
-| ACP `AuthRequired` | Sign-in required | Sign in |
-| Launch/protocol/session failure | Setup needed | Resolve setup or retry |
-| Authentication in progress | Signing in | Continue/cancel |
+| Internal result                 | Primary state       | Primary action             |
+| ------------------------------- | ------------------- | -------------------------- |
+| Installing or probing           | Getting agent ready | None/cancel when supported |
+| Probe session succeeds          | Ready to use        | Start chat                 |
+| ACP `AuthRequired`              | Sign-in required    | Sign in                    |
+| Launch/protocol/session failure | Setup needed        | Resolve setup or retry     |
+| Authentication in progress      | Signing in          | Continue/cancel            |
 
 Detailed information is available through an expandable details or diagnostics
 surface:

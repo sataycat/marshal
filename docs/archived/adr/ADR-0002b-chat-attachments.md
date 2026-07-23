@@ -1,8 +1,9 @@
 # ADR-0002b: Chat Attachments
 
-**Status:** Accepted
+**Status:** Superseded by ADR-0012
 **Date:** 2026-07-16  
 **Parent:** ADR-0002 (Chat Interface — Lightweight Web Client over ACP)
+**Superseded:** Decision 2's repository-local storage path is replaced by a daemon-owned repository namespace beneath `MARSHAL_HOME`. The validation, quota, metadata, capability, and recovery decisions remain historical design context.
 
 ## Context
 

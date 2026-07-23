@@ -157,22 +157,36 @@ Binary installation must:
 
 Package distributions are also installations, not moving aliases. The exact package specifier and registry version are persisted. Updating is explicit.
 
-Suggested machine state:
+Daemon-owned state has one configurable root. `MARSHAL_HOME` overrides the
+default `~/.marshal` location for development, VPS persistent volumes, backup,
+restore, and diagnostics:
 
 ```text
-~/.marshal/
-  daemon.json
+<MARSHAL_HOME>/
+  marshal.db
   registry/
     public-v1.json
   agents/
     <agent-id>/
       <version>/
-        manifest.json
-        payload/
+        <installation-id>/
+          manifest.json
+          payload/
+  credentials/
+  repositories/
+    <repository-id>/
+      attachments/
+      artifacts/
+      worktrees/
   logs/
+  daemon.pid
+  daemon.port
 ```
 
-Secrets do not belong in installation manifests or repository config.
+Registered source checkouts contain project inputs and source code, not Marshal
+databases, attachments, artifacts, worktrees, or other daemon state. Secrets do
+not belong in SQLite, installation manifests, or repository config; use an OS
+credential store or explicit external secret source where available.
 
 ---
 
@@ -312,6 +326,12 @@ A repository is a durable Marshal resource rather than an implicit consequence o
 
 The web application can add and open repositories. The daemon validates repository paths and stores repository-scoped preferences, threads, workflow profiles, tasks, and worktrees.
 
+Repository scope is represented by immutable repository IDs and foreign keys in
+daemon storage. Repository history is not portable with the checkout, and the
+daemon never stores application state in a repository-local `.marshal`
+directory. Moving or deleting a checkout therefore does not implicitly move or
+delete its Marshal history.
+
 Interactive threads normally use the source checkout unless the user chooses an isolated workspace. Factory tasks always use a dedicated worktree.
 
 Task worktrees are:
@@ -376,7 +396,11 @@ The web application presents the frozen spec, diff, checks, agent transcripts, a
 
 ## 12. Data model
 
-SQLite is the durable local store. The conceptual model is:
+One SQLite database at `$MARSHAL_HOME/marshal.db` is the durable local store.
+Machine-scoped and repository-scoped records share one schema and one ordered
+migration stream. Repository-scoped records carry an immutable `repository_id`;
+physical consolidation does not weaken repository ownership in APIs or store
+modules. The conceptual model is:
 
 - `repositories` — registered source repositories and settings.
 - `registry_sources` and `registry_snapshots` — catalog provenance and cached metadata.
@@ -392,6 +416,13 @@ SQLite is the durable local store. The conceptual model is:
 - `artifacts` and `attachments` — bounded metadata for files stored outside SQLite.
 
 Historical records store the resolved agent ID and version used at execution time. Updating an installation never rewrites history.
+
+Files that do not belong in SQLite live under daemon-owned namespaces within
+`MARSHAL_HOME`, normally `repositories/<repository-id>/`. The storage root is
+the complete persistence boundary for backup, restore, persistent-volume
+mounting, and fresh-install reset. Consistent live backup must use SQLite's
+supported backup mechanism; otherwise stop the daemon before copying or
+removing the storage root.
 
 ---
 
