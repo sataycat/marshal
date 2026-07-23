@@ -278,10 +278,9 @@ export async function probeInstalledAgent(
 ): Promise<InstalledAgent> {
   const params = new URLSearchParams({ version });
   if (installationId) params.set("installation_id", installationId);
-  const res = await fetch(
-    `/api/agents/${encodeURIComponent(agentId)}/probe?${params}`,
-    { method: "POST" },
-  );
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/probe?${params}`, {
+    method: "POST",
+  });
   return (await jsonOrThrow<{ agent: InstalledAgent }>(res)).agent;
 }
 export async function authenticateInstalledAgent(
@@ -293,26 +292,51 @@ export async function authenticateInstalledAgent(
 ): Promise<AgentAuthenticationOperation | InstalledAgent> {
   const params = new URLSearchParams({ version });
   if (installationId) params.set("installation_id", installationId);
-  const res = await fetch(
-    `/api/agents/${encodeURIComponent(agentId)}/auth?${params}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ method_id: methodId, ...(values ? { values } : {}) }),
-    },
-  );
-  const payload = await jsonOrThrow<{ authentication?: AgentAuthenticationOperation; agent?: InstalledAgent }>(res);
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/auth?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ method_id: methodId, ...(values ? { values } : {}) }),
+  });
+  const payload = await jsonOrThrow<{
+    authentication?: AgentAuthenticationOperation;
+    agent?: InstalledAgent;
+  }>(res);
   return payload.authentication ?? payload.agent!;
 }
-export async function fetchTerminalAuthentication(operationId: string, signal?: AbortSignal): Promise<TerminalAuthSnapshot> {
-  const res = await fetch(`/api/agents/auth/operations/${encodeURIComponent(operationId)}/terminal`, { signal });
+export async function fetchTerminalAuthentication(
+  operationId: string,
+  signal?: AbortSignal,
+): Promise<TerminalAuthSnapshot> {
+  const res = await fetch(
+    `/api/agents/auth/operations/${encodeURIComponent(operationId)}/terminal`,
+    { signal },
+  );
   return (await jsonOrThrow<{ terminal: TerminalAuthSnapshot }>(res)).terminal;
 }
-export function connectTerminalAuthentication(operationId: string, onMessage: (message: { type: string; payload: unknown }) => void): { send(data: string): void; close(): void } {
+export function connectTerminalAuthentication(
+  operationId: string,
+  onMessage: (message: { type: string; payload: unknown }) => void,
+): { send(data: string): void; close(): void } {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const socket = new WebSocket(`${protocol}//${window.location.host}/ws/terminal/${encodeURIComponent(operationId)}`);
-  socket.addEventListener("message", (event) => { try { onMessage(JSON.parse(String(event.data)) as { type: string; payload: unknown }); } catch { /* ignore malformed server frames */ } });
-  return { send(data) { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "terminal.input", data })); }, close() { socket.close(); } };
+  const socket = new WebSocket(
+    `${protocol}//${window.location.host}/ws/terminal/${encodeURIComponent(operationId)}`,
+  );
+  socket.addEventListener("message", (event) => {
+    try {
+      onMessage(JSON.parse(String(event.data)) as { type: string; payload: unknown });
+    } catch {
+      /* ignore malformed server frames */
+    }
+  });
+  return {
+    send(data) {
+      if (socket.readyState === WebSocket.OPEN)
+        socket.send(JSON.stringify({ type: "terminal.input", data }));
+    },
+    close() {
+      socket.close();
+    },
+  };
 }
 export async function fetchAgentAuthentication(
   agentId: string,
@@ -322,10 +346,7 @@ export async function fetchAgentAuthentication(
 ): Promise<{ authentication: AgentAuthenticationOperation | null }> {
   const params = new URLSearchParams({ version });
   if (installationId) params.set("installation_id", installationId);
-  const res = await fetch(
-    `/api/agents/${encodeURIComponent(agentId)}/auth?${params}`,
-    { signal },
-  );
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/auth?${params}`, { signal });
   return jsonOrThrow<{ authentication: AgentAuthenticationOperation | null }>(res);
 }
 export async function cancelAgentAuthentication(
@@ -518,9 +539,24 @@ export interface SendSpecMessageResponse {
   userMessage: SpecMessage;
   assistantMessage: SpecMessage | null;
 }
-export async function resubmitSpecMessage(slug: string, messageId: number): Promise<SendSpecMessageResponse> { const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-messages/${messageId}/resubmit`, { method: "POST" }); return jsonOrThrow<SendSpecMessageResponse>(res); }
-export async function fetchTaskRuns(slug: string, signal?: AbortSignal): Promise<WorkflowRun[]> { const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/runs`, { signal }); return (await jsonOrThrow<{ runs: WorkflowRun[] }>(res)).runs; }
-export async function recoverRunAuthentication(runId: number): Promise<WorkflowRun> { const res = await fetch(`/api/runs/${runId}/recover-authentication`, { method: "POST" }); return (await jsonOrThrow<{ run: WorkflowRun }>(res)).run; }
+export async function resubmitSpecMessage(
+  slug: string,
+  messageId: number,
+): Promise<SendSpecMessageResponse> {
+  const res = await fetch(
+    `/api/tasks/${encodeURIComponent(slug)}/spec-messages/${messageId}/resubmit`,
+    { method: "POST" },
+  );
+  return jsonOrThrow<SendSpecMessageResponse>(res);
+}
+export async function fetchTaskRuns(slug: string, signal?: AbortSignal): Promise<WorkflowRun[]> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/runs`, { signal });
+  return (await jsonOrThrow<{ runs: WorkflowRun[] }>(res)).runs;
+}
+export async function recoverRunAuthentication(runId: number): Promise<WorkflowRun> {
+  const res = await fetch(`/api/runs/${runId}/recover-authentication`, { method: "POST" });
+  return (await jsonOrThrow<{ run: WorkflowRun }>(res)).run;
+}
 
 export async function sendSpecMessage(
   slug: string,
@@ -601,6 +637,33 @@ export async function fetchChatEvents(id: string, signal?: AbortSignal): Promise
   const res = await fetch(`/api/threads/${encodeURIComponent(id)}/events`, { signal });
   return (await jsonOrThrow<{ events: AcpEvent[] }>(res)).events;
 }
+export async function initializeChatSession(id: string): Promise<ChatThread> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/session`, { method: "POST" });
+  return (await jsonOrThrow<{ thread: ChatThread }>(res)).thread;
+}
+export async function setChatSessionConfigOption(
+  id: string,
+  configId: string,
+  value: string | boolean,
+): Promise<ChatThread> {
+  const res = await fetch(
+    `/api/threads/${encodeURIComponent(id)}/session/config-options/${encodeURIComponent(configId)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    },
+  );
+  return (await jsonOrThrow<{ thread: ChatThread }>(res)).thread;
+}
+export async function setChatSessionMode(id: string, modeId: string): Promise<ChatThread> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/session/mode`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode_id: modeId }),
+  });
+  return (await jsonOrThrow<{ thread: ChatThread }>(res)).thread;
+}
 
 export async function uploadChatAttachment(id: string, file: File): Promise<ChatAttachment> {
   const form = new FormData();
@@ -637,8 +700,13 @@ export async function sendChatMessage(
   return jsonOrThrow<{ userMessage: ChatMessage; assistantMessage: ChatMessage }>(res);
 }
 
-export async function resubmitChatMessage(id: string, messageId: number): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage | null }> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/messages/${messageId}/resubmit`, { method: "POST" });
+export async function resubmitChatMessage(
+  id: string,
+  messageId: number,
+): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage | null }> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/messages/${messageId}/resubmit`, {
+    method: "POST",
+  });
   return jsonOrThrow<{ userMessage: ChatMessage; assistantMessage: ChatMessage | null }>(res);
 }
 

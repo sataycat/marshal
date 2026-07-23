@@ -22,7 +22,18 @@ rl.on('line', (line) => {
     } });
   } else if (msg.method === 'session/new') {
     if (process.env.MARSHAL_EXPECT_ENV && process.env.MARSHAL_ENV_CONSISTENCY !== process.env.MARSHAL_EXPECT_ENV) send({ jsonrpc: '2.0', id: msg.id, error: { code: -32001, message: 'launch environment mismatch' } });
-    else send({ jsonrpc: '2.0', id: msg.id, result: { sessionId } });
+    else send({ jsonrpc: '2.0', id: msg.id, result: { sessionId, configOptions: [
+      { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'sonnet', options: [{ value: 'sonnet', name: 'Sonnet' }, { value: 'opus', name: 'Opus' }] },
+      { id: 'fast', name: 'Fast mode', type: 'boolean', currentValue: false },
+    ], modes: { currentModeId: 'code', availableModes: [{ id: 'code', name: 'Code' }, { id: 'plan', name: 'Plan' }] } } });
+  } else if (msg.method === 'session/set_config_option') {
+    const isFast = msg.params.configId === 'fast';
+    send({ jsonrpc: '2.0', id: msg.id, result: { configOptions: [
+      { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: isFast ? 'sonnet' : msg.params.value, options: [{ value: 'sonnet', name: 'Sonnet' }, { value: 'opus', name: 'Opus' }] },
+      { id: 'fast', name: 'Fast mode', type: 'boolean', currentValue: isFast ? msg.params.value : false },
+    ] } });
+  } else if (msg.method === 'session/set_mode') {
+    send({ jsonrpc: '2.0', id: msg.id, result: {} });
   } else if (msg.method === 'session/prompt') {
     global.pendingPromptId = msg.id;
     if (process.env.FAKE_ACP_HANG === '1') return;
@@ -88,7 +99,10 @@ function makeAdapter(env?: Record<string, string>): SdkAcpAgentAdapter {
 
 describe("SdkAcpAgentAdapter", () => {
   it("uses the same resolved launch environment for normal sessions", async () => {
-    const adapter = makeAdapter({ MARSHAL_ENV_CONSISTENCY: "session-value", MARSHAL_EXPECT_ENV: "session-value" });
+    const adapter = makeAdapter({
+      MARSHAL_ENV_CONSISTENCY: "session-value",
+      MARSHAL_EXPECT_ENV: "session-value",
+    });
     const cwd = mkdtempSync(join(tmpdir(), "marshal-sdk-env-"));
     const session = await adapter.spawn(cwd, "fake");
     expect(session.recordId).toBeTruthy();
@@ -104,8 +118,33 @@ describe("SdkAcpAgentAdapter", () => {
       cwd,
       name: "custom",
       recordId: "sdk-session-1",
+      configOptions: [
+        expect.objectContaining({ id: "model", currentValue: "sonnet" }),
+        expect.objectContaining({ id: "fast", currentValue: false }),
+      ],
+      modes: expect.objectContaining({ currentModeId: "code" }),
     });
 
+    await adapter.close(session);
+  });
+
+  it("changes generic session configuration and legacy modes", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "marshal-sdk-config-"));
+    const adapter = makeAdapter();
+    const updates: unknown[] = [];
+    const session = await adapter.spawn(cwd, "fake", {
+      onSessionConfiguration: (configuration) => updates.push(configuration),
+    });
+    await expect(adapter.setConfigOption(session, "model", "opus")).resolves.toContainEqual(
+      expect.objectContaining({ id: "model", currentValue: "opus" }),
+    );
+    await expect(adapter.setConfigOption(session, "fast", true)).resolves.toContainEqual(
+      expect.objectContaining({ id: "fast", currentValue: true }),
+    );
+    await expect(adapter.setMode(session, "plan")).resolves.toMatchObject({
+      currentModeId: "plan",
+    });
+    expect(updates.length).toBeGreaterThanOrEqual(4);
     await adapter.close(session);
   });
 
@@ -166,9 +205,15 @@ describe("SdkAcpAgentAdapter", () => {
         return "allow";
       },
     });
-    const events = await collect(adapter.prompt(session, "hello", { permissionMode: "interactive" }));
-    expect(events).toContainEqual(expect.objectContaining({ type: "permission", granted: false, requestId: "sdk-session-1:1" }));
-    expect(events).toContainEqual(expect.objectContaining({ type: "tool", status: "completed", output: "allow" }));
+    const events = await collect(
+      adapter.prompt(session, "hello", { permissionMode: "interactive" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "permission", granted: false, requestId: "sdk-session-1:1" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "tool", status: "completed", output: "allow" }),
+    );
     await adapter.close(session);
   });
 

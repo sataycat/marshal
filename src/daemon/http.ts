@@ -139,7 +139,11 @@ import {
 import { authenticateAgent } from "../acp/authenticate.js";
 import { bindAgentCredential } from "../agents/credentials.js";
 import { launchWithResolvedEnvironment } from "../agents/launch-environment.js";
-import { StructuredAcpFailureError, structuredAcpError, type StructuredAcpError } from "../acp/errors.js";
+import {
+  StructuredAcpFailureError,
+  structuredAcpError,
+  type StructuredAcpError,
+} from "../acp/errors.js";
 import { TerminalAuthManager } from "../acp/terminal-auth.js";
 import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
 import { randomUUID } from "node:crypto";
@@ -290,9 +294,14 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerStaticRoutes(app, webDir, options.webUrl);
   app.notFound((c) => spaNotFound(c, webDir, options.webUrl));
   app.onError((err, c) => {
-    const mapped = err instanceof ApiError || err instanceof StructuredAcpFailureError ? mapDomainError(err) : null;
+    const mapped =
+      err instanceof ApiError || err instanceof StructuredAcpFailureError
+        ? mapDomainError(err)
+        : null;
     if (mapped) {
-      const body: { error: string; code?: string; failure?: StructuredAcpError } = { error: mapped.message };
+      const body: { error: string; code?: string; failure?: StructuredAcpError } = {
+        error: mapped.message,
+      };
       if (mapped.code !== undefined) body.code = mapped.code;
       if (mapped.failure) body.failure = mapped.failure;
       return c.json(body, mapped.status);
@@ -504,13 +513,14 @@ function mapDomainError(err: unknown): ApiError {
       logger.error({ err }, "Unexpected error in task HTTP handler");
       return new ApiError(500, "Internal server error", "internal_error");
     }
-    const status: StatusCode = failure.kind === "resource_not_found"
-      ? 404
-      : failure.kind === "timeout"
-        ? 504
-        : failure.kind === "agent_internal_error" || failure.kind === "process_start_failed"
-          ? 502
-          : 409;
+    const status: StatusCode =
+      failure.kind === "resource_not_found"
+        ? 404
+        : failure.kind === "timeout"
+          ? 504
+          : failure.kind === "agent_internal_error" || failure.kind === "process_start_failed"
+            ? 502
+            : 409;
     return new ApiError(status, failure.message, failure.kind, failure);
   }
   if (err instanceof TaskNotFoundError) {
@@ -682,9 +692,18 @@ function registerRepositoryRoutes(app: Hono): void {
       }))
       .map((entry) => ({ ...entry, fuzzy_score: fuzzyDirectoryScore(entry.name, query) }))
       .filter((entry) => entry.fuzzy_score !== null)
-      .sort((a, b) => (a.fuzzy_score! - b.fuzzy_score!) || Number(b.is_git) - Number(a.is_git) || a.name.localeCompare(b.name))
+      .sort(
+        (a, b) =>
+          a.fuzzy_score! - b.fuzzy_score! ||
+          Number(b.is_git) - Number(a.is_git) ||
+          a.name.localeCompare(b.name),
+      )
       .slice(0, 30);
-    return c.json({ path: parent, display_path: parent === homedir() ? "~" : parent, directories: directories.map(({ fuzzy_score: _score, ...directory }) => directory) });
+    return c.json({
+      path: parent,
+      display_path: parent === homedir() ? "~" : parent,
+      directories: directories.map(({ fuzzy_score: _score, ...directory }) => directory),
+    });
   });
   app.get("/api/repositories/:id", (c) => {
     const repository = getRepository(c.req.param("id"));
@@ -756,7 +775,13 @@ function registerDiagnosticsRoute(
         severity: "warning",
       });
     for (const agent of agents) {
-      const activation = getInstallationByIdentity(agent.id, agent.version, agent.distribution, agent.installation_id, machineDir);
+      const activation = getInstallationByIdentity(
+        agent.id,
+        agent.version,
+        agent.distribution,
+        agent.installation_id,
+        machineDir,
+      );
       if (agent.status === "failed")
         issues.push({
           code: "INSTALLATION_FAILED",
@@ -768,7 +793,9 @@ function registerDiagnosticsRoute(
         issues.push({
           code: activation?.activation_error_code?.toUpperCase() ?? "ACP_READINESS_FAILED",
           message: `${agent.id}@${agent.version}: ${agent.readiness_error ?? "readiness probe failed"}`,
-          action: activation?.activation_diagnostic?.action ?? "Retry the readiness check after reviewing the installation and authentication state.",
+          action:
+            activation?.activation_diagnostic?.action ??
+            "Retry the readiness check after reviewing the installation and authentication state.",
           severity: "error",
         });
       if (agent.readiness_status === "authentication_required")
@@ -848,7 +875,12 @@ function registerRegistryRoutes(app: Hono, machineDir?: string): void {
   });
 }
 
-function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus, terminalAuth?: TerminalAuthManager): void {
+function registerAgentRoutes(
+  app: Hono,
+  machineDir?: string,
+  bus?: EventBus,
+  terminalAuth?: TerminalAuthManager,
+): void {
   app.get("/api/agents", (c) => c.json({ agents: listInstalledAgents(machineDir) }));
   app.post("/api/agents/:id/default", async (c) => {
     const body = await readJsonObject(c, new Set(["installation_id"]));
@@ -917,7 +949,14 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus, ter
     const installed = getInstalledAgent(c.req.param("id"), version, machineDir, installationId);
     if (!installed || installed.status !== "installed")
       throw new ApiError(409, "Only an installed agent can be probed", "agent_not_installed");
-    const agent = await activateInstalledAgent(installed.id, installed.version, machineDir, bus, undefined, installed.installation_id);
+    const agent = await activateInstalledAgent(
+      installed.id,
+      installed.version,
+      machineDir,
+      bus,
+      undefined,
+      installed.installation_id,
+    );
     return c.json({ agent });
   });
   app.get("/api/agents/:id/auth", (c) => {
@@ -929,7 +968,12 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus, ter
     return c.json({
       agent: installed,
       authentication:
-        getLatestAgentAuthenticationOperation(installed.id, installed.version, machineDir, installed.installation_id) ?? null,
+        getLatestAgentAuthenticationOperation(
+          installed.id,
+          installed.version,
+          machineDir,
+          installed.installation_id,
+        ) ?? null,
     });
   });
   app.post("/api/agents/:id/auth", async (c) => {
@@ -949,22 +993,63 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus, ter
         "auth_method_invalid",
       );
     if (method.type === "env_var") {
-      if (body.values === null || typeof body.values !== "object" || Array.isArray(body.values)) throw new ApiError(422, "values must be an object", "auth_values_invalid");
+      if (body.values === null || typeof body.values !== "object" || Array.isArray(body.values))
+        throw new ApiError(422, "values must be an object", "auth_values_invalid");
       const values = body.values as Record<string, unknown>;
       for (const variable of method.vars) {
         const value = values[variable.name];
         if (value === undefined) {
-          if (!variable.optional) throw new ApiError(422, `${variable.name} is required`, "auth_value_missing");
+          if (!variable.optional)
+            throw new ApiError(422, `${variable.name} is required`, "auth_value_missing");
           continue;
         }
-        if (typeof value !== "string") throw new ApiError(422, `${variable.name} must be a string`, "auth_value_invalid");
-        bindAgentCredential(installed.installation_id, variable.name, value, variable.secret, machineDir);
+        if (typeof value !== "string")
+          throw new ApiError(422, `${variable.name} must be a string`, "auth_value_invalid");
+        bindAgentCredential(
+          installed.installation_id,
+          variable.name,
+          value,
+          variable.secret,
+          machineDir,
+        );
       }
-      const operation = beginAgentAuthentication({ id: randomUUID(), agent_id: installed.id, version: installed.version, installation_id: installed.installation_id, method_id: method.id, method_name: method.name, method_type: method.type }, machineDir);
+      const operation = beginAgentAuthentication(
+        {
+          id: randomUUID(),
+          agent_id: installed.id,
+          version: installed.version,
+          installation_id: installed.installation_id,
+          method_id: method.id,
+          method_name: method.name,
+          method_type: method.type,
+        },
+        machineDir,
+      );
       try {
-        const refreshed = await activateInstalledAgent(installed.id, installed.version, machineDir, bus, undefined, installed.installation_id);
-        finishAgentAuthentication(operation.id, refreshed.readiness_status === "ready" ? "succeeded" : "failed", refreshed.readiness_status === "ready" ? null : refreshed.readiness_error ?? "Agent is still not ready after saving credentials", machineDir, refreshed.readiness_failure);
-        return c.json({ agent: refreshed, authentication: getAgentAuthenticationOperation(operation.id, machineDir) }, 200);
+        const refreshed = await activateInstalledAgent(
+          installed.id,
+          installed.version,
+          machineDir,
+          bus,
+          undefined,
+          installed.installation_id,
+        );
+        finishAgentAuthentication(
+          operation.id,
+          refreshed.readiness_status === "ready" ? "succeeded" : "failed",
+          refreshed.readiness_status === "ready"
+            ? null
+            : (refreshed.readiness_error ?? "Agent is still not ready after saving credentials"),
+          machineDir,
+          refreshed.readiness_failure,
+        );
+        return c.json(
+          {
+            agent: refreshed,
+            authentication: getAgentAuthenticationOperation(operation.id, machineDir),
+          },
+          200,
+        );
       } catch (error) {
         const failure = structuredAcpError(error);
         finishAgentAuthentication(operation.id, "failed", failure.message, machineDir, failure);
@@ -972,14 +1057,57 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus, ter
       }
     }
     if (method.type === "terminal") {
-      if (!terminalAuth) throw new ApiError(500, "Terminal authentication is unavailable", "terminal_auth_unavailable");
-      if (!Array.isArray(method.args) || method.args.some((arg) => typeof arg !== "string") || !method.env || Object.values(method.env).some((value) => typeof value !== "string")) throw new ApiError(422, "The advertised terminal authentication metadata is invalid", "auth_method_invalid");
-      const current = getLatestAgentAuthenticationOperation(installed.id, installed.version, machineDir, installed.installation_id);
-      if (current?.status === "authenticating") return c.json({ authentication: current, terminal: terminalAuth.snapshot(current.id) }, 202);
-      const operation = beginAgentAuthentication({ id: randomUUID(), agent_id: installed.id, version: installed.version, installation_id: installed.installation_id, method_id: method.id, method_name: method.name, method_type: method.type }, machineDir);
-      return c.json({ authentication: operation, terminal: terminalAuth.start(operation, installed, method) }, 202);
+      if (!terminalAuth)
+        throw new ApiError(
+          500,
+          "Terminal authentication is unavailable",
+          "terminal_auth_unavailable",
+        );
+      if (
+        !Array.isArray(method.args) ||
+        method.args.some((arg) => typeof arg !== "string") ||
+        !method.env ||
+        Object.values(method.env).some((value) => typeof value !== "string")
+      )
+        throw new ApiError(
+          422,
+          "The advertised terminal authentication metadata is invalid",
+          "auth_method_invalid",
+        );
+      const current = getLatestAgentAuthenticationOperation(
+        installed.id,
+        installed.version,
+        machineDir,
+        installed.installation_id,
+      );
+      if (current?.status === "authenticating")
+        return c.json(
+          { authentication: current, terminal: terminalAuth.snapshot(current.id) },
+          202,
+        );
+      const operation = beginAgentAuthentication(
+        {
+          id: randomUUID(),
+          agent_id: installed.id,
+          version: installed.version,
+          installation_id: installed.installation_id,
+          method_id: method.id,
+          method_name: method.name,
+          method_type: method.type,
+        },
+        machineDir,
+      );
+      return c.json(
+        { authentication: operation, terminal: terminalAuth.start(operation, installed, method) },
+        202,
+      );
     }
-    if (method.type !== "agent") throw new ApiError(422, "This advertised authentication method is not supported", "auth_method_unsupported");
+    if (method.type !== "agent")
+      throw new ApiError(
+        422,
+        "This advertised authentication method is not supported",
+        "auth_method_unsupported",
+      );
     const current = getLatestAgentAuthenticationOperation(
       installed.id,
       installed.version,
@@ -1004,16 +1132,39 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus, ter
     void (async () => {
       const workspace = mkdtempSync(resolve(tmpdir(), "marshal-auth-"));
       try {
-        await authenticateAgent(workspace, launchWithResolvedEnvironment(installed, machineDir), method.id, controller.signal);
-        const refreshed = getInstalledAgent(installed.id, installed.version, machineDir, installed.installation_id);
-        if (!refreshed) throw new Error("Installed agent disappeared before the required readiness check");
-        const reprobed = await activateInstalledAgent(refreshed.id, refreshed.version, machineDir, bus, undefined, refreshed.installation_id);
+        await authenticateAgent(
+          workspace,
+          launchWithResolvedEnvironment(installed, machineDir),
+          method.id,
+          controller.signal,
+        );
+        const refreshed = getInstalledAgent(
+          installed.id,
+          installed.version,
+          machineDir,
+          installed.installation_id,
+        );
+        if (!refreshed)
+          throw new Error("Installed agent disappeared before the required readiness check");
+        const reprobed = await activateInstalledAgent(
+          refreshed.id,
+          refreshed.version,
+          machineDir,
+          bus,
+          undefined,
+          refreshed.installation_id,
+        );
         if (reprobed.readiness_status === "ready") {
           finishAgentAuthentication(operation.id, "succeeded", null, machineDir);
         } else {
-          const message = reprobed.readiness_error ?? `Fresh readiness check returned ${reprobed.readiness_status}`;
+          const message =
+            reprobed.readiness_error ??
+            `Fresh readiness check returned ${reprobed.readiness_status}`;
           const failure = reprobed.readiness_failure ?? {
-            kind: reprobed.readiness_status === "authentication_required" ? "authentication_required" as const : "agent_internal_error" as const,
+            kind:
+              reprobed.readiness_status === "authentication_required"
+                ? ("authentication_required" as const)
+                : ("agent_internal_error" as const),
             message,
             protocol_code: null,
             data: { readiness_status: reprobed.readiness_status },
@@ -1032,7 +1183,14 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus, ter
               ? error.message
               : String(error),
           machineDir,
-          cancelled ? { kind: "cancelled", message: "Authentication was cancelled", protocol_code: null, data: null } : failure,
+          cancelled
+            ? {
+                kind: "cancelled",
+                message: "Authentication was cancelled",
+                protocol_code: null,
+                data: null,
+              }
+            : failure,
         );
       } finally {
         authenticationControllers.delete(operation.id);
@@ -1049,10 +1207,17 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus, ter
   });
   app.get("/api/agents/auth/operations/:id/terminal", (c) => {
     const operation = getAgentAuthenticationOperation(c.req.param("id"), machineDir);
-    if (!operation) throw new ApiError(404, "Authentication operation not found", "operation_not_found");
-    if (operation.method_type !== "terminal") throw new ApiError(409, "Authentication operation is not a terminal operation", "operation_not_terminal");
+    if (!operation)
+      throw new ApiError(404, "Authentication operation not found", "operation_not_found");
+    if (operation.method_type !== "terminal")
+      throw new ApiError(
+        409,
+        "Authentication operation is not a terminal operation",
+        "operation_not_terminal",
+      );
     const terminal = terminalAuth?.snapshot(operation.id);
-    if (!terminal) throw new ApiError(404, "Terminal operation is not retained", "terminal_not_retained");
+    if (!terminal)
+      throw new ApiError(404, "Terminal operation is not retained", "terminal_not_retained");
     return c.json({ terminal });
   });
   app.post("/api/agents/auth/operations/:id/cancel", (c) => {
@@ -1061,7 +1226,12 @@ function registerAgentRoutes(app: Hono, machineDir?: string, bus?: EventBus, ter
       throw new ApiError(404, "Authentication operation not found", "operation_not_found");
     if (operation.status === "authenticating" && operation.method_type === "terminal") {
       const cancelled = terminalAuth?.cancel(operation.id);
-      if (!cancelled) throw new ApiError(409, "Terminal authentication operation is not running", "authentication_not_running");
+      if (!cancelled)
+        throw new ApiError(
+          409,
+          "Terminal authentication operation is not running",
+          "authentication_not_running",
+        );
       return c.json({ authentication: cancelled });
     }
     if (operation.status === "authenticating") authenticationControllers.get(operation.id)?.abort();
@@ -1320,6 +1490,35 @@ function registerChatRoutes(
       throw mapDomainError(err);
     }
   });
+  app.post("/api/threads/:id/session", async (c) => {
+    try {
+      await turns.initializeThread(c.req.param("id"));
+      return c.json({ thread: getChatThread(c.req.param("id"), root) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.post("/api/threads/:id/session/config-options/:configId", async (c) => {
+    const body = await readJsonObject(c, new Set(["value"]));
+    if (typeof body.value !== "string" && typeof body.value !== "boolean")
+      throw new ApiError(422, "value must be a string or boolean", "invalid_field");
+    try {
+      await turns.setConfigOption(c.req.param("id"), c.req.param("configId"), body.value);
+      return c.json({ thread: getChatThread(c.req.param("id"), root) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
+  app.post("/api/threads/:id/session/mode", async (c) => {
+    const body = await readJsonObject(c, new Set(["mode_id"]));
+    if (body.mode_id === undefined) throw new ApiError(422, "mode_id is required", "missing_field");
+    try {
+      await turns.setMode(c.req.param("id"), assertString(body.mode_id, "mode_id"));
+      return c.json({ thread: getChatThread(c.req.param("id"), root) });
+    } catch (err) {
+      throw mapDomainError(err);
+    }
+  });
   app.patch("/api/threads/:id", async (c) => {
     const body = await readJsonObject(
       c,
@@ -1344,7 +1543,13 @@ function registerChatRoutes(
         c.req.param("id"),
         {
           title: body.title as string | undefined,
-          status: body.status as "draft" | "active" | "authentication_required" | "closed" | "error" | undefined,
+          status: body.status as
+            | "draft"
+            | "active"
+            | "authentication_required"
+            | "closed"
+            | "error"
+            | undefined,
           archived: body.archived as boolean | undefined,
           pinned: body.pinned as boolean | undefined,
           scratchMarkdown: body.scratch_markdown as string | undefined,
@@ -1515,8 +1720,11 @@ function registerChatRoutes(
     }
   });
   app.post("/api/threads/:id/messages/:messageId/resubmit", async (c) => {
-    try { return c.json(await turns.resubmit(c.req.param("id"), Number(c.req.param("messageId"))), 201); }
-    catch (err) { throw mapDomainError(err); }
+    try {
+      return c.json(await turns.resubmit(c.req.param("id"), Number(c.req.param("messageId"))), 201);
+    } catch (err) {
+      throw mapDomainError(err);
+    }
   });
   app.post("/api/threads/:id/cancel", async (c) => {
     try {
@@ -1797,9 +2005,19 @@ function registerRunRoutes(app: Hono, root: string | undefined): void {
     return c.json({ run: runDetail(run) });
   });
   app.post("/api/runs/:id/recover-authentication", (c) => {
-    const runId = parseRunId(c.req.param("id")); const log = new RunLog(root);
-    try { const run = log.resolveAuthenticationRequired(runId); return c.json({ run: runDetail(run) }); }
-    catch (err) { if (err instanceof RunNotFoundError) throw new ApiError(404, err.message, "run_not_found"); throw new ApiError(409, err instanceof Error ? err.message : String(err), "run_not_authentication_required"); }
+    const runId = parseRunId(c.req.param("id"));
+    const log = new RunLog(root);
+    try {
+      const run = log.resolveAuthenticationRequired(runId);
+      return c.json({ run: runDetail(run) });
+    } catch (err) {
+      if (err instanceof RunNotFoundError) throw new ApiError(404, err.message, "run_not_found");
+      throw new ApiError(
+        409,
+        err instanceof Error ? err.message : String(err),
+        "run_not_authentication_required",
+      );
+    }
   });
 
   app.get("/api/runs/:id/events", (c) => {
@@ -1901,11 +2119,14 @@ function registerSpecRoutes(
         machineDir,
       });
       publishSpecMessage(busLocal, slug, promptEvents.userMessage);
-      if (promptEvents.assistantMessage) publishSpecMessage(busLocal, slug, promptEvents.assistantMessage);
+      if (promptEvents.assistantMessage)
+        publishSpecMessage(busLocal, slug, promptEvents.assistantMessage);
       return c.json(
         {
           userMessage: specMessageFields(promptEvents.userMessage),
-          assistantMessage: promptEvents.assistantMessage ? specMessageFields(promptEvents.assistantMessage) : null,
+          assistantMessage: promptEvents.assistantMessage
+            ? specMessageFields(promptEvents.assistantMessage)
+            : null,
         },
         201,
       );
@@ -1915,12 +2136,30 @@ function registerSpecRoutes(
   });
   app.post("/api/tasks/:slug/spec-messages/:messageId/resubmit", async (c) => {
     const messageId = Number(c.req.param("messageId"));
-    if (!Number.isInteger(messageId) || messageId <= 0) throw new ApiError(400, "message id must be a positive integer", "invalid_message_id");
+    if (!Number.isInteger(messageId) || messageId <= 0)
+      throw new ApiError(400, "message id must be a positive integer", "invalid_message_id");
     try {
-      const result = await resubmitSpecAuthorTurn(c.req.param("slug"), messageId, { root, agent: specAgent, machineDir });
-      const busLocal = ensureBus(bus); publishSpecMessage(busLocal, c.req.param("slug"), result.userMessage); if (result.assistantMessage) publishSpecMessage(busLocal, c.req.param("slug"), result.assistantMessage);
-      return c.json({ userMessage: specMessageFields(result.userMessage), assistantMessage: result.assistantMessage ? specMessageFields(result.assistantMessage) : null }, 201);
-    } catch (err) { throw mapDomainError(err); }
+      const result = await resubmitSpecAuthorTurn(c.req.param("slug"), messageId, {
+        root,
+        agent: specAgent,
+        machineDir,
+      });
+      const busLocal = ensureBus(bus);
+      publishSpecMessage(busLocal, c.req.param("slug"), result.userMessage);
+      if (result.assistantMessage)
+        publishSpecMessage(busLocal, c.req.param("slug"), result.assistantMessage);
+      return c.json(
+        {
+          userMessage: specMessageFields(result.userMessage),
+          assistantMessage: result.assistantMessage
+            ? specMessageFields(result.assistantMessage)
+            : null,
+        },
+        201,
+      );
+    } catch (err) {
+      throw mapDomainError(err);
+    }
   });
 
   app.get("/api/tasks/:slug/spec-author-sessions", (c) => {
@@ -2044,7 +2283,10 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
         path: "/ws",
         authenticate: (req) => auth.isAuthenticated(req.headers.cookie),
         allowedOrigins: trustedOrigins,
-        terminal: { pathPrefix: "/ws/terminal", attach: (operationId, socket) => terminalAuth.attach(operationId, socket) },
+        terminal: {
+          pathPrefix: "/ws/terminal",
+          attach: (operationId, socket) => terminalAuth.attach(operationId, socket),
+        },
       },
     );
   }
@@ -2064,7 +2306,14 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     portFile,
     bus,
     close() {
-      return closeServer(server, portFile, wsHandle, pidFile, resolve(GLOBAL_DIR, "daemon.port"), terminalAuth);
+      return closeServer(
+        server,
+        portFile,
+        wsHandle,
+        pidFile,
+        resolve(GLOBAL_DIR, "daemon.port"),
+        terminalAuth,
+      );
     },
   };
 }

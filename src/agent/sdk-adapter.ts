@@ -9,6 +9,8 @@ import type {
   AgentId,
   AgentSession,
   AgentPermissionRequest,
+  AgentSessionConfigOption,
+  AgentSessionModeState,
   PromptOptions,
   SpawnOptions,
 } from "./types.js";
@@ -51,6 +53,10 @@ interface SessionState {
   queue: AsyncQueue | null;
   prompting: boolean;
   closed: boolean;
+  configOptions: AgentSessionConfigOption[];
+  modes: AgentSessionModeState | null;
+  onSessionConfiguration?: SpawnOptions["onSessionConfiguration"];
+  session?: AgentSession;
 }
 
 export interface SdkAcpAgentAdapterOptions {
@@ -88,7 +94,10 @@ export class SdkAcpAgentAdapter implements Agent {
         name: opts.sessionName ?? `marshal-${agentId}`,
         recordId: state.sessionId,
         supportsImages: state.supportsImages,
+        configOptions: state.configOptions,
+        modes: state.modes,
       };
+      state.session = session;
       this.sessions.set(session, state);
       return session;
     } catch (err) {
@@ -137,7 +146,14 @@ export class SdkAcpAgentAdapter implements Agent {
       .catch((err: unknown) => {
         if (!timedOut) {
           const failure = structuredAcpError(err);
-          queue.push({ event: { type: "error", message: failure.message, ...(failure.protocol_code === null ? {} : { code: failure.protocol_code }), failure } });
+          queue.push({
+            event: {
+              type: "error",
+              message: failure.message,
+              ...(failure.protocol_code === null ? {} : { code: failure.protocol_code }),
+              failure,
+            },
+          });
           queue.push({ terminal: true });
         }
       });
@@ -158,6 +174,36 @@ export class SdkAcpAgentAdapter implements Agent {
   async cancel(session: AgentSession): Promise<void> {
     const state = this.getState(session);
     await state.context.notify(acp.methods.agent.session.cancel, { sessionId: state.sessionId });
+  }
+
+  async setConfigOption(
+    session: AgentSession,
+    configId: string,
+    value: string | boolean,
+  ): Promise<AgentSessionConfigOption[]> {
+    const state = this.getState(session);
+    const response = await state.context.request(
+      acp.methods.agent.session.setConfigOption,
+      typeof value === "boolean"
+        ? { sessionId: state.sessionId, configId, type: "boolean", value }
+        : { sessionId: state.sessionId, configId, value },
+    );
+    state.configOptions = normalizeConfigOptions(response.configOptions);
+    session.configOptions = state.configOptions;
+    this.notifySessionConfiguration(state);
+    return state.configOptions;
+  }
+
+  async setMode(session: AgentSession, modeId: string): Promise<AgentSessionModeState | null> {
+    const state = this.getState(session);
+    await state.context.request(acp.methods.agent.session.setMode, {
+      sessionId: state.sessionId,
+      modeId,
+    });
+    if (state.modes) state.modes = { ...state.modes, currentModeId: modeId };
+    session.modes = state.modes;
+    this.notifySessionConfiguration(state);
+    return state.modes;
   }
 
   async close(session: AgentSession): Promise<void> {
@@ -195,13 +241,26 @@ export class SdkAcpAgentAdapter implements Agent {
             tool: params.toolCall.title ?? "tool",
             kind: params.toolCall.kind,
             rawInput: params.toolCall.rawInput,
-            options: params.options.map((option) => ({ optionId: option.optionId, name: option.name, kind: option.kind })),
+            options: params.options.map((option) => ({
+              optionId: option.optionId,
+              name: option.name,
+              kind: option.kind,
+            })),
           };
-          state.queue?.push({ event: { type: "permission", tool: request.tool, granted: false, requestId: request.requestId } });
+          state.queue?.push({
+            event: {
+              type: "permission",
+              tool: request.tool,
+              granted: false,
+              requestId: request.requestId,
+            },
+          });
           return (async () => {
             const optionId = await state?.onPermission?.(request);
             const option = params.options.find((candidate) => candidate.optionId === optionId);
-            return option ? { outcome: { outcome: "selected", optionId: option.optionId } } : { outcome: { outcome: "cancelled" } };
+            return option
+              ? { outcome: { outcome: "selected", optionId: option.optionId } }
+              : { outcome: { outcome: "cancelled" } };
           })();
         }
         const option = selectPermissionOption(
@@ -219,6 +278,13 @@ export class SdkAcpAgentAdapter implements Agent {
       })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         if (state && params.sessionId === state.sessionId) {
+          if (params.update.sessionUpdate === "config_option_update") {
+            state.configOptions = normalizeConfigOptions(params.update.configOptions);
+            this.notifySessionConfiguration(state);
+          } else if (params.update.sessionUpdate === "current_mode_update" && state.modes) {
+            state.modes = { ...state.modes, currentModeId: params.update.currentModeId };
+            this.notifySessionConfiguration(state);
+          }
           const event = mapSessionUpdate(params.update);
           if (event) state.queue?.push({ event });
         }
@@ -258,7 +324,11 @@ export class SdkAcpAgentAdapter implements Agent {
       queue: null,
       prompting: false,
       closed: false,
+      configOptions: normalizeConfigOptions(created.configOptions ?? []),
+      modes: normalizeModes(created.modes),
+      onSessionConfiguration: opts.onSessionConfiguration,
     };
+    this.notifySessionConfiguration(state);
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
       for (const line of chunk.split("\n")) {
@@ -284,13 +354,33 @@ export class SdkAcpAgentAdapter implements Agent {
     if (!state || state.closed) throw new Error(`Unknown or closed ACP session "${session.name}"`);
     return state;
   }
+
+  private notifySessionConfiguration(state: SessionState): void {
+    if (state.session) {
+      state.session.configOptions = state.configOptions;
+      state.session.modes = state.modes;
+    }
+    state.onSessionConfiguration?.({ configOptions: state.configOptions, modes: state.modes });
+  }
+}
+
+function normalizeConfigOptions(options: acp.SessionConfigOption[]): AgentSessionConfigOption[] {
+  return structuredClone(options) as AgentSessionConfigOption[];
+}
+
+function normalizeModes(
+  modes: acp.SessionModeState | null | undefined,
+): AgentSessionModeState | null {
+  return modes ? (structuredClone(modes) as AgentSessionModeState) : null;
 }
 
 function toAcpPrompt(prompt: string | AgentPromptPart[]): acp.ContentBlock[] {
   if (typeof prompt === "string") return [{ type: "text", text: prompt }];
-  return prompt.map((part) => part.type === "text"
-    ? { type: "text", text: part.text }
-    : { type: "image", data: part.data, mimeType: part.mimeType });
+  return prompt.map((part) =>
+    part.type === "text"
+      ? { type: "text", text: part.text }
+      : { type: "image", data: part.data, mimeType: part.mimeType },
+  );
 }
 
 function waitForSpawn(child: ChildProcessWithoutNullStreams, command: string): Promise<void> {
@@ -353,6 +443,9 @@ function mapSessionUpdate(update: acp.SessionUpdate): AgentEvent | null {
         status: update.status ?? undefined,
         output: stringifyOutput(update.rawOutput ?? update.content),
       };
+    case "config_option_update":
+    case "current_mode_update":
+      return null;
     default:
       return {
         type: "log",

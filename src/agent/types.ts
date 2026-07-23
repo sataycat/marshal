@@ -15,6 +15,39 @@ export interface AgentSession {
   name: string;
   recordId?: string;
   supportsImages?: boolean;
+  configOptions?: AgentSessionConfigOption[];
+  modes?: AgentSessionModeState | null;
+}
+
+export interface AgentSessionConfigValue {
+  value: string;
+  name: string;
+  description?: string | null;
+}
+
+export interface AgentSessionConfigGroup {
+  group: string;
+  name: string;
+  options: AgentSessionConfigValue[];
+}
+
+export type AgentSessionConfigOption = {
+  id: string;
+  name: string;
+  description?: string | null;
+  category?: string | null;
+} & (
+  | {
+      type: "select";
+      currentValue: string;
+      options: AgentSessionConfigValue[] | AgentSessionConfigGroup[];
+    }
+  | { type: "boolean"; currentValue: boolean }
+);
+
+export interface AgentSessionModeState {
+  currentModeId: string;
+  availableModes: Array<{ id: string; name: string; description?: string | null }>;
 }
 
 export type AgentPromptPart =
@@ -53,6 +86,10 @@ export interface SpawnOptions {
   systemPrompt?: string;
   extraArgs?: string[];
   sessionName?: string;
+  onSessionConfiguration?: (configuration: {
+    configOptions: AgentSessionConfigOption[];
+    modes: AgentSessionModeState | null;
+  }) => void;
 }
 
 export interface PromptOptions extends SpawnOptions {
@@ -61,7 +98,17 @@ export interface PromptOptions extends SpawnOptions {
 
 export interface Agent {
   spawn(cwd: string, agentId: AgentId, opts?: SpawnOptions): Promise<AgentSession>;
-  prompt(session: AgentSession, prompt: string | AgentPromptPart[], opts?: PromptOptions): AsyncIterable<AgentEvent>;
+  prompt(
+    session: AgentSession,
+    prompt: string | AgentPromptPart[],
+    opts?: PromptOptions,
+  ): AsyncIterable<AgentEvent>;
+  setConfigOption?(
+    session: AgentSession,
+    configId: string,
+    value: string | boolean,
+  ): Promise<AgentSessionConfigOption[]>;
+  setMode?(session: AgentSession, modeId: string): Promise<AgentSessionModeState | null>;
   cancel(session: AgentSession): Promise<void>;
   close(session: AgentSession): Promise<void>;
 }

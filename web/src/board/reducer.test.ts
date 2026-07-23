@@ -71,10 +71,7 @@ describe("boardReducer", () => {
 
   it("optimistic.apply upserts an optimistic task without touching others", () => {
     const state: BoardState = { 1: card({ id: 1, status: "ready" }) };
-    const next = boardReducer(
-      state,
-      ev("optimistic.apply", card({ id: 1, status: "building" })),
-    );
+    const next = boardReducer(state, ev("optimistic.apply", card({ id: 1, status: "building" })));
     expect(next[1]?.status).toBe("building");
   });
 
@@ -97,10 +94,7 @@ describe("boardReducer", () => {
       1: card({ id: 1, status: "ready" }),
       2: card({ id: 2, status: "backlog" }),
     };
-    const next = boardReducer(
-      state,
-      ev("optimistic.apply", card({ id: 1, status: "building" })),
-    );
+    const next = boardReducer(state, ev("optimistic.apply", card({ id: 1, status: "building" })));
     expect(next[2]).toEqual(state[2]);
   });
 });
@@ -125,7 +119,8 @@ function thread(overrides: Partial<ChatThread> = {}): ChatThread {
     id: "thread-1",
     repo_root: "/repo",
     cwd: "/repo",
-    agent_id: "builder", agent_version: "1.0.0",
+    agent_id: "builder",
+    agent_version: "1.0.0",
     title: "Thread",
     status: "draft",
     archived: false,
@@ -135,6 +130,9 @@ function thread(overrides: Partial<ChatThread> = {}): ChatThread {
     updated_at: "2026-01-01T00:00:00.000Z",
     last_message_at: null,
     scratch_markdown: "",
+    session_config_options: [],
+    session_modes: null,
+    session_initialized: false,
     ...overrides,
   };
 }
@@ -160,16 +158,42 @@ describe("chat state reducers", () => {
 
   it("upserts live thread updates and sorts pinned threads before recent threads", () => {
     let state: ChatThreadsState = {};
-    state = chatThreadsReducer(state, ev("thread.created", { thread: thread({ id: "old", updated_at: "2026-01-03T00:00:00.000Z" }) }));
-    state = chatThreadsReducer(state, ev("thread.updated", { thread: thread({ id: "pinned", pinned: true }) }));
+    state = chatThreadsReducer(
+      state,
+      ev("thread.created", {
+        thread: thread({ id: "old", updated_at: "2026-01-03T00:00:00.000Z" }),
+      }),
+    );
+    state = chatThreadsReducer(
+      state,
+      ev("thread.updated", { thread: thread({ id: "pinned", pinned: true }) }),
+    );
     expect(chatThreadsToList(state).map((item) => item.id)).toEqual(["pinned", "old"]);
   });
 
   it("deduplicates streamed messages by id and returns them in order", () => {
     const state: ChatMessagesState = {};
-    const withFirst = chatMessagesReducer(state, ev("thread.message", { threadId: "thread-1", message: message({ id: 2, content: "partial" }) }));
-    const withUpdate = chatMessagesReducer(withFirst, ev("thread.message", { threadId: "thread-1", message: message({ id: 2, content: "complete" }) }));
-    const withSecond = chatMessagesReducer(withUpdate, ev("thread.message", { threadId: "thread-1", message: message({ id: 3, content: "next" }) }));
-    expect(chatMessagesFor(withSecond, "thread-1").map((item) => item.content)).toEqual(["complete", "next"]);
+    const withFirst = chatMessagesReducer(
+      state,
+      ev("thread.message", {
+        threadId: "thread-1",
+        message: message({ id: 2, content: "partial" }),
+      }),
+    );
+    const withUpdate = chatMessagesReducer(
+      withFirst,
+      ev("thread.message", {
+        threadId: "thread-1",
+        message: message({ id: 2, content: "complete" }),
+      }),
+    );
+    const withSecond = chatMessagesReducer(
+      withUpdate,
+      ev("thread.message", { threadId: "thread-1", message: message({ id: 3, content: "next" }) }),
+    );
+    expect(chatMessagesFor(withSecond, "thread-1").map((item) => item.content)).toEqual([
+      "complete",
+      "next",
+    ]);
   });
 });

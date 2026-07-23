@@ -42,12 +42,15 @@ import {
   useDeleteThreadMutation,
   useDirectorySuggestionsQuery,
   usePermissionMutation,
+  useInitializeChatSessionMutation,
   useRegistryQuery,
   useRegisterRepositoryMutation,
   useResubmitChatMutation,
   useRepositoriesQuery,
   useSelectRepositoryMutation,
   useSendChatMutation,
+  useSetChatSessionConfigOptionMutation,
+  useSetChatSessionModeMutation,
   useUpdateThreadMutation,
   useUploadAttachmentMutation,
 } from "../api/queries";
@@ -67,7 +70,7 @@ import { useConfirmContext } from "../components/ConfirmDialog";
 import { ThreadStatusDot, threadStatusLabel } from "../components/status";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { ChatAttachment, ChatMessage, ChatThread, InstalledAgent, PendingPermission, RegistryAgent } from "../types";
+import type { ChatAttachment, ChatMessage, ChatThread, InstalledAgent, PendingPermission, RegistryAgent, SessionConfigGroup, SessionConfigOption } from "../types";
 import { FilesSidebar } from "./FilesSidebar";
 import { groupThreadsByProject } from "./sidebar";
 
@@ -673,8 +676,12 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
   const resubmitMutation = useResubmitChatMutation();
   const uploadMutation = useUploadAttachmentMutation();
   const cancelMutation = useCancelChatMutation();
+  const initializeSessionMutation = useInitializeChatSessionMutation();
+  const setConfigOptionMutation = useSetChatSessionConfigOptionMutation();
+  const setModeMutation = useSetChatSessionModeMutation();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const initializedThreadRef = useRef<string | null>(null);
   const messages = useMemo(() => {
     const byId = new Map<number, ChatMessage>();
     for (const message of seeded) byId.set(message.id, message);
@@ -688,6 +695,36 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
     const viewport = content?.parentElement;
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [messages, draftSending, externalSending]);
+
+  useEffect(() => {
+    if (!thread || thread.status === "closed" || thread.session_initialized || initializedThreadRef.current === thread.id) return;
+    initializedThreadRef.current = thread.id;
+    void initializeSessionMutation.mutateAsync(thread.id).then((updated) => {
+      applyChatEvent({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
+    }).catch(() => undefined);
+  }, [applyChatEvent, initializeSessionMutation, thread]);
+
+  const setConfigOption = async (option: SessionConfigOption, value: string | boolean): Promise<void> => {
+    if (!thread) return;
+    setSendError(null);
+    try {
+      const updated = await setConfigOptionMutation.mutateAsync({ id: thread.id, configId: option.id, value });
+      applyChatEvent({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : `Unable to change ${option.name}.`);
+    }
+  };
+
+  const setMode = async (modeId: string): Promise<void> => {
+    if (!thread) return;
+    setSendError(null);
+    try {
+      const updated = await setModeMutation.mutateAsync({ id: thread.id, modeId });
+      applyChatEvent({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Unable to change the session mode.");
+    }
+  };
 
   const send = async (text = draft): Promise<void> => {
     const content = text.trim();
@@ -813,6 +850,15 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
               ))}
             </div>
           )}
+          {(thread.session_config_options.length > 0 || thread.session_modes) && (
+            <SessionConfigurationControls
+              options={thread.session_config_options}
+              modes={thread.session_modes}
+              disabled={busy || setConfigOptionMutation.isPending || setModeMutation.isPending}
+              onOptionChange={setConfigOption}
+              onModeChange={setMode}
+            />
+          )}
           <div className="flex items-end gap-2 rounded-2xl border border-input bg-bg p-2 transition-colors focus-within:border-ring">
             {supportsImages && (
               <>
@@ -846,6 +892,44 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
       </div>
     </div>
   );
+}
+
+function SessionConfigurationControls({ options, modes, disabled, onOptionChange, onModeChange }: { options: SessionConfigOption[]; modes: ChatThread["session_modes"]; disabled: boolean; onOptionChange: (option: SessionConfigOption, value: string | boolean) => Promise<void>; onModeChange: (modeId: string) => Promise<void> }): JSX.Element {
+  const ordered = [...options].sort((a, b) => configOrder(a.category) - configOrder(b.category));
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="Agent session options">
+      {modes && !options.some((option) => option.category === "mode") && (
+        <label className="relative">
+          <span className="sr-only">Mode</span>
+          <select className="h-7 max-w-44 appearance-none rounded-lg border border-input bg-bg py-0 pl-2 pr-7 text-xs font-medium outline-none hover:bg-secondary focus:border-ring disabled:opacity-50" value={modes.currentModeId} disabled={disabled} onChange={(event) => void onModeChange(event.target.value)} title="Session mode">
+            {modes.availableModes.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        </label>
+      )}
+      {ordered.map((option) => option.type === "boolean"
+        ? <button key={option.id} type="button" className={cn("inline-flex h-7 items-center gap-2 rounded-lg border border-input bg-bg px-2 text-xs font-medium hover:bg-secondary disabled:opacity-50", option.currentValue && "border-primary/40 bg-accent text-accent-foreground")} disabled={disabled} onClick={() => void onOptionChange(option, !option.currentValue)} title={option.description ?? option.name} aria-pressed={option.currentValue}>
+            <span>{option.name}</span><span className={cn("relative h-4 w-7 rounded-full bg-muted transition-colors", option.currentValue && "bg-primary")}><span className={cn("absolute left-0.5 top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform", option.currentValue && "translate-x-3")} /></span>
+          </button>
+        : <label key={option.id} className="relative">
+            <span className="sr-only">{option.name}</span>
+            <select className="h-7 max-w-52 appearance-none rounded-lg border border-input bg-bg py-0 pl-2 pr-7 text-xs font-medium outline-none hover:bg-secondary focus:border-ring disabled:opacity-50" value={option.currentValue} disabled={disabled} onChange={(event) => void onOptionChange(option, event.target.value)} title={option.description ?? option.name}>
+              {isGroupedOptions(option.options)
+                ? option.options.map((group) => <optgroup key={group.group} label={group.name}>{group.options.map((value) => <option key={value.value} value={value.value}>{value.name}</option>)}</optgroup>)
+                : option.options.map((value) => <option key={value.value} value={value.value}>{value.name}</option>)}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          </label>)}
+    </div>
+  );
+}
+
+function isGroupedOptions(options: Array<{ value: string }> | SessionConfigGroup[]): options is SessionConfigGroup[] {
+  return options.length > 0 && typeof options[0] === "object" && options[0] !== null && "group" in options[0];
+}
+
+function configOrder(category?: string | null): number {
+  return category === "model" ? 0 : category === "thought_level" ? 1 : category === "mode" ? 2 : category === "model_config" ? 3 : 4;
 }
 
 function PermissionCard({ request, onDecision }: { request: PendingPermission; onDecision: (requestId: string, action: "approve" | "deny") => Promise<void> }): JSX.Element {

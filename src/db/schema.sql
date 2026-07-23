@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS chat_threads (
   last_message_at DATETIME,
   scratch_markdown TEXT NOT NULL DEFAULT '',
   agent_provenance TEXT NOT NULL DEFAULT '{}',
+  session_config_options TEXT NOT NULL DEFAULT '[]',
+  session_modes TEXT,
+  session_initialized INTEGER NOT NULL DEFAULT 0,
   failure TEXT,
   FOREIGN KEY (task_slug) REFERENCES tasks(slug)
 );

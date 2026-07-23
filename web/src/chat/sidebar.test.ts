@@ -7,7 +7,8 @@ function thread(id: string, repoRoot: string): ChatThread {
     id,
     repo_root: repoRoot,
     cwd: repoRoot,
-    agent_id: "builder", agent_version: "1.0.0",
+    agent_id: "builder",
+    agent_version: "1.0.0",
     title: id,
     status: "draft",
     archived: false,
@@ -17,6 +18,9 @@ function thread(id: string, repoRoot: string): ChatThread {
     updated_at: "2026-01-01T00:00:00.000Z",
     last_message_at: null,
     scratch_markdown: "",
+    session_config_options: [],
+    session_modes: null,
+    session_initialized: false,
   };
 }
 

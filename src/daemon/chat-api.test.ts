@@ -18,6 +18,53 @@ const testAgent: Agent = {
   async close() {},
 };
 
+const configurableAgent: Agent = {
+  async spawn(cwd, agentId) {
+    return {
+      cwd,
+      agentId,
+      name: "configurable",
+      recordId: "configurable-session",
+      configOptions: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "sonnet",
+          options: [
+            { value: "sonnet", name: "Sonnet" },
+            { value: "opus", name: "Opus" },
+          ],
+        },
+        { id: "fast", name: "Fast mode", type: "boolean", currentValue: false },
+      ],
+      modes: {
+        currentModeId: "code",
+        availableModes: [
+          { id: "code", name: "Code" },
+          { id: "plan", name: "Plan" },
+        ],
+      },
+    };
+  },
+  async setConfigOption(session, configId, value) {
+    session.configOptions = (session.configOptions ?? []).map((option) =>
+      option.id === configId ? ({ ...option, currentValue: value } as typeof option) : option,
+    );
+    return session.configOptions;
+  },
+  async setMode(session, modeId) {
+    session.modes = session.modes ? { ...session.modes, currentModeId: modeId } : null;
+    return session.modes;
+  },
+  async *prompt() {
+    yield { type: "done", stopReason: "end_turn" };
+  },
+  async cancel() {},
+  async close() {},
+};
+
 function initGitRepo(root: string): void {
   execSync("git init -b main", { cwd: root, stdio: "ignore" });
   execSync("git config user.email test@example.com", { cwd: root, stdio: "ignore" });
@@ -187,5 +234,41 @@ describe("chat thread API", () => {
     });
     expect((await req(app, "DELETE", `/api/threads/${id}`)).body).toEqual({ deleted: true });
     expect((await req(app, "GET", `/api/threads/${id}`)).status).toBe(404);
+  });
+
+  it("initializes and updates agent-owned session options", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-chat-config-"));
+    initGitRepo(root);
+    const app = buildApp("0.0.1", { root, chatAgent: configurableAgent });
+    const created = await req(app, "POST", "/api/threads", {
+      agent_id: "configurable",
+      agent_version: "1.0.0",
+    });
+    const id = created.body.thread.id;
+
+    const initialized = await req(app, "POST", `/api/threads/${id}/session`);
+    expect(initialized.body.thread).toMatchObject({
+      session_initialized: true,
+      session_config_options: [
+        expect.objectContaining({ id: "model", currentValue: "sonnet" }),
+        expect.objectContaining({ id: "fast", currentValue: false }),
+      ],
+      session_modes: expect.objectContaining({ currentModeId: "code" }),
+    });
+
+    const model = await req(app, "POST", `/api/threads/${id}/session/config-options/model`, {
+      value: "opus",
+    });
+    expect(model.body.thread.session_config_options).toContainEqual(
+      expect.objectContaining({ id: "model", currentValue: "opus" }),
+    );
+    const fast = await req(app, "POST", `/api/threads/${id}/session/config-options/fast`, {
+      value: true,
+    });
+    expect(fast.body.thread.session_config_options).toContainEqual(
+      expect.objectContaining({ id: "fast", currentValue: true }),
+    );
+    const mode = await req(app, "POST", `/api/threads/${id}/session/mode`, { mode_id: "plan" });
+    expect(mode.body.thread.session_modes.currentModeId).toBe("plan");
   });
 });
