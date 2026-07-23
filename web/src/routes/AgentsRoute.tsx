@@ -6,7 +6,6 @@ import { Link } from "wouter";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { PageHeader } from "../components/PageHeader";
-import { ReadinessBadge } from "../components/status";
 import { useConfirmContext } from "../components/ConfirmDialog";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -28,7 +27,7 @@ import { connectTerminalAuthentication, fetchInstallCandidate, fetchTerminalAuth
 import type { AgentAuthenticationOperation, InstalledAgent, InstallationOperation, RegistryAgent, TerminalAuthSnapshot } from "../types";
 import { useToastStore } from "../state/toastStore";
 import { cn } from "../lib/utils";
-import { installedCardState, installedCardStateLabel } from "../agents/installedCardState";
+import { installedCardState } from "../agents/installedCardState";
 import { authMethodSupport } from "../agents/authMethodSupport";
 
 const featuredAgentNames = ["claude", "codex", "devin", "copilot", "opencode", "gemini", "amp", "zed"];
@@ -121,7 +120,7 @@ export function AgentsRoute(): JSX.Element {
       <PageHeader
         eyebrow="ACP registry"
         title="Agents"
-        description="Install a protocol-compatible coding agent, authenticate it, and bring it online for repository sessions."
+        description="Discover, install, and use protocol-compatible coding agents for repository sessions."
         actions={
           <Button variant="outline" onClick={() => void runRefresh()} disabled={refreshing}>
             <RefreshCw className={refreshing ? "animate-spin" : ""} />
@@ -141,38 +140,53 @@ export function AgentsRoute(): JSX.Element {
         </div>
       )}
 
-      <section className="mt-8" aria-labelledby="catalog-heading">
-        <label className="relative block max-w-xl">
+      <section className="mt-6" aria-labelledby="catalog-heading">
+        <label className="relative block w-full">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input className="bg-panel pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search agents by name or capability…" />
         </label>
-        <div className="mt-5 flex flex-wrap items-center gap-1 border-b border-border" role="tablist" aria-label="Agent filters">
+        <div className="mt-3 flex flex-wrap items-center gap-1 border-b border-border" role="tablist" aria-label="Agent filters">
           {(["all", "installed", "not-installed"] as const).map((value) => (
-            <button key={value} type="button" role="tab" aria-selected={filter === value} onClick={() => setFilter(value)} className={cn("border-b-2 px-3 py-2 text-sm font-medium text-muted-foreground transition-colors", filter === value ? "border-primary text-text" : "border-transparent hover:text-text")}>
-              {value === "all" ? "All" : value === "installed" ? `Installed${inventory.length ? ` (${inventory.length})` : ""}` : "Not Installed"}
+            <button key={value} type="button" role="tab" aria-selected={filter === value} onClick={() => setFilter(value)} className={cn("border-b-2 px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors", filter === value ? "border-primary text-text" : "border-transparent hover:text-text")}>
+              {value === "all" ? "All" : value === "installed" ? `Installed${inventory.length ? ` · ${inventory.length}` : ""}` : "Discover"}
             </button>
           ))}
         </div>
         {(() => {
           const visible = filteredAgents(catalog.data?.agents ?? [], inventory, search, filter);
           const visibleInstalled = inventory.filter((entry) => matchesSearch(registryMatchFor(entry) ?? { id: entry.id, name: entry.id, description: "" }, search));
+          const displayedInstalled = filter === "not-installed" ? [] : visibleInstalled;
           return (
             <>
               {catalog.isPending || refreshing ? (
                 <p className="mt-6 text-sm text-muted-foreground">Fetching registry snapshot…</p>
-              ) : visible.length === 0 && visibleInstalled.length === 0 ? (
+              ) : visible.length === 0 && displayedInstalled.length === 0 ? (
                 <div className="mt-6 rounded-xl border border-dashed border-border px-6 py-12 text-center">
                   <p className="text-sm font-medium">{catalog.data?.snapshot ? "No agents match this search" : "No agents are available yet"}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{catalog.data?.snapshot ? "Try a different name or description." : "Try updating the catalog."}</p>
                 </div>
               ) : (
-                <div className="mt-4 space-y-3">
-                  {(filter !== "not-installed" ? visibleInstalled : []).map((entry) => (
-                    <InstalledCard key={entry.installation_id} entry={entry} registryAgent={registryMatchFor(entry)} activationOperation={(operations.data ?? []).find((operation) => operation.agent_id === entry.id && operation.version === entry.version && operation.installation_id === entry.installation_id) ?? null} onProbe={() => void probeAgent(entry)} onRemove={() => void removeAgent(entry)} onUpdate={registryMatchFor(entry) && registryMatchFor(entry)!.version !== entry.version ? () => void requestInstall(registryMatchFor(entry)!, "update") : null} onDefault={(installationId) => void setDefault.mutateAsync({ agentId: entry.id, installationId })} onAuthenticate={(methodId, values) => authenticateAgent(entry, methodId, values)} busy={busy} preparing={preparingId !== null} />
-                  ))}
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {visible.map((agent) => <CatalogCard key={agent.id} agent={agent} installed={isInstalled(agent)} operationId={operationIds[`${agent.id}@${agent.version}`] ?? null} onInstall={() => void requestInstall(agent, "install")} busy={busy} preparing={preparingId === `${agent.id}@${agent.version}:install`} />)}
-                  </div>
+                <div className="mt-5 space-y-8">
+                  {displayedInstalled.length > 0 && <section aria-labelledby="installed-agents-heading">
+                    <div className="mb-3 flex items-baseline justify-between gap-3">
+                      <h2 id="installed-agents-heading" className="text-sm font-semibold tracking-tight">Installed agents</h2>
+                      <span className="text-xs text-muted-foreground">{displayedInstalled.length} {displayedInstalled.length === 1 ? "agent" : "agents"}</span>
+                    </div>
+                    <div className="grid items-start gap-3 md:grid-cols-2">
+                      {displayedInstalled.map((entry) => (
+                        <InstalledCard key={entry.installation_id} entry={entry} registryAgent={registryMatchFor(entry)} activationOperation={(operations.data ?? []).find((operation) => operation.agent_id === entry.id && operation.version === entry.version && operation.installation_id === entry.installation_id) ?? null} onProbe={() => void probeAgent(entry)} onRemove={() => void removeAgent(entry)} onUpdate={registryMatchFor(entry) && registryMatchFor(entry)!.version !== entry.version ? () => void requestInstall(registryMatchFor(entry)!, "update") : null} onDefault={(installationId) => void setDefault.mutateAsync({ agentId: entry.id, installationId })} onAuthenticate={(methodId, values) => authenticateAgent(entry, methodId, values)} busy={busy} preparing={preparingId !== null} />
+                      ))}
+                    </div>
+                  </section>}
+                  {visible.length > 0 && <section aria-labelledby="discover-agents-heading">
+                    <div className="mb-3 flex items-baseline justify-between gap-3">
+                      <h2 id="discover-agents-heading" className="text-sm font-semibold tracking-tight">Discover agents</h2>
+                      <span className="text-xs text-muted-foreground">{visible.length} available</span>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {visible.map((agent) => <CatalogCard key={agent.id} agent={agent} installed={isInstalled(agent)} operationId={operationIds[`${agent.id}@${agent.version}`] ?? null} onInstall={() => void requestInstall(agent, "install")} busy={busy} preparing={preparingId === `${agent.id}@${agent.version}:install`} />)}
+                    </div>
+                  </section>}
                 </div>
               )}
             </>
@@ -263,6 +277,8 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
   const [terminal, setTerminal] = useState<TerminalAuthSnapshot | null>(null);
   const [terminalInput, setTerminalInput] = useState("");
   const terminalSocket = useRef<ReturnType<typeof connectTerminalAuthentication> | null>(null);
+  const statusTone = cardState === "ready" ? "success" : cardState === "setup_needed" ? "error" : "neutral";
+  const statusLabel = cardState === "ready" ? "Ready" : cardState === "setup_needed" ? "Error" : "Installed";
 
   useEffect(() => () => terminalSocket.current?.close(), []);
   useEffect(() => {
@@ -291,22 +307,18 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
 
   return (
     <article className={cn(
-      "flex flex-col overflow-hidden rounded-xl border bg-panel transition-colors",
-      cardState === "ready" ? "border-success-border bg-success-bg/35" : "border-border",
+      "flex flex-col overflow-hidden rounded-xl border bg-panel transition-colors hover:border-input",
+      cardState === "setup_needed" ? "border-error-border" : "border-border",
     )}>
-      <div className="p-4 md:p-5">
+      <div className="p-4">
       <div className="flex items-start gap-3">
         {registryAgent && <AgentIcon agent={registryAgent} className="size-11 shrink-0 rounded-lg border border-border bg-bg object-cover p-1" />}
         <div className="min-w-0 flex-1">
           <h3 className="text-base font-semibold tracking-tight">{name}</h3>
           <p className="mt-0.5 font-mono text-xs text-muted-foreground">{entry.id}@{entry.version}</p>
         </div>
-        {cardState !== "ready" && <div className="flex shrink-0 flex-col items-end gap-1">
-          {cardState === "signing_in" ? <Badge tone="accent">{installedCardStateLabel(cardState)}</Badge> : <ReadinessBadge status={entry.readiness_status} />}
-        </div>}
+        <Badge tone={statusTone} className="mt-0.5"><span aria-hidden className={cn("size-1.5 rounded-full", cardState === "ready" ? "bg-success" : cardState === "setup_needed" ? "bg-error" : "bg-muted-foreground")} />{statusLabel}</Badge>
       </div>
-
-      {cardState === "ready" && <div className="mt-4 flex items-center gap-2 border-t border-success-border/70 pt-3 text-sm font-medium text-success"><span aria-hidden className="size-2 rounded-full bg-success" />Ready for a new conversation</div>}
 
       {entry.status === "failed" && <p className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">Installation failed: {entry.failure ?? "unknown error"}</p>}
       {entry.status === "installed" && entry.readiness_status === "probing" && <p className="mt-3 text-sm text-muted-foreground">Marshal is getting this agent ready.</p>}
@@ -347,21 +359,21 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
         </div>
       )}
 
-      <div className="mt-4 flex flex-col gap-2 border-t border-border/80 pt-4 sm:flex-row sm:items-center">
-        {cardState === "ready" && <Link href="/chat" className={cn(buttonVariants({ size: "lg" }), "h-10 w-full px-6 sm:w-auto")}><MessageSquare aria-hidden />Start a chat</Link>}
-        {cardState === "sign_in_required" && signInMethod && <Button size="lg" className="h-10 w-full px-6 sm:w-auto" onClick={() => onAuthenticate(signInMethod.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Sign in</Button>}
-        {cardState === "setup_needed" && <Button size="lg" className="h-10 w-full px-6 sm:w-auto" onClick={onProbe} disabled={busy || activationBusy}><Wrench aria-hidden />Retry setup</Button>}
+      <div className="mt-4 flex flex-col gap-2 border-t border-border/80 pt-3 sm:flex-row sm:items-center">
+        {cardState === "ready" && <Link href="/chat" className={cn(buttonVariants({ size: "lg" }), "w-full px-4 sm:w-auto")}><MessageSquare aria-hidden />Start chat</Link>}
+        {cardState === "sign_in_required" && signInMethod && <Button size="lg" className="w-full px-4 sm:w-auto" onClick={() => onAuthenticate(signInMethod.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Sign in</Button>}
+        {cardState === "setup_needed" && <Button size="lg" className="w-full px-4 sm:w-auto" onClick={onProbe} disabled={busy || activationBusy}><Wrench aria-hidden />Retry setup</Button>}
         {cardState === "getting_ready" && <p className="text-sm text-muted-foreground">Setup is running. Details will update when the check finishes.</p>}
       </div>
       </div>
 
       <details className="group border-t border-border/80 bg-panel/70 text-sm">
-        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 font-medium text-muted-foreground transition-colors hover:bg-inset/70 hover:text-text md:px-5 [&::-webkit-details-marker]:hidden">
-          <span>Installation details</span>
+        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-inset/70 hover:text-text [&::-webkit-details-marker]:hidden">
+          <span>View details</span>
           <ChevronDown aria-hidden className="size-4 transition-transform group-open:rotate-180" />
         </summary>
-        <div className="border-t border-border/80 px-4 py-4 md:px-5">
-          <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="border-t border-border/80 px-4 py-4">
+          <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
             <div><dt className="text-xs text-muted-foreground">Distribution</dt><dd className="mt-0.5 font-medium text-text">{entry.distribution}</dd></div>
             <div><dt className="text-xs text-muted-foreground">Integrity</dt><dd className="mt-0.5 font-medium capitalize text-text">{entry.integrity_status.replaceAll("_", " ")}</dd></div>
             <div><dt className="text-xs text-muted-foreground">ACP protocol</dt><dd className="mt-0.5 font-medium text-text">{entry.protocol_version === null ? "Not negotiated" : `v${entry.protocol_version}`}</dd></div>
@@ -404,21 +416,18 @@ function CatalogCard({ agent, installed, operationId, onInstall, busy, preparing
             <h3 className="truncate font-semibold tracking-tight">{agent.name}</h3>
             {popularityScore(agent) > 0 && <Badge tone="accent">Featured</Badge>}
           </div>
-          <p className="truncate font-mono text-[0.6875rem] text-muted-foreground">{agent.id}</p>
+          <p className="truncate text-[0.6875rem] text-muted-foreground"><span className="font-mono">{agent.id}</span><span aria-hidden> · </span>{agent.authors[0] ?? "Unknown author"}</p>
         </div>
         <span className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground">v{agent.version}</span>
       </div>
       <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">{agent.description}</p>
-      <div className="mt-3 flex items-center gap-3 text-xs">
+      <div className="mt-auto flex flex-wrap items-center gap-3 pt-4 text-xs">
         {agent.repository && <a className="inline-flex items-center gap-1 text-primary hover:underline" href={agent.repository} target="_blank" rel="noreferrer">Source <ExternalLink className="size-3" /></a>}
         {agent.website && <a className="inline-flex items-center gap-1 text-primary hover:underline" href={agent.website} target="_blank" rel="noreferrer">Website <ExternalLink className="size-3" /></a>}
-        <span className="ml-auto truncate text-muted-foreground">{agent.authors[0] ?? "Unknown author"}</span>
-      </div>
-      <div className="mt-3 border-t border-border pt-3">
         {installed ? (
-          <p className="flex h-8 items-center gap-1.5 text-sm font-medium text-success"><Check className="size-4" />Installed</p>
+          <p className="ml-auto flex h-8 items-center gap-1.5 text-sm font-medium text-success"><Check className="size-4" />Installed</p>
         ) : (
-          <Button className="w-full" onClick={onInstall} disabled={busy || agent.distributions.length === 0 || Boolean(installing) || preparing}>
+          <Button variant="outline" className="ml-auto border-primary/35 text-primary hover:border-primary/60 hover:bg-accent hover:text-primary" onClick={onInstall} disabled={busy || agent.distributions.length === 0 || Boolean(installing) || preparing}>
             {installing || preparing ? <LoaderCircleSpin /> : <Download aria-hidden />}
             {installing ? "Installing…" : preparing ? "Preparing…" : "Install"}
           </Button>

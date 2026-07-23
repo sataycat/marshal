@@ -14,7 +14,7 @@ export function RepositorySetup(): JSX.Element {
         <p className="eyebrow mt-6">First launch</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight">Connect an agent</h1>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Marshal needs at least one installed, ready agent before you can start a thread. Browse the registry, install one, and authenticate it — all from the browser.
+          Marshal needs at least one installed, ready agent before you can start a session. Browse the registry, install one, and authenticate it — all from the browser.
         </p>
         <Link href="/agents" className={cn(buttonVariants({ size: "lg" }), "mt-7 w-full sm:w-auto")}>
           <span>Browse the agent catalog</span>

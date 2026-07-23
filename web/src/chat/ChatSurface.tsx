@@ -5,12 +5,15 @@ import { Link, useLocation } from "wouter";
 import {
   Archive,
   ArrowLeft,
+  Bot,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   FileText,
   Folder,
   FolderGit2,
+  GitBranch,
   ImagePlus,
   LoaderCircle,
   MoreHorizontal,
@@ -39,6 +42,7 @@ import {
   useDeleteThreadMutation,
   useDirectorySuggestionsQuery,
   usePermissionMutation,
+  useRegistryQuery,
   useRegisterRepositoryMutation,
   useResubmitChatMutation,
   useRepositoriesQuery,
@@ -63,7 +67,7 @@ import { useConfirmContext } from "../components/ConfirmDialog";
 import { ThreadStatusDot, threadStatusLabel } from "../components/status";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { ChatAttachment, ChatMessage, ChatThread, InstalledAgent, PendingPermission } from "../types";
+import type { ChatAttachment, ChatMessage, ChatThread, InstalledAgent, PendingPermission, RegistryAgent } from "../types";
 import { FilesSidebar } from "./FilesSidebar";
 import { groupThreadsByProject } from "./sidebar";
 
@@ -80,7 +84,6 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
   const agentsQuery = useChatAgentsQuery();
   const archivedQuery = useChatThreadsQuery(true);
   const [showArchived, setShowArchived] = useState(false);
-  const [agentFilter, setAgentFilter] = useState("all");
   const agents = (agentsQuery.data ?? []).filter((agent) => agent.status === "installed" && agent.readiness_status === "ready");
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [switcherQuery, setSwitcherQuery] = useState("");
@@ -107,19 +110,19 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
   const openNewThread = (): void => { void navigate("/chat"); };
 
   const allThreads = showArchived ? [...threads, ...(archivedQuery.data ?? []).filter((archived) => !threads.some((thread) => thread.id === archived.id))] : threads;
-  const visibleThreads = allThreads.filter((thread) => (agentFilter === "all" || `${thread.agent_id}@${thread.agent_version}` === agentFilter) && (showArchived || !thread.archived));
+  const visibleThreads = allThreads.filter((thread) => showArchived || !thread.archived);
   const projectGroups = groupThreadsByProject(visibleThreads);
   const mutateThread = async (thread: ChatThread, input: Parameters<typeof updateThreadMutation.mutateAsync>[0]["input"]): Promise<void> => {
     try {
       const updated = await updateThreadMutation.mutateAsync({ id: thread.id, input });
       applyChatEvent({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
     } catch (error) {
-      pushError(error instanceof Error ? error.message : "Unable to update the thread.");
+      pushError(error instanceof Error ? error.message : "Unable to update the session.");
     }
   };
   const discardThread = async (thread: ChatThread): Promise<void> => {
     const ok = await confirm({
-      title: "Discard thread",
+      title: "Discard session",
       message: `Discard "${thread.title}"? This cannot be undone.`,
       confirmLabel: "Discard",
     });
@@ -129,44 +132,44 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
       applyChatEvent({ type: "thread.deleted", payload: { id: thread.id }, timestamp: new Date().toISOString() });
       if (selectedId === thread.id) void navigate("/chat");
     } catch (error) {
-      pushError(error instanceof Error ? error.message : "Unable to discard the thread.");
+      pushError(error instanceof Error ? error.message : "Unable to discard the session.");
     }
   };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <aside className={cn("flex w-full shrink-0 flex-col border-b border-border bg-panel md:w-76 md:border-r md:border-b-0", selectedId && "hidden md:flex")}>
-        <div className="border-b border-border px-3 py-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold tracking-tight">Threads</p>
-              <p className="text-xs text-muted-foreground">{status === "open" ? "Live" : status === "connecting" ? "Connecting…" : "Reconnecting…"}</p>
+          <div className="border-b border-border px-3 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold tracking-tight">Sessions</p>
+                  <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[0.625rem] font-medium tabular-nums text-muted-foreground">{visibleThreads.length}</span>
+                </div>
+                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className={cn("size-1.5 rounded-full", status === "open" ? "bg-success" : status === "connecting" ? "bg-warn" : "bg-muted-foreground")} aria-hidden />
+                  {status === "open" ? "Live" : status === "connecting" ? "Connecting…" : "Reconnecting…"}
+                </p>
+              </div>
+              <Button type="button" size="sm" onClick={openNewThread} aria-label="New session">
+                <Plus aria-hidden />
+                New session
+              </Button>
             </div>
-            <Button type="button" size="sm" onClick={openNewThread}>
-              <Plus aria-hidden />
-              New
-            </Button>
-          </div>
-          <div className="mt-3 flex gap-2">
-            <label className="sr-only" htmlFor="agent-filter">Filter threads by agent</label>
-            <select
-              id="agent-filter"
-              value={agentFilter}
-              onChange={(event) => setAgentFilter(event.target.value)}
-              className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2 text-xs text-text outline-none focus-visible:border-ring"
-            >
-              <option value="all">All agents</option>
-              {agents.map((agent) => <option key={`${agent.id}@${agent.version}`} value={`${agent.id}@${agent.version}`}>{agent.id}@{agent.version}</option>)}
-            </select>
-            <Button type="button" size="icon-sm" variant="outline" onClick={() => setSwitcherOpen(true)} aria-label="Switch thread (Cmd/Ctrl+K)" title="Switch thread (Cmd/Ctrl+K)"><Search aria-hidden /></Button>
-          </div>
+            <div className="mt-3 flex gap-2">
+              <Button type="button" variant="outline" className="min-w-0 flex-1 justify-start gap-2 font-normal text-muted-foreground" onClick={() => setSwitcherOpen(true)} aria-label="Search sessions (Cmd/Ctrl+K)">
+                <Search aria-hidden className="size-4" />
+                <span className="flex-1 text-left">Search sessions…</span>
+                <kbd className="kbd hidden shrink-0 sm:inline-flex">⌘K</kbd>
+              </Button>
+            </div>
         </div>
         <ScrollArea className="max-h-[calc(100svh-11.5rem)] md:h-[calc(100svh-7.5rem)] md:max-h-none">
           <div className="p-2">
             {visibleThreads.length === 0 && (
               <div className="px-3 py-10 text-center">
-                <p className="text-sm text-muted-foreground">{showArchived ? "No matching threads." : "No threads yet."}</p>
-                {!showArchived && <p className="mt-1 text-xs text-muted-foreground">Start a thread to work with an agent in this repository.</p>}
+                <p className="text-sm text-muted-foreground">{showArchived ? "No matching sessions." : "No sessions yet."}</p>
+                {!showArchived && <p className="mt-1 text-xs text-muted-foreground">Start a session to work with an agent in this repository.</p>}
               </div>
             )}
             {projectGroups.map((group) => (
@@ -196,7 +199,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
                 </div>
               </section>
             ))}
-            <button type="button" className="mt-2 w-full rounded-md px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-text" onClick={() => setShowArchived((value) => !value)}>{showArchived ? "Hide archived" : "Show archived"}</button>
+            <button type="button" className="mt-2 w-full rounded-md px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-text" onClick={() => setShowArchived((value) => !value)}>{showArchived ? "Hide archived sessions" : "Show archived sessions"}</button>
           </div>
         </ScrollArea>
       </aside>
@@ -208,13 +211,13 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
       <Dialog open={switcherOpen} onOpenChange={setSwitcherOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Switch thread</DialogTitle>
-            <DialogDescription>Search titles, agents, and recent activity.</DialogDescription>
+            <DialogTitle>Search sessions</DialogTitle>
+            <DialogDescription>Search titles, agents, projects, and recent activity.</DialogDescription>
           </DialogHeader>
-          <Input autoFocus value={switcherQuery} onChange={(event) => setSwitcherQuery(event.target.value)} placeholder="Search threads…" />
+          <Input autoFocus value={switcherQuery} onChange={(event) => setSwitcherQuery(event.target.value)} placeholder="Search sessions…" />
           <div className="max-h-72 space-y-0.5 overflow-y-auto">
             {threads
-              .filter((thread) => !thread.archived && `${thread.title} ${thread.agent_id} ${thread.agent_version}`.toLowerCase().includes(switcherQuery.toLowerCase()))
+             .filter((thread) => !thread.archived && `${thread.title} ${thread.agent_id} ${thread.agent_version} ${thread.repo_root}`.toLowerCase().includes(switcherQuery.toLowerCase()))
               .map((thread) => (
                 <button
                   key={thread.id}
@@ -359,18 +362,47 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
   const createMutation = useCreateThreadMutation();
   const sendMutation = useSendChatMutation();
   const pushError = useToastStore((state) => state.pushError);
+  const registry = useRegistryQuery();
   const repositories = useRepositoriesQuery();
   const register = useRegisterRepositoryMutation();
   const select = useSelectRepositoryMutation();
   const [projectPath, setProjectPath] = useState("~");
-  const [project, setProject] = useState<string | null>(null);
   const [projectSearch, setProjectSearch] = useState("");
+  const [highlightedDirectory, setHighlightedDirectory] = useState(0);
+  const [homePath, setHomePath] = useState<string | null>(null);
+  const [project, setProject] = useState<string | null>(null);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
-  const directoryQuery = useDirectorySuggestionsQuery(projectPath, projectSearch, projectPickerOpen);
+  const pathLikeSearch = /^(?:~|\.|\/)|\//.test(projectSearch.trim());
+  const directoryQuery = useDirectorySuggestionsQuery(projectPath, pathLikeSearch ? "" : projectSearch.trim(), projectPickerOpen);
+  const currentProjectPath = directoryQuery.data?.path ?? projectPath;
+  const directories = directoryQuery.data?.directories ?? [];
   const selectedRepository = repositories.data?.repositories.find((item) => item.id === repositories.data?.selected_repository_id);
+  useEffect(() => {
+    if (!agents.some((item) => `${item.id}@${item.version}` === agent)) setAgent(agents[0] ? `${agents[0].id}@${agents[0].version}` : "");
+  }, [agent, agents]);
   useEffect(() => {
     if (selectedRepository && !project) { setProject(selectedRepository.path); setProjectPath(selectedRepository.path); }
   }, [selectedRepository, project]);
+  useEffect(() => {
+    if (directoryQuery.data?.display_path === "~") setHomePath(directoryQuery.data.path);
+  }, [directoryQuery.data]);
+  useEffect(() => setHighlightedDirectory(0), [projectPath, projectSearch]);
+  const breadcrumbItems = (() => {
+    const normalized = currentProjectPath.replaceAll("\\", "/");
+    const normalizedHome = homePath?.replaceAll("\\", "/").replace(/\/$/, "");
+    if (normalizedHome && (normalized === normalizedHome || normalized.startsWith(`${normalizedHome}/`))) {
+      const relativeParts = normalized.slice(normalizedHome.length).split("/").filter(Boolean);
+      return [
+        { label: "~", path: normalizedHome },
+        ...relativeParts.map((part, index) => ({ label: part, path: `${normalizedHome}/${relativeParts.slice(0, index + 1).join("/")}` })),
+      ];
+    }
+    const parts = normalized.split("/").filter(Boolean);
+    return [
+      { label: "/", path: "/" },
+      ...parts.map((part, index) => ({ label: part, path: `/${parts.slice(0, index + 1).join("/")}` })),
+    ];
+  })();
   const chooseProject = async (path: string): Promise<void> => {
     setProject(path);
     setProjectPath(path);
@@ -385,6 +417,15 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
       setProjectPickerOpen(true);
       pushError(error instanceof Error ? error.message : "Unable to select this project.");
     }
+  };
+  const openProjectPicker = (): void => {
+    setProjectPath(project ?? "~");
+    setProjectSearch("");
+    setProjectPickerOpen(true);
+  };
+  const browseProjectPath = (path: string): void => {
+    setProjectPath(path);
+    setProjectSearch("");
   };
   const send = async (): Promise<void> => {
     const content = value.trim();
@@ -404,11 +445,11 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-4 md:p-8">
       <div className="w-full max-w-2xl">
         <div className="mb-7">
-          <h1 className="text-2xl font-semibold tracking-[-0.02em]">Start a thread</h1>
+          <h1 className="text-2xl font-semibold tracking-[-0.02em]">Start a session</h1>
           <p className="mt-1.5 text-sm leading-6 text-muted-foreground">Pick a project and an agent, then describe the work. The conversation is durable — you can leave and come back.</p>
         </div>
-        <div className="rounded-2xl border border-border bg-panel shadow-sm">
-          <div className="p-3">
+        <div className="rounded-2xl border border-border bg-panel shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/15">
+          <div className="p-3 pb-1">
             <Textarea
               value={value}
               onChange={(event) => setValue(event.target.value)}
@@ -417,71 +458,205 @@ function NewChatComposer({ agents, onCreated }: { agents: InstalledAgent[]; onCr
               rows={4}
               disabled={sending || agents.length === 0}
               autoFocus
-              className="resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+              className="min-h-32 resize-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
             />
           </div>
-          <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2.5">
-            <label className="sr-only" htmlFor="new-chat-agent">Agent</label>
-            <select
-              id="new-chat-agent"
+          <div className="flex items-center gap-2 px-3 pb-3">
+            <AgentPicker
               value={agent}
-              onChange={(event) => setAgent(event.target.value)}
-              className="h-8 min-w-0 max-w-56 rounded-lg border border-input bg-transparent px-2 font-mono text-xs text-text outline-none focus-visible:border-ring"
+              onChange={setAgent}
+              agents={agents}
+              registryAgents={registry.data?.agents ?? []}
               disabled={sending || agents.length === 0}
-            >
-              {agents.map((item) => <option key={`${item.id}@${item.version}`} value={`${item.id}@${item.version}`}>{item.id}@{item.version}</option>)}
-            </select>
+            />
             <Button type="button" className="ml-auto" onClick={() => void send()} disabled={sending || agents.length === 0 || !project || value.trim().length === 0}>
               {sending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Send aria-hidden />}
-              Start thread
+              <span className="hidden sm:inline">Start session</span>
             </Button>
           </div>
-          <div className="border-t border-border px-3 py-2.5">
-            <div className="flex items-center gap-2 text-sm">
-              <FolderGit2 aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-              <button
-                type="button"
-                className="rounded-md bg-secondary px-2 py-1 text-xs font-medium hover:bg-secondary/70"
-                onClick={() => setProjectPickerOpen((open) => !open)}
-              >
-                {project ? project.split("/").filter(Boolean).pop() ?? "~" : "Choose project"}
-              </button>
-              <span className="truncate font-mono text-[0.6875rem] text-muted-foreground">{project ?? "Required — the agent works inside this checkout"}</span>
-            </div>
-            {projectPickerOpen && (
-              <div className="mt-2 rounded-xl border border-border bg-bg p-2">
-                <label className="sr-only" htmlFor="project-search">Search projects</label>
-                <Input id="project-search" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Search directories…" autoFocus />
-                <div className="mt-1 max-h-48 overflow-y-auto">
-                  {projectPath !== "~" && (
-                    <button type="button" className="flex w-full items-center gap-2 rounded-lg bg-secondary px-2 py-2 text-left text-sm hover:bg-secondary/70" onClick={() => { const parent = projectPath.split("/").slice(0, -1).join("/") || "/"; setProjectPath(parent === "/" ? "~" : parent); setProjectSearch(""); }}>
-                      <ChevronLeft className="size-4 text-muted-foreground" aria-hidden />
-                      <span>..</span>
-                    </button>
-                  )}
-                  {directoryQuery.data?.directories.map((directory) => (
-                    <div key={directory.path} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-secondary">
-                      <Folder className="size-4 text-muted-foreground" aria-hidden />
-                      <button type="button" className="min-w-0 flex-1 truncate text-left" onClick={() => { setProjectPath(directory.path); setProjectSearch(""); }}>{directory.name}</button>
-                      {directory.is_git ? <Badge tone="success">Git</Badge> : <span className="text-xs text-muted-foreground">Open</span>}
-                      <button type="button" className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-panel hover:text-text" onClick={() => void chooseProject(directory.path)}>Add</button>
-                    </div>
-                  ))}
-                  {directoryQuery.data?.directories.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">No directories match here.</p>}
-                </div>
-                <div className="mt-1 flex items-center justify-between px-2 text-xs text-muted-foreground">
-                  <span className="truncate font-mono">{directoryQuery.isFetching ? "Searching…" : directoryQuery.data?.display_path ?? projectPath}</span>
-                  <button type="button" className="hover:text-text" onClick={() => { setProjectPath("~"); setProjectSearch(""); }}>Home</button>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
-        {agents.length === 0 && <p className="mt-3 text-sm text-muted-foreground">Install and probe an agent from the <Link href="/agents" className="text-primary hover:underline">Agents</Link> page before starting a thread.</p>}
+        <div className="mt-3 rounded-xl border border-border bg-panel p-1 shadow-sm">
+            <button
+              type="button"
+              className="group flex w-full min-w-0 items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              onClick={openProjectPicker}
+              aria-label={project ? `Change project, currently ${project}` : "Choose a project"}
+            >
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <FolderGit2 aria-hidden className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{project ? project.split("/").filter(Boolean).pop() ?? "~" : "Choose project"}</span>
+                <span className="block truncate font-mono text-[0.6875rem] text-muted-foreground">{project ?? "Required - the agent works inside this checkout"}</span>
+              </span>
+              <ChevronDown aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+            </button>
+        </div>
+        <Dialog open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
+          <DialogContent className="gap-3 sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Choose a project</DialogTitle>
+              <DialogDescription>Search for a folder or enter its full path.</DialogDescription>
+            </DialogHeader>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <label className="sr-only" htmlFor="project-search">Search folders or enter a path</label>
+              <Input
+                id="project-search"
+                value={projectSearch}
+                onChange={(event) => setProjectSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setHighlightedDirectory((value) => Math.min(value + 1, Math.max(directories.length - 1, 0)));
+                  } else if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setHighlightedDirectory((value) => Math.max(value - 1, 0));
+                  } else if (event.key === "Enter") {
+                    event.preventDefault();
+                    if (event.metaKey || event.ctrlKey) void chooseProject(currentProjectPath);
+                    else if (pathLikeSearch) browseProjectPath(projectSearch.trim());
+                    else if (directories[highlightedDirectory]) browseProjectPath(directories[highlightedDirectory].path);
+                  } else if (event.key === "Escape" && projectSearch) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setProjectSearch("");
+                  }
+                }}
+                placeholder="Search folders or enter a path..."
+                autoFocus
+                className="h-10 pl-9 pr-24"
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[0.6875rem] text-muted-foreground">{pathLikeSearch ? "Enter to open" : "Type to filter"}</span>
+            </div>
+            <nav className="flex min-w-0 items-center gap-1 overflow-x-auto px-1 text-xs text-muted-foreground" aria-label="Current folder">
+              {breadcrumbItems.map((item, index) => (
+                <span key={item.path} className="flex items-center gap-1">
+                  {index > 0 && <ChevronRight className="size-3 shrink-0 opacity-50" aria-hidden />}
+                  <button
+                    type="button"
+                    className={cn("rounded px-1.5 py-1 hover:bg-secondary hover:text-foreground", index === breadcrumbItems.length - 1 && "font-medium text-foreground")}
+                    onClick={() => browseProjectPath(item.path)}
+                  >
+                    {item.label}
+                  </button>
+                </span>
+              ))}
+            </nav>
+            <div className="max-h-80 overflow-y-auto rounded-xl border border-border p-1">
+              {directories.map((directory, index) => (
+                <button
+                  key={directory.path}
+                  type="button"
+                  className={cn("flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary focus-visible:bg-secondary focus-visible:outline-none", index === highlightedDirectory && "bg-secondary")}
+                  onMouseMove={() => setHighlightedDirectory(index)}
+                  onClick={() => browseProjectPath(directory.path)}
+                >
+                  {directory.is_git ? <FolderGit2 className="size-4 shrink-0 text-primary/70" aria-hidden /> : <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+                  <span className="min-w-0 flex-1 truncate">{directory.name}</span>
+                  {directory.is_git && <span className="flex items-center gap-1 text-xs text-muted-foreground"><GitBranch className="size-3" aria-hidden />Repository</span>}
+                </button>
+              ))}
+              {directoryQuery.isFetching && <p className="px-3 py-4 text-xs text-muted-foreground">Searching…</p>}
+              {!directoryQuery.isFetching && directoryQuery.isError && <p className="px-3 py-4 text-xs text-error">That folder could not be opened. Check the path and try again.</p>}
+              {!directoryQuery.isFetching && !directoryQuery.isError && directories.length === 0 && <p className="px-3 py-4 text-xs text-muted-foreground">No folders match this search.</p>}
+            </div>
+            <div className="flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">Selected folder</p>
+                <p className="truncate font-mono text-xs" title={currentProjectPath}>{currentProjectPath}</p>
+              </div>
+              <Button type="button" className="shrink-0" onClick={() => void chooseProject(currentProjectPath)} disabled={register.isPending || select.isPending || directoryQuery.isFetching || directoryQuery.isError}>
+                <FolderGit2 aria-hidden />
+                {register.isPending || select.isPending ? "Selecting…" : "Select folder"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+        {agents.length === 0 && <p className="mt-3 text-sm text-muted-foreground">Install and probe an agent from the <Link href="/agents" className="text-primary hover:underline">Agents</Link> page before starting a session.</p>}
         <p className="mt-4 text-xs text-muted-foreground">Enter sends · Shift+Enter adds a new line</p>
       </div>
     </div>
   );
+}
+
+function AgentPicker({ value, onChange, agents, registryAgents, disabled }: {
+  value: string;
+  onChange: (value: string) => void;
+  agents: InstalledAgent[];
+  registryAgents: RegistryAgent[];
+  disabled: boolean;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const selected = agents.find((item) => `${item.id}@${item.version}` === value) ?? agents[0];
+  const registryById = new Map(registryAgents.map((item) => [item.id, item]));
+  const selectedRegistryAgent = selected ? registryById.get(selected.id) : undefined;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent): void => {
+      if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div ref={pickerRef} className="relative min-w-0">
+      <button
+        type="button"
+        className="flex h-9 min-w-0 max-w-64 items-center gap-2 rounded-lg border border-input bg-bg/70 px-2 text-left transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+        onClick={() => setOpen((current) => !current)}
+        disabled={disabled}
+        aria-label="Choose agent"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <AgentArtwork agent={selectedRegistryAgent} className="size-5 shrink-0 rounded-md" />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">{selectedRegistryAgent?.name ?? selected?.id ?? "Choose agent"}</span>
+        <ChevronDown aria-hidden className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div role="listbox" aria-label="Agents" className="absolute bottom-11 left-0 z-30 w-72 max-w-[calc(100vw-3.5rem)] rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl">
+          {agents.map((item) => {
+            const itemValue = `${item.id}@${item.version}`;
+            const registryAgent = registryById.get(item.id);
+            const selectedItem = itemValue === value;
+            return (
+              <button
+                key={itemValue}
+                type="button"
+                role="option"
+                aria-selected={selectedItem}
+                className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-secondary focus-visible:bg-secondary focus-visible:outline-none", selectedItem && "bg-secondary")}
+                onClick={() => { onChange(itemValue); setOpen(false); }}
+              >
+                <AgentArtwork agent={registryAgent} className="size-8 shrink-0 rounded-lg" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{registryAgent?.name ?? item.id}</span>
+                  <span className="block truncate font-mono text-[0.6875rem] text-muted-foreground">{item.id} · v{item.version}</span>
+                </span>
+                {selectedItem && <Check aria-hidden className="size-4 shrink-0 text-primary" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentArtwork({ agent, className }: { agent?: RegistryAgent; className?: string }): JSX.Element {
+  if (agent?.icon) return <img src={agent.icon} alt="" className={cn("border border-border bg-bg object-cover p-0.5", className)} />;
+  return <span className={cn("flex items-center justify-center border border-border bg-accent text-primary", className)} aria-hidden><Bot className="size-3.5" /></span>;
 }
 
 function formatClock(iso: string): string {
@@ -563,15 +738,15 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
     }
   };
 
-  if (loading) return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" aria-hidden />Loading thread…</div>;
-  if (loadError || !thread) return <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center"><p className="text-sm text-error">{loadError ?? "Thread not found."}</p><Button type="button" variant="outline" onClick={onRetryLoad}><RefreshCw aria-hidden />Retry</Button></div>;
+  if (loading) return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" aria-hidden />Loading session…</div>;
+  if (loadError || !thread) return <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center"><p className="text-sm text-error">{loadError ?? "Session not found."}</p><Button type="button" variant="outline" onClick={onRetryLoad}><RefreshCw aria-hidden />Retry</Button></div>;
 
   const busy = draftSending || externalSending;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-13 shrink-0 items-center gap-2 border-b border-border bg-panel px-3 md:px-4">
-        <Button type="button" size="icon-sm" variant="ghost" className="md:hidden" onClick={onBack} aria-label="Back to threads" title="Back to threads"><ArrowLeft aria-hidden /></Button>
+        <Button type="button" size="icon-sm" variant="ghost" className="md:hidden" onClick={onBack} aria-label="Back to sessions" title="Back to sessions"><ArrowLeft aria-hidden /></Button>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold tracking-tight">{thread.title}</h1>
           <p className="truncate font-mono text-[0.6875rem] text-muted-foreground">{thread.agent_id}@{thread.agent_version} · {thread.cwd}</p>
