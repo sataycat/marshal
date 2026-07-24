@@ -131,11 +131,11 @@ Implement the ADR as the following dependency-ordered vertical slices. Each slic
 
 ### 3. Make factory workflows repository-ID scoped
 
-- [ ] Change task, spec-message, spec-author session, run, run-operation, run-event, workflow-profile, and assignment stores to require repository identity explicitly.
-- [ ] Scope task slugs, task lookup, transitions, run history, scheduler selection, and WebSocket snapshots by repository so two repositories may use the same slug safely.
-- [ ] Resolve the checkout path from the immutable repository ID only when source, git, agent-session, or worktree execution needs it.
-- [ ] Update task, spec, run, workflow-profile, and board APIs plus browser query keys and mutations to preserve repository ownership end to end.
-- [ ] Add two-repository tests covering identical task slugs, independent workflow profiles, scheduler isolation, run/event ownership, and rejected cross-repository mutations.
+- [x] Change task, spec-message, spec-author session, run, run-operation, run-event, workflow-profile, and assignment stores to require repository identity explicitly. (Factory stores and execution paths now use repository-leading queries; legacy direct seams remain only for pre-Slice-3 CLI/unit fixtures.)
+- [x] Scope task slugs, task lookup, transitions, run history, scheduler selection, and WebSocket snapshots by repository so two repositories may use the same slug safely. (Scheduler, run/event payloads, connected snapshots, and browser projections carry repository identity.)
+- [x] Resolve the checkout path from the immutable repository ID only when source, git, agent-session, or worktree execution needs it.
+- [x] Update task, spec, run, workflow-profile, and board APIs plus browser query keys and mutations to preserve repository ownership end to end. (Explicit query/header repository resolution and repository-leading web keys/mutations are covered.)
+- [x] Add two-repository tests covering identical task slugs, independent workflow profiles, scheduler isolation, run/event ownership, and rejected cross-repository mutations.
 
 ### 4. Cut fresh installations over to one `marshal.db`
 

@@ -69,6 +69,7 @@ export interface TaskPayload {
   created_at: string;
   updated_at: string;
   repositoryId?: string | null;
+  repository_id?: string | null;
 }
 
 export interface TaskTransitionedPayload extends TaskPayload {
@@ -88,11 +89,13 @@ export interface RunPayload {
   endedAt: string | null;
   error: string | null;
   failure?: StructuredAcpError | null;
+  repositoryId?: string;
 }
 
 export interface RunEventPayload {
   runId: number;
   event: unknown;
+  repositoryId?: string;
 }
 
 export interface ConnectedPayload {

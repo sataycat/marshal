@@ -16,27 +16,27 @@ describe("specMessagesReducer", () => {
       {},
       ev("spec.message", { taskSlug: "a", message: msg(1, "user", "hi") }),
     );
-    expect(messagesForSlug(next, "a")).toEqual([msg(1, "user", "hi")]);
-    expect(messagesForSlug(next, "other")).toEqual([]);
+    expect(messagesForSlug(next, ":a")).toEqual([msg(1, "user", "hi")]);
+    expect(messagesForSlug(next, ":other")).toEqual([]);
   });
 
   it("does not duplicate a message that already exists", () => {
-    const state = { a: [msg(1, "user", "hi")] };
+    const state = { ":a": [msg(1, "user", "hi")] };
     const next = specMessagesReducer(
       state,
       ev("spec.message", { taskSlug: "a", message: msg(1, "user", "hi") }),
     );
-    expect(messagesForSlug(next, "a")).toHaveLength(1);
+    expect(messagesForSlug(next, ":a")).toHaveLength(1);
   });
 
   it("preserves messages for other slugs when one slug updates", () => {
-    const state = { a: [msg(1, "user", "hi")] };
+    const state = { ":a": [msg(1, "user", "hi")] };
     const next = specMessagesReducer(
       state,
       ev("spec.message", { taskSlug: "b", message: msg(2, "assistant", "yo") }),
     );
-    expect(messagesForSlug(next, "a")).toHaveLength(1);
-    expect(messagesForSlug(next, "b")).toHaveLength(1);
+    expect(messagesForSlug(next, ":a")).toHaveLength(1);
+    expect(messagesForSlug(next, ":b")).toHaveLength(1);
   });
 
   it("appends subsequent messages in arrival order", () => {
@@ -48,7 +48,7 @@ describe("specMessagesReducer", () => {
       state,
       ev("spec.message", { taskSlug: "a", message: msg(5, "assistant", "yo") }),
     );
-    expect(messagesForSlug(state, "a").map((m) => m.id)).toEqual([1, 5]);
+    expect(messagesForSlug(state, ":a").map((m) => m.id)).toEqual([1, 5]);
   });
 
   it("resets to empty on connected (HTTP is the durable source)", () => {

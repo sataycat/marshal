@@ -180,8 +180,8 @@ export async function buildTask(
   slug: string,
   options: BuildTaskOptions = {},
 ): Promise<RunOnceResult> {
-  const root = options.root;
   const repositoryId = options.repositoryId ?? "";
+  const root = options.root ?? (repositoryId ? resolveRepositoryContext(repositoryId, options.machineDir).checkoutPath : undefined);
   const task = repositoryId ? getTask(repositoryId, slug, options.machineDir) : getTask(slug, root);
 
   const manager = options.manager ?? new WorktreeManager(task.repository_id ?? repositoryId, root ?? cwd(), { machineDir: options.machineDir });
@@ -339,18 +339,18 @@ function computeTruncatedDiff(
   return { diff: head, totalLines: lines.length };
 }
 
-function lastBuilderCommitSha(slug: string, root?: string): string | null {
-  const db = openDb(root);
+function lastBuilderCommitSha(slug: string, root?: string, repositoryId?: string, machineDir?: string): string | null {
+  const db = repositoryId ? openRepositoryDb(repositoryId, machineDir) : openDb(root);
    const row = db
     .prepare(
       `SELECT r.commit_sha AS commit_sha
          FROM runs r
          JOIN tasks t ON t.id = r.task_id
-        WHERE t.slug = ? AND r.role = 'builder' AND r.status = 'done' AND r.commit_sha IS NOT NULL
+         WHERE t.slug = ? AND r.role = 'builder' AND r.status = 'done' AND r.commit_sha IS NOT NULL AND (? IS NULL OR r.repository_id = ?)
         ORDER BY r.ended_at DESC, r.id DESC
         LIMIT 1`,
     )
-    .get(slug) as BuildRunRow | undefined;
+     .get(slug, repositoryId ?? null, repositoryId ?? null) as BuildRunRow | undefined;
   return row?.commit_sha ?? null;
 }
 
@@ -358,8 +358,8 @@ export async function validateTask(
   slug: string,
   options: ValidateTaskOptions = {},
 ): Promise<RunOnceResult> {
-  const root = options.root;
   const repositoryId = options.repositoryId ?? "";
+  const root = options.root ?? (repositoryId ? resolveRepositoryContext(repositoryId, options.machineDir).checkoutPath : undefined);
   const task = repositoryId ? getTask(repositoryId, slug, options.machineDir) : getTask(slug, root);
 
   const manager = options.manager ?? new WorktreeManager(task.repository_id ?? repositoryId, root ?? cwd(), { machineDir: options.machineDir });
@@ -369,7 +369,7 @@ export async function validateTask(
    const runLog = new RunLog(repositoryId || root, options.bus);
 
   const worktree = manager.create(slug);
-  const buildCommit = lastBuilderCommitSha(slug, root);
+  const buildCommit = lastBuilderCommitSha(slug, root, repositoryId || undefined, options.machineDir);
   if (!buildCommit) {
     logger.warn({ slug }, "Validator pre-flight: no successful builder run found");
     return {
@@ -499,7 +499,7 @@ function runDeterministicVerification(commands: string[], cwdPath: string): { pa
 }
 
 export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResult | null> {
-  const root = options.root;
+  const root = options.root ?? (options.repositoryId ? resolveRepositoryContext(options.repositoryId, options.machineDir).checkoutPath : undefined);
 
    const db = options.repositoryId ? openRepositoryDb(options.repositoryId, options.machineDir) : openDb(root);
    const repositoryFilter = options.repositoryId ?? (root ? (db.prepare("SELECT id FROM repositories WHERE path = ?").get(resolve(root)) as { id: string } | undefined)?.id : undefined);
@@ -547,7 +547,7 @@ export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResu
       };
     }
 
-    transitionAndPublish(slug, "ready", "building", root, options.bus);
+    transitionAndPublish(row.repository_id, slug, "ready", "building", root, options.machineDir, options.bus);
 
     const result = await buildTask(slug, {
       root,
@@ -556,10 +556,11 @@ export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResu
       builderAgentId: options.builderAgentId,
       bus: options.bus,
       machineDir: options.machineDir,
+      repositoryId: row.repository_id,
     });
 
     if (result.status === "built") {
-      transitionAndPublish(slug, "building", "validating", root, options.bus);
+      transitionAndPublish(row.repository_id, slug, "building", "validating", root, options.machineDir, options.bus);
     }
 
     return result;
@@ -573,20 +574,21 @@ export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResu
       validatorAgentId: options.validatorAgentId,
       bus: options.bus,
       machineDir: options.machineDir,
+      repositoryId: row.repository_id,
   });
 
   if (result.status === "validated") {
-    clearRetryState(slug, root);
-    transitionAndPublish(slug, "validating", "review", root, options.bus);
+    clearRetryState(row.repository_id, slug, options.machineDir);
+    transitionAndPublish(row.repository_id, slug, "validating", "review", root, options.machineDir, options.bus);
   } else if (result.status === "validation_failed") {
     const maxRetries = options.maxRetries ?? resolveMaxRetries();
     const reason = result.reason ?? result.error ?? "unknown validation failure";
     if (task.retry_count < maxRetries) {
-      incrementRetryCount(slug, reason, root);
-      transitionAndPublish(slug, "validating", "building", root, options.bus);
+      incrementRetryCount(row.repository_id, slug, reason, options.machineDir);
+      transitionAndPublish(row.repository_id, slug, "validating", "building", root, options.machineDir, options.bus);
     } else {
-      setLastFailure(slug, reason, root);
-      transitionAndPublish(slug, "validating", "review", root, options.bus);
+      setLastFailure(row.repository_id, slug, reason, options.machineDir);
+      transitionAndPublish(row.repository_id, slug, "validating", "review", root, options.machineDir, options.bus);
     }
   }
 
@@ -594,13 +596,15 @@ export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResu
 }
 
 function transitionAndPublish(
+  repositoryId: string,
   slug: string,
   from: string,
   to: TaskStatus,
   root?: string,
+  machineDir?: string,
   bus?: EventBus,
 ): void {
-  const task = transitionTask(slug, to, root);
+  const task = transitionTask(repositoryId, slug, to, machineDir);
   if (bus) {
     publishTaskTransitioned(bus, taskCardPayload(task), from, to);
   }

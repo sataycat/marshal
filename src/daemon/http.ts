@@ -65,7 +65,7 @@ import {
   type RunRecord,
 } from "./run-log.js";
 import { runSpecAuthorTurn, resubmitSpecAuthorTurn, SpecChatClosedError } from "./spec-chat.js";
-import { listSpecMessages, type SpecMessage } from "../tasks/spec-store.js";
+import { listSpecMessages, SpecMessageNotFoundError, type SpecMessage } from "../tasks/spec-store.js";
 import { publishSpecMessage } from "./bus.js";
 import type { Agent } from "../agent/types.js";
 import { MissingAgentIdError } from "../worktree/config.js";
@@ -465,6 +465,7 @@ interface TaskCardFields {
   retry_count: number;
   created_at: string;
   updated_at: string;
+  repository_id?: string | null;
 }
 
 interface TaskDetailFields extends TaskCardFields {
@@ -483,11 +484,12 @@ function taskCard(task: Task): TaskCardFields {
     retry_count: task.retry_count,
     created_at: task.created_at,
     updated_at: task.updated_at,
+    repository_id: task.repository_id,
   };
 }
 
 function taskPayload(task: Task): TaskPayload {
-  return { ...taskCard(task), repositoryId: task.repository_id ?? null };
+  return { ...taskCard(task), repositoryId: task.repository_id ?? null, repository_id: task.repository_id ?? null };
 }
 
 function taskDetail(task: Task): TaskDetailFields {
@@ -558,6 +560,9 @@ function mapDomainError(err: unknown): ApiError {
   }
   if (err instanceof TaskNotFoundError) {
     return new ApiError(404, err.message, "task_not_found");
+  }
+  if (err instanceof SpecMessageNotFoundError) {
+    return new ApiError(404, err.message, "spec_message_not_found");
   }
   if (err instanceof DuplicateSlugError) {
     return new ApiError(409, err.message, "duplicate_slug");
@@ -1897,7 +1902,10 @@ function registerTaskRoutes(
   configuredRepositoryId?: string,
 ): void {
   const resolveFactoryRepository = (c: Context, bodyRepositoryId?: string): { id: string; checkoutPath: string } => {
-    const id = bodyRepositoryId ?? c.req.query("repository_id") ?? c.req.header("x-marshal-repository-id") ?? configuredRepositoryId;
+    const requested = c.req.query("repository_id") ?? c.req.header("x-marshal-repository-id");
+    if (bodyRepositoryId && requested && bodyRepositoryId !== requested)
+      throw new ApiError(409, "repository_id does not match the requested repository", "repository_conflict");
+    const id = bodyRepositoryId ?? requested ?? configuredRepositoryId;
     if (!id) throw new ApiError(409, "repository_id is required", "repository_required");
     const repository = resolveRepositoryRecord(id, machineDir);
     return { id, checkoutPath: repository.path };
@@ -2016,7 +2024,7 @@ function registerTaskRoutes(
       }
       const task = transitionTask(repository.id, slug, "ready", machineDir);
       if (bus) publishTaskTransitioned(bus, taskPayload(task), from, "ready");
-      freezeTask(slug, repository.checkoutPath, makeManager(repository.id));
+       freezeTask(repository.id, slug, repository.checkoutPath, makeManager(repository.id), machineDir);
       return c.json({ task: taskDetail(task) });
     } catch (err) {
       throw mapDomainError(err);
@@ -2087,6 +2095,7 @@ interface RunCardFields {
   failure: unknown;
   auth_recovery_resolved_at: string | null | undefined;
   superseded_by_run_id: number | null | undefined;
+  repository_id?: string;
 }
 
 interface RunDetailFields extends RunCardFields {
@@ -2098,6 +2107,7 @@ interface RunEventFields {
   type: string;
   payload: unknown;
   created_at: string;
+  repository_id?: string;
 }
 
 function runCard(run: RunRecord): RunCardFields {
@@ -2121,6 +2131,7 @@ function runCard(run: RunRecord): RunCardFields {
     failure: run.failure,
     auth_recovery_resolved_at: run.authRecoveryResolvedAt,
     superseded_by_run_id: run.supersededByRunId,
+    repository_id: run.repositoryId,
   };
 }
 
@@ -2134,6 +2145,7 @@ function runEventFields(event: RunEventRecord): RunEventFields {
     type: event.type,
     payload: event.payload,
     created_at: event.createdAt,
+    repository_id: event.repositoryId,
   };
 }
 
@@ -2228,6 +2240,7 @@ interface SpecMessageFields {
   created_at: string;
   prompt_status: "authentication_required" | null;
   failure: unknown;
+  repository_id?: string;
 }
 
 function specMessageFields(msg: SpecMessage): SpecMessageFields {
@@ -2239,6 +2252,7 @@ function specMessageFields(msg: SpecMessage): SpecMessageFields {
     created_at: msg.created_at,
     prompt_status: msg.prompt_status ?? null,
     failure: msg.failure ?? null,
+    repository_id: msg.repository_id,
   };
 }
 
@@ -2251,7 +2265,7 @@ function registerSpecRoutes(
   configuredRepositoryId?: string,
 ): void {
   const repositoryFor = (c: Context): string => {
-    const id = c.req.query("repository_id") ?? configuredRepositoryId;
+    const id = c.req.query("repository_id") ?? c.req.header("x-marshal-repository-id") ?? configuredRepositoryId;
     if (!id) throw new ApiError(409, "repository_id is required", "repository_required");
     resolveRepositoryRecord(id, machineDir);
     return id;
@@ -2320,7 +2334,7 @@ function registerSpecRoutes(
     try {
       const repositoryId = repositoryFor(c);
       const result = await resubmitSpecAuthorTurn(c.req.param("slug"), messageId, {
-        root,
+        root: resolveRepositoryContext(repositoryId, machineDir).checkoutPath,
         repositoryId,
         agent: specAgent,
         machineDir,

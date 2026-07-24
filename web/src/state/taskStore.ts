@@ -28,12 +28,12 @@ interface TaskStore {
   socketStatus: SocketStatus;
   applyTaskEvent: (event: BusEvent) => void;
   setSocketStatus: (status: SocketStatus) => void;
-  createTask: (input: { title: string; spec_markdown?: string }) => Promise<TaskDetail | null>;
+  createTask: (input: { title: string; spec_markdown?: string; repository_id?: string; workflow_profile_id?: string }) => Promise<TaskDetail | null>;
   freezeTask: (slug: string, previous: TaskCard, specMarkdown?: string) => Promise<TaskDetail | null>;
   transitionTask: (slug: string, to: TaskStatus, previous: TaskCard) => Promise<TaskDetail | null>;
   mergeTask: (slug: string, previous: TaskCard) => Promise<TaskDetail | null>;
-  sendSpecMessage: (slug: string, content: string) => Promise<{ userMessage: SpecMessage; assistantMessage: SpecMessage | null } | null>;
-  updateTaskSpec: (slug: string, specMarkdown: string) => Promise<TaskDetail | null>;
+  sendSpecMessage: (slug: string, repositoryId: string, content: string) => Promise<{ userMessage: SpecMessage; assistantMessage: SpecMessage | null } | null>;
+  updateTaskSpec: (slug: string, repositoryId: string, specMarkdown: string) => Promise<TaskDetail | null>;
 }
 
 function toCard(detail: TaskDetail): TaskCard {
@@ -104,21 +104,21 @@ export const useTaskStore = create<TaskStore>((set) => ({
       return null;
     }
   },
-  sendSpecMessage: async (slug, content) => {
+  sendSpecMessage: async (slug, repositoryId, content) => {
     try {
-      const result = await apiSendSpecMessage(slug, "", content);
+      const result = await apiSendSpecMessage(slug, repositoryId, content);
       const apply = useTaskStore.getState().applyTaskEvent;
-      apply({ type: "spec.message", payload: { taskSlug: slug, message: result.userMessage }, timestamp: nowIso() });
-      if (result.assistantMessage) apply({ type: "spec.message", payload: { taskSlug: slug, message: result.assistantMessage }, timestamp: nowIso() });
+      apply({ type: "spec.message", payload: { taskSlug: slug, repositoryId, message: result.userMessage }, timestamp: nowIso() });
+      if (result.assistantMessage) apply({ type: "spec.message", payload: { taskSlug: slug, repositoryId, message: result.assistantMessage }, timestamp: nowIso() });
       return result;
     } catch (error) {
       reportError(error);
       return null;
     }
   },
-  updateTaskSpec: async (slug, specMarkdown) => {
+  updateTaskSpec: async (slug, repositoryId, specMarkdown) => {
     try {
-      const task = await apiUpdateTaskSpec(slug, "", specMarkdown);
+      const task = await apiUpdateTaskSpec(slug, repositoryId, specMarkdown);
       useTaskStore.getState().applyTaskEvent({ type: "task.updated", payload: toCard(task), timestamp: nowIso() });
       return task;
     } catch (error) {
@@ -129,4 +129,4 @@ export const useTaskStore = create<TaskStore>((set) => ({
 }));
 
 export const selectTasks = (state: TaskStore): TaskCard[] => boardToList(state.tasksById);
-export const selectSpecMessages = (slug: string) => (state: TaskStore): SpecMessage[] => messagesForSlug(state.specMessagesBySlug, slug);
+export const selectSpecMessages = (slug: string, repositoryId: string | null) => (state: TaskStore): SpecMessage[] => messagesForSlug(state.specMessagesBySlug, `${repositoryId ?? ""}:${slug}`);

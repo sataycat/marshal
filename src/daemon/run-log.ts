@@ -54,6 +54,7 @@ export interface RunEventRecord {
   type: AgentEvent["type"];
   payload: AgentEvent;
   createdAt: string;
+  repositoryId?: string;
 }
 
 export interface FinishRunOptions {
@@ -102,6 +103,7 @@ interface RunEventRow {
   type: string;
   payload: string;
   created_at: string;
+  repository_id: string | null;
 }
 
 function asRunStatus(value: string): RunStatus {
@@ -153,6 +155,7 @@ function rowToRunEvent(row: RunEventRow): RunEventRecord {
     type: row.type as AgentEvent["type"],
     payload: JSON.parse(row.payload) as AgentEvent,
     createdAt: row.created_at,
+    repositoryId: row.repository_id ?? undefined,
   };
 }
 
@@ -204,7 +207,7 @@ export class RunLog {
     this.db
       .prepare("INSERT INTO run_events (repository_id, run_id, seq, type, payload) VALUES (?, ?, ?, ?, ?)")
       .run(ownerRepositoryId, runId, seq, event.type, JSON.stringify(event));
-    if (this.bus) publishRunEvent(this.bus, runId, event);
+    if (this.bus) this.bus.publish("run.event", { repositoryId: ownerRepositoryId, runId, event });
   }
 
   finishRun(runId: number, status: "done" | "error" | "authentication_required", opts: FinishRunOptions = {}): void {
@@ -280,6 +283,7 @@ function toRunPayload(run: RunRecord): RunPayload {
     endedAt: run.endedAt,
     error: run.error,
     failure: run.failure,
+    repositoryId: run.repositoryId,
   };
 }
 

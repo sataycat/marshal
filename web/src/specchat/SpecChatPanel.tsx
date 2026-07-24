@@ -19,7 +19,7 @@ interface Props {
 }
 
 export function SpecChatPanel({ slug, repositoryId, onSpecUpdated, onFrozen }: Props) {
-  const streamed = useTaskStore(useShallow(selectSpecMessages(slug)));
+  const streamed = useTaskStore(useShallow(selectSpecMessages(slug, repositoryId)));
   const applyTaskEvent = useTaskStore((state) => state.applyTaskEvent);
   const sendSpecMessage = useSendSpecMessageMutation();
   const resubmitSpecMessage = useResubmitSpecMessageMutation();
@@ -70,8 +70,8 @@ export function SpecChatPanel({ slug, repositoryId, onSpecUpdated, onFrozen }: P
     setDraft("");
     try {
       const res = await sendSpecMessage.mutateAsync({ slug, repositoryId: repositoryId!, content: text });
-      applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.userMessage }, timestamp: new Date().toISOString() });
-      if (res.assistantMessage) applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.assistantMessage }, timestamp: new Date().toISOString() });
+       applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, repositoryId: repositoryId!, message: res.userMessage }, timestamp: new Date().toISOString() });
+       if (res.assistantMessage) applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, repositoryId: repositoryId!, message: res.assistantMessage }, timestamp: new Date().toISOString() });
     } catch (err) {
       pushError(err instanceof Error ? err.message : String(err));
       setDraft(text);
@@ -85,7 +85,7 @@ export function SpecChatPanel({ slug, repositoryId, onSpecUpdated, onFrozen }: P
     if (proposedSpec === null || applying) return;
     setApplying(true);
     try {
-      const updated = await updateTaskSpec.mutateAsync({ slug, repositoryId: repositoryId!, specMarkdown: proposedSpec });
+       const updated = await updateTaskSpec.mutateAsync({ slug, repositoryId: repositoryId!, specMarkdown: proposedSpec });
       if (updated) {
         const { spec_markdown: _spec, last_failure: _failure, ...card } = updated;
         applyTaskEvent({ type: "task.updated", payload: card, timestamp: new Date().toISOString() });

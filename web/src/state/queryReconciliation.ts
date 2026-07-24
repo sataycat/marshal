@@ -13,9 +13,10 @@ export function mergeById<T extends { id: number }>(items: T[], next: T): T[] {
 export function reconcileBusEvent(queryClient: QueryClient, event: BusEvent): void {
   if (event.type === "task.created" || event.type === "task.updated" || event.type === "task.transitioned") {
     const task = event.payload as TaskCard;
-    queryClient.setQueryData<TaskCard[]>(queryKeys.tasks(), (tasks) => tasks ? mergeById(tasks, task) : tasks);
-    queryClient.invalidateQueries({ queryKey: queryKeys.task(task.slug), refetchType: "none" });
-    if (task.status === "review") queryClient.invalidateQueries({ queryKey: queryKeys.taskDiff(task.slug), refetchType: "none" });
+    const repositoryId = task.repository_id ?? (event.payload as { repositoryId?: string }).repositoryId ?? null;
+    queryClient.setQueryData<TaskCard[]>(queryKeys.tasks(repositoryId), (tasks) => tasks ? mergeById(tasks, task) : tasks);
+    queryClient.invalidateQueries({ queryKey: queryKeys.task(task.slug, repositoryId), refetchType: "none" });
+    if (task.status === "review") queryClient.invalidateQueries({ queryKey: queryKeys.taskDiff(task.slug, repositoryId), refetchType: "none" });
     return;
   }
   if (event.type === "thread.created" || event.type === "thread.updated") {

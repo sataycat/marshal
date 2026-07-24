@@ -314,6 +314,7 @@ export interface SpecMessage {
   created_at: string;
   prompt_status?: "authentication_required" | null;
   failure?: StructuredAcpError | null;
+  repository_id?: string;
 }
 export interface WorkflowRun {
   id: number;
@@ -328,6 +329,7 @@ export interface WorkflowRun {
   failure: StructuredAcpError | null;
   auth_recovery_resolved_at: string | null;
   superseded_by_run_id: number | null;
+  repository_id?: string;
 }
 
 export interface SpecMessagePayload {

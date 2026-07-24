@@ -34,7 +34,7 @@ describe("taskStore", () => {
     const message = { id: 1, task_id: 1, role: "assistant" as const, content: "hi", created_at: "now" };
     apply({ type: "spec.message", payload: { taskSlug: "task", message }, timestamp: "now" });
     apply({ type: "spec.message", payload: { taskSlug: "task", message }, timestamp: "now" });
-    expect(useTaskStore.getState().specMessagesBySlug.task).toHaveLength(1);
+    expect(useTaskStore.getState().specMessagesBySlug[":task"]).toHaveLength(1);
   });
 
   it("rolls back an optimistic transition when the API fails", async () => {

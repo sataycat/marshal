@@ -56,13 +56,33 @@ export function specRelPathFor(slug: string, taskId: number): string {
 }
 
 export function freezeTask(
+  repositoryId: string,
   slug: string,
   root?: string,
   manager?: WorktreeManager,
+  machineDir?: string,
+): FreezeResult;
+export function freezeTask(
+  slug: string,
+  root?: string,
+  manager?: WorktreeManager,
+): FreezeResult;
+export function freezeTask(
+  first: string,
+  second?: string | WorktreeManager,
+  third?: string | WorktreeManager,
+  fourth?: WorktreeManager,
+  fifth?: string,
 ): FreezeResult {
+  const scoped = fourth !== undefined || (typeof second === "string" && typeof third === "string");
+  const repositoryId = scoped ? first : undefined;
+  const slug = scoped ? second as string : first;
+  const root = scoped ? (third as string | undefined) : second as string | undefined;
+  const manager = scoped ? fourth ?? (third instanceof WorktreeManager ? third : undefined) : second instanceof WorktreeManager ? second : third instanceof WorktreeManager ? third : undefined;
+  const machineDir = scoped ? fifth : undefined;
   const task = (() => {
     try {
-      return getTask(slug, root);
+      return repositoryId ? getTask(repositoryId, slug, machineDir) : getTask(slug, root);
     } catch (err) {
       if (err instanceof TaskNotFoundError) {
         throw new FreezeError(slug, "task not found");
@@ -79,7 +99,7 @@ export function freezeTask(
     throw new FreezeError(slug, "spec is empty (provide --spec or --spec-file at create time)");
   }
 
-  const mgr = manager ?? new WorktreeManager(task.repository_id ?? "", root ?? process.cwd());
+  const mgr = manager ?? new WorktreeManager(task.repository_id ?? repositoryId ?? "", root ?? process.cwd());
   const worktree = mgr.create(slug);
 
   const specRel = specRelPathFor(slug, task.id);

@@ -9,6 +9,7 @@ import {
   listSpecMessages,
   type SpecMessage,
   type SpecMessageRole,
+  SpecMessageNotFoundError,
 } from "../tasks/spec-store.js";
 import { AcpSessionSupervisor } from "../acp/supervisor.js";
 import { createSpecAuthorSession, updateSpecAuthorSession, appendSpecAuthorOperation } from "../tasks/author-store.js";
@@ -233,4 +234,4 @@ export async function runSpecAuthorTurn(
   return { userMessage: finalUserMessage, assistantMessage };
 }
 
-export function resubmitSpecAuthorTurn(slug: string, messageId: number, options: RunSpecAuthorTurnOptions = {}): Promise<SpecAuthorTurnResult> { const message = options.repositoryId ? getSpecMessage(options.repositoryId, messageId, options.machineDir) : getSpecMessage(messageId, options.root); if (!message) throw new Error("Spec message not found"); return runSpecAuthorTurn(slug, message.content, options, messageId); }
+export function resubmitSpecAuthorTurn(slug: string, messageId: number, options: RunSpecAuthorTurnOptions = {}): Promise<SpecAuthorTurnResult> { const message = options.repositoryId ? getSpecMessage(options.repositoryId, messageId, options.machineDir) : getSpecMessage(messageId, options.root); if (!message) throw new SpecMessageNotFoundError(messageId); return runSpecAuthorTurn(slug, message.content, options, messageId); }
