@@ -26,6 +26,7 @@ import {
   updateInstallationPhase,
 } from "../agents/store.js";
 import { completeRegistryRefresh, beginRegistryRefresh } from "../registry/store.js";
+import { registerRepository } from "../repositories/store.js";
 
 function fetchJson(url: string): Promise<{ status: number; body: unknown }> {
   return fetch(url).then(async (res) => ({ status: res.status, body: await res.json() }));
@@ -121,6 +122,37 @@ describe("buildApp /api/health", () => {
     const removals = await app.request("/api/agents/removal-operations");
     expect(removals.status).toBe(200);
     expect(await removals.json()).toEqual({ operations: [] });
+  });
+});
+
+describe("repository retention API", () => {
+  it("unregisters without deleting history, blocks selection, and reconnects by ID", async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-repository-retention-api-"));
+    const checkout = mkdtempSync(join(tmpdir(), "marshal-repository-retention-checkout-"));
+    execFileSync("git", ["init", "-q", checkout]);
+    const repository = registerRepository(checkout, machineDir);
+    const app = buildApp("0.0.1", { machineDir });
+
+    expect((await app.request(`/api/repositories/${repository.id}`, { method: "DELETE" })).status).toBe(200);
+    const listed = await app.request("/api/repositories");
+    expect((await listed.json()) as { repositories: Array<{ id: string; registration_status: string }> }).toMatchObject({
+      repositories: [{ id: repository.id, registration_status: "unregistered" }],
+      selected_repository_id: null,
+    });
+    const selection = await app.request(`/api/repositories/${repository.id}/select`, { method: "POST" });
+    expect(selection.status).toBe(409);
+    expect((await selection.json()) as { code: string }).toMatchObject({ code: "repository_unregistered" });
+
+    const reconnect = await app.request(`/api/repositories/${repository.id}/reconnect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: checkout }),
+    });
+    expect(reconnect.status).toBe(200);
+    expect((await reconnect.json()) as { repository: { id: string; registration_status: string } }).toMatchObject({
+      repository: { id: repository.id, registration_status: "registered" },
+    });
+    expect((await app.request(`/api/repositories/${repository.id}/select`, { method: "POST" })).status).toBe(200);
   });
 });
 

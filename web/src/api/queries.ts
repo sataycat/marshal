@@ -240,7 +240,26 @@ export const useSelectRepositoryMutation = () => {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.repositories }),
   });
 };
-export const useRemoveRepositoryMutation = () => useMutation({ mutationFn: api.removeRepository });
+export const useRemoveRepositoryMutation = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.removeRepository,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.diagnostics });
+    },
+  });
+};
+export const useReconnectRepositoryMutation = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, path }: { id: string; path: string }) => api.reconnectRepository(id, path),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.diagnostics });
+    },
+  });
+};
 export function useTaskDiffQuery(slug: string, repositoryId: string | null, enabled: boolean) {
   return useQuery({
     queryKey: queryKeys.taskDiff(slug, repositoryId),

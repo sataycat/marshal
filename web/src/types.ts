@@ -8,6 +8,8 @@ export interface Repository {
   updated_at: string;
   preferences: Record<string, unknown>;
   legacy_state: "preserved" | "none";
+  registration_status: "registered" | "unregistered";
+  checkout_status: "available" | "missing" | "unregistered";
 }
 export interface DirectorySuggestion {
   name: string;
@@ -255,7 +257,7 @@ export interface DiagnosticIssue {
 }
 export interface DiagnosticsResponse {
   daemon: { status: string; version: string; host: string | null };
-  repository: { selected: Repository | null; registered_count: number; root: string | null };
+  repository: { selected: Repository | null; registered_count: number; root: string | null; repositories: Repository[] };
   registry: { snapshot: RegistrySnapshot | null; refresh: RegistryRefresh | null };
   agents: InstalledAgent[];
   issues: DiagnosticIssue[];

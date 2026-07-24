@@ -165,11 +165,11 @@ Implement the ADR as the following dependency-ordered vertical slices. Each slic
 
 ### 7. Define repository removal and retained-history behavior
 
-- [ ] Change ordinary repository removal to unregister the checkout, clear it as the selected repository, and retain its database history and daemon-owned file namespace by stable repository ID.
-- [ ] Make unavailable, moved, and unregistered checkouts inspectable in repository diagnostics while blocking source-dependent actions with stable, actionable errors.
-- [ ] Allow an existing retained repository identity to be reconnected to a valid checkout path without rewriting historical ownership.
-- [ ] Keep irreversible purge out of ordinary removal; if a purge flow is introduced, make it explicit, durable, idempotent, and recoverable across database and filesystem cleanup.
-- [ ] Test unregister, re-selection prevention, retained threads and runs, missing checkout behavior, reconnection, file retention, and foreign-key integrity.
+- [x] Change ordinary repository removal to unregister the checkout, clear it as the selected repository, and retain its database history and daemon-owned file namespace by stable repository ID.
+- [x] Make unavailable, moved, and unregistered checkouts inspectable in repository diagnostics while blocking source-dependent actions with stable, actionable errors.
+- [x] Allow an existing retained repository identity to be reconnected to a valid checkout path without rewriting historical ownership.
+- [x] Keep irreversible purge out of ordinary removal; if a purge flow is introduced, make it explicit, durable, idempotent, and recoverable across database and filesystem cleanup.
+- [x] Test unregister, re-selection prevention, retained threads and runs, missing checkout behavior, reconnection, file retention, and foreign-key integrity.
 
 ### 8. Remove repository-local daemon state and expose the operational boundary
 

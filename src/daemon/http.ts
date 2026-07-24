@@ -107,11 +107,12 @@ import {
   listRepositories,
   registerRepository,
   removeRepository,
+  reconnectRepository,
   selectRepository,
   repositoryRoot,
   RepositoryError,
 } from "../repositories/store.js";
-import { resolveRepositoryContext, RepositoryContextError } from "../repositories/context.js";
+import { resolveRepositoryContext, resolveRepositoryRecord, RepositoryContextError } from "../repositories/context.js";
 import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import {
   beginRegistryRefresh,
@@ -597,9 +598,13 @@ function mapDomainError(err: unknown): ApiError {
     return new ApiError(err.code === "attachment_missing" ? 404 : 422, err.message, err.code);
   if (err instanceof StoragePathError) return new ApiError(422, err.message, "attachment_invalid");
   if (err instanceof RepositoryError)
-    return new ApiError(err.code === "duplicate_path" ? 409 : 422, err.message, err.code);
+    return new ApiError(
+      err.code === "duplicate_path" || err.code === "repository_unregistered" || err.code === "repository_unavailable" ? 409 : 422,
+      err.message,
+      err.code,
+    );
   if (err instanceof RepositoryContextError)
-    return new ApiError(404, err.message, err.code);
+    return new ApiError(err.code === "repository_not_found" ? 404 : 409, err.message, err.code);
   if (err instanceof WorkflowValidationError)
     return new ApiError(422, err.message, "workflow_profile_invalid");
   logger.error({ err }, "Unexpected error in task HTTP handler");
@@ -761,8 +766,15 @@ function registerRepositoryRoutes(app: Hono, machineDir?: string): void {
     try {
       return c.json({ repository: selectRepository(c.req.param("id"), machineDir) });
     } catch (err) {
-      if (err instanceof Error && /not found/.test(err.message))
-        throw new ApiError(404, err.message, "repository_not_found");
+      throw mapDomainError(err);
+    }
+  });
+  app.post("/api/repositories/:id/reconnect", async (c) => {
+    const body = await readJsonObject(c, new Set(["path"]));
+    if (body.path === undefined) throw new ApiError(422, "path is required", "missing_field");
+    try {
+      return c.json({ repository: reconnectRepository(c.req.param("id"), assertString(body.path, "path"), machineDir) });
+    } catch (err) {
       throw mapDomainError(err);
     }
   });
@@ -797,6 +809,23 @@ function registerDiagnosticsRoute(
         action: "Register and select a git repository in the browser.",
         severity: "warning",
       });
+    for (const repository of repositories) {
+      if (repository.checkout_status === "missing") {
+        issues.push({
+          code: "REPOSITORY_CHECKOUT_UNAVAILABLE",
+          message: `${repository.name} is registered, but its checkout is unavailable at ${repository.path}.`,
+          action: "Reconnect this repository to its moved checkout before using source-dependent actions.",
+          severity: "error",
+        });
+      } else if (repository.checkout_status === "unregistered") {
+        issues.push({
+          code: "REPOSITORY_UNREGISTERED",
+          message: `${repository.name} is unregistered; its history and daemon-owned files are retained.`,
+          action: "Reconnect the checkout if you want to resume source-dependent work.",
+          severity: "warning",
+        });
+      }
+    }
     if (catalog.refresh?.status === "failed")
       issues.push({
         code: "REGISTRY_REFRESH_FAILED",
@@ -848,8 +877,9 @@ function registerDiagnosticsRoute(
       daemon: { status: "ok", version, host: c.req.header("host") ?? null },
       repository: {
         selected: selected ?? null,
-        registered_count: repositories.length,
+        registered_count: repositories.filter((repository) => repository.registration_status === "registered").length,
         root: root ?? null,
+        repositories,
       },
       registry: { snapshot: catalog.snapshot, refresh: catalog.refresh },
       agents,
@@ -1454,7 +1484,7 @@ function registerChatRoutes(
     const requested = typeof explicit === "string" ? explicit : c.req.query("repository_id") ?? c.req.header("x-marshal-repository-id") ?? configuredRepositoryId;
     if (!requested) throw new ApiError(409, "repository_id is required", "repository_required");
     if (explicit !== undefined && typeof explicit !== "string") throw new ApiError(422, "repository_id must be a string", "invalid_field");
-    resolveRepositoryContext(requested, machineDir);
+    resolveRepositoryRecord(requested, machineDir);
     return requested;
   };
   const turnsByRepository = new Map<string, ChatTurnRunner>();
@@ -1478,6 +1508,7 @@ function registerChatRoutes(
       new Set(["repository_id", "agent_id", "agent_version", "cwd", "title", "task_slug"]),
     );
     const repositoryId = resolveRequestRepository(c, body.repository_id);
+    resolveRepositoryContext(repositoryId, machineDir);
     if (body.agent_id === undefined)
       throw new ApiError(422, "agent_id is required", "missing_field");
     const agentId = assertString(body.agent_id, "agent_id");
@@ -1829,20 +1860,21 @@ function registerTaskRoutes(
   const resolveFactoryRepository = (c: Context): { id: string; checkoutPath: string } => {
     const id = c.req.query("repository_id") ?? c.req.header("x-marshal-repository-id") ?? configuredRepositoryId;
     if (!id) throw new ApiError(409, "repository_id is required", "repository_required");
-    const context = resolveRepositoryContext(id, machineDir);
-    return { id, checkoutPath: context.checkoutPath };
+    const repository = resolveRepositoryRecord(id, machineDir);
+    return { id, checkoutPath: repository.path };
   };
-  const configuredRoot = root ?? (configuredRepositoryId ? resolveRepositoryContext(configuredRepositoryId, machineDir).checkoutPath : undefined);
   const makeManager = (repositoryId?: string): WorktreeManager =>
     (() => {
-      const selectedRoot = root ?? repositoryRoot(machineDir);
+      const resolvedRepositoryId = repositoryId ?? configuredRepositoryId;
+      const selectedRoot = root ?? (resolvedRepositoryId
+        ? resolveRepositoryContext(resolvedRepositoryId, machineDir).checkoutPath
+        : repositoryRoot(machineDir));
       if (!selectedRoot)
         throw new ApiError(
           409,
           "Select a repository before using tasks",
           "repository_not_selected",
         );
-      const resolvedRepositoryId = repositoryId ?? configuredRepositoryId;
       if (!resolvedRepositoryId) throw new ApiError(409, "repository_id is required", "repository_required");
       return new WorktreeManager(resolvedRepositoryId, selectedRoot, { machineDir });
     })();
@@ -2182,7 +2214,7 @@ function registerSpecRoutes(
   const repositoryFor = (c: Context): string => {
     const id = c.req.query("repository_id") ?? configuredRepositoryId;
     if (!id) throw new ApiError(409, "repository_id is required", "repository_required");
-    resolveRepositoryContext(id, machineDir);
+    resolveRepositoryRecord(id, machineDir);
     return id;
   };
   const ensureBus = (bus: EventBus | undefined): EventBus => {

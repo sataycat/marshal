@@ -1,7 +1,7 @@
 import { logger } from "../logger.js";
 import { runOnce, type RunOnceOptions, type RunOnceResult } from "./orchestrator.js";
 import { publishDaemonCycleComplete, publishDaemonIdle, type EventBus } from "./bus.js";
-import { repositoryRoot, listRepositories } from "../repositories/store.js";
+import { repositoryRoot, listRepositories, repositoryIsAvailable } from "../repositories/store.js";
 import { reconcileInstallationOperations } from "../agents/store.js";
 import { reconcileAgentActivations } from "../agents/activation.js";
 import { getGlobalDir } from "./config.js";
@@ -69,7 +69,7 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<voi
     let result: RunOnceResult | null = null;
     let published = false;
     try {
-      const repositories = options.repositoryId ? listRepositories(machineDir).filter((repo) => repo.id === options.repositoryId) : listRepositories(machineDir);
+      const repositories = (options.repositoryId ? listRepositories(machineDir).filter((repo) => repo.id === options.repositoryId) : listRepositories(machineDir)).filter(repositoryIsAvailable);
       for (const repository of repositories) {
         result = await runOnce({ ...options, repositoryId: repository.id, root: repository.path });
         if (result) break;

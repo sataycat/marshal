@@ -51,6 +51,14 @@ export async function selectRepository(id: string): Promise<Repository> {
   const res = await fetch(`/api/repositories/${encodeURIComponent(id)}/select`, { method: "POST" });
   return (await jsonOrThrow<{ repository: Repository }>(res)).repository;
 }
+export async function reconnectRepository(id: string, path: string): Promise<Repository> {
+  const res = await fetch(`/api/repositories/${encodeURIComponent(id)}/reconnect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  return (await jsonOrThrow<{ repository: Repository }>(res)).repository;
+}
 export async function removeRepository(id: string): Promise<void> {
   const res = await fetch(`/api/repositories/${encodeURIComponent(id)}`, { method: "DELETE" });
   await jsonOrThrow(res);
