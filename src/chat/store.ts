@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { relative, resolve } from "node:path";
 import { openRepositoryDb } from "../db/index.js";
 import { resolveRepositoryContext } from "../repositories/context.js";
+import { removeAttachmentTree } from "./attachment-storage.js";
 import type { HistoricalAgentProvenance } from "../agents/provenance.js";
 import type { StructuredAcpError } from "../acp/errors.js";
 import type { AgentSessionConfigOption, AgentSessionModeState } from "../agent/types.js";
@@ -256,6 +257,10 @@ export function updateChatThread(
 export function deleteChatThread(repositoryId: string, id: string, machineDir?: string): void {
   const db = openRepositoryDb(repositoryId, machineDir);
   getChatThread(repositoryId, id, machineDir);
+  const attachments = db
+    .prepare("SELECT storage_key FROM chat_attachments WHERE repository_id = ? AND thread_id = ? ORDER BY id")
+    .all(repositoryId, id) as Array<{ storage_key: string }>;
+  removeAttachmentTree(repositoryId, id, attachments.map((row) => row.storage_key), machineDir);
   const result = db
     .prepare("DELETE FROM chat_threads WHERE id = ? AND repository_id = ?")
     .run(id, repositoryId);

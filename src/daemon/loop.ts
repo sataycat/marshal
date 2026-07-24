@@ -6,6 +6,7 @@ import { reconcileInstallationOperations } from "../agents/store.js";
 import { reconcileAgentActivations } from "../agents/activation.js";
 import { getGlobalDir } from "./config.js";
 import { openDatabase } from "../db/index.js";
+import { reconcileChatAttachments } from "../chat/attachments.js";
 
 export const DEFAULT_DAEMON_INTERVAL_MS = 5000;
 
@@ -58,9 +59,11 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<voi
   openDatabase(machineDir).close();
   reconcileInstallationOperations(machineDir);
   reconcileAgentActivations(machineDir, options.bus);
+  reconcileChatAttachments(machineDir);
 
   while (!signal?.aborted) {
     reconcileAgentActivations(machineDir, options.bus);
+    reconcileChatAttachments(machineDir);
     let result: RunOnceResult | null = null;
     let published = false;
     try {

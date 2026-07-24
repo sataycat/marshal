@@ -260,7 +260,7 @@ export function createStorageTemporaryDirectory(prefix: string, explicitRoot?: s
 }
 
 /** Assert that an existing or planned path belongs to a storage root. */
-export function assertStoragePath(explicitRoot: string, candidate: string): string {
+export function assertStoragePath(explicitRoot: string | undefined, candidate: string): string {
   return assertPathContained(resolveMarshalHome(explicitRoot), candidate);
 }
 

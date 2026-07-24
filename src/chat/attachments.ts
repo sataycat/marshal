@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { extname, resolve } from "node:path";
-import { openRepositoryDb } from "../db/index.js";
-import { getChatThread, type ChatThread } from "./store.js";
-import { ensureRepositoryNamespace } from "../storage/layout.js";
+import { extname } from "node:path";
+import { openDatabase, openRepositoryDb } from "../db/index.js";
+import { getChatThread } from "./store.js";
+import {
+  newAttachmentStorageKey,
+  reconcileAttachmentFiles,
+  readAttachmentBytes,
+  removeAttachmentTree,
+  writeAttachmentBytes,
+} from "./attachment-storage.js";
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_THREAD = 40 * 1024 * 1024;
@@ -28,10 +33,6 @@ export class ChatAttachmentError extends Error {
   }
 }
 
-function attachmentDir(thread: ChatThread): string {
-  return resolve(ensureRepositoryNamespace(thread.repository_id).attachmentsDirectory, thread.id);
-}
-
 function rowToAttachment(row: Record<string, unknown>): ChatAttachment {
   return { ...(row as unknown as ChatAttachment), repository_id: String(row.repository_id) };
 }
@@ -47,6 +48,7 @@ function validSignature(mime: string, bytes: Uint8Array): boolean {
 export function validateAttachment(file: { type: string; size: number; bytes: Uint8Array }): ChatAttachmentMime {
   if (!ALLOWED_IMAGE_TYPES.includes(file.type as ChatAttachmentMime)) throw new ChatAttachmentError("Unsupported image type. Use PNG, JPEG, WebP, or GIF.", "unsupported_image");
   if (file.size <= 0 || file.size > MAX_ATTACHMENT_BYTES) throw new ChatAttachmentError("Image must be between 1 byte and 10 MiB.", "attachment_too_large");
+  if (file.size !== file.bytes.byteLength) throw new ChatAttachmentError("Uploaded byte size does not match its metadata.", "invalid_image");
   if (!validSignature(file.type, file.bytes)) throw new ChatAttachmentError("The uploaded file is not a valid image of its declared type.", "invalid_image");
   return file.type as ChatAttachmentMime;
 }
@@ -69,13 +71,15 @@ export function createChatAttachment(
   const extension = extname(file.name).toLowerCase();
   if (extension && extension !== extensionFor(mime) && !(mime === "image/jpeg" && extension === ".jpeg")) throw new ChatAttachmentError("The file extension does not match its image type.", "invalid_image");
   const id = randomUUID();
-  const storageName = `${id}.bin`;
-  mkdirSync(attachmentDir(thread), { recursive: true, mode: 0o700 });
-  writeFileSync(resolve(attachmentDir(thread), storageName), file.bytes, { mode: 0o600, flag: "wx" });
+  const storageKey = newAttachmentStorageKey();
+  writeAttachmentBytes(repositoryId, thread.id, storageKey, file.bytes, machineDir);
   try {
-    db.prepare("INSERT INTO chat_attachments (id, repository_id, thread_id, filename, mime_type, byte_size, storage_name) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, repositoryId, threadId, file.name.slice(0, 200) || "image", mime, file.size, storageName);
+    db.prepare("INSERT INTO chat_attachments (id, repository_id, thread_id, filename, mime_type, byte_size, storage_key) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, repositoryId, threadId, file.name.slice(0, 200) || "image", mime, file.size, storageKey);
   } catch (error) {
-    unlinkSync(resolve(attachmentDir(thread), storageName));
+    // Metadata is authoritative for access.  A failed insert must not leave
+    // a readable file; maintenance also cleans up if this unlink is
+    // interrupted by a crash.
+    try { removeAttachmentTree(repositoryId, thread.id, [storageKey], machineDir); } catch { /* reconcile orphan later */ }
     throw error;
   }
   return getChatAttachment(repositoryId, threadId, id, machineDir);
@@ -97,8 +101,25 @@ export function getChatAttachment(repositoryId: string, threadId: string, id: st
 
 export function readChatAttachment(repositoryId: string, threadId: string, id: string, machineDir?: string): { attachment: ChatAttachment; bytes: Buffer } {
   const attachment = getChatAttachment(repositoryId, threadId, id, machineDir);
-  const thread = getChatThread(repositoryId, threadId, machineDir);
-  const row = openRepositoryDb(repositoryId, machineDir).prepare("SELECT storage_name FROM chat_attachments WHERE id = ? AND repository_id = ? AND thread_id = ?").get(id, repositoryId, threadId) as { storage_name: string };
-  if (!/^[0-9a-f-]+\.bin$/i.test(row.storage_name)) throw new ChatAttachmentError("Attachment storage is invalid.", "attachment_invalid");
-  return { attachment, bytes: readFileSync(resolve(attachmentDir(thread), row.storage_name)) };
+  const row = openRepositoryDb(repositoryId, machineDir).prepare("SELECT storage_key FROM chat_attachments WHERE id = ? AND repository_id = ? AND thread_id = ?").get(id, repositoryId, threadId) as { storage_key: string };
+  try {
+    return { attachment, bytes: readAttachmentBytes(repositoryId, threadId, row.storage_key, machineDir) };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new ChatAttachmentError("Attachment bytes are unavailable.", "attachment_missing");
+    throw error;
+  }
+}
+
+export function reconcileChatAttachments(machineDir?: string): ReturnType<typeof reconcileAttachmentFiles> {
+  const db = openDatabase(machineDir);
+  try {
+    const rows = db.prepare("SELECT repository_id, thread_id, storage_key FROM chat_attachments").all() as Array<{
+      repository_id: string;
+      thread_id: string;
+      storage_key: string;
+    }>;
+    return reconcileAttachmentFiles(rows, machineDir);
+  } finally {
+    db.close();
+  }
 }

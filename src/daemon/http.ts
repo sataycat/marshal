@@ -23,6 +23,7 @@ import {
   ensureStorageLayout,
   storageLayout,
   STORAGE_FILE_MODE,
+  StoragePathError,
 } from "../storage/layout.js";
 import {
   DEFAULT_DAEMON_HOST,
@@ -97,6 +98,7 @@ import {
   listChatAttachments,
   MAX_ATTACHMENT_BYTES,
   readChatAttachment,
+  reconcileChatAttachments,
 } from "../chat/attachments.js";
 import { AuthService } from "./auth.js";
 import {
@@ -591,7 +593,9 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof ChatAgentUnavailableError) return new ApiError(409, err.message, err.code);
   if (err instanceof InvalidChatPathError) return new ApiError(422, err.message, "invalid_path");
   if (err instanceof ChatFileTooLargeError) return new ApiError(422, err.message, "file_too_large");
-  if (err instanceof ChatAttachmentError) return new ApiError(422, err.message, err.code);
+  if (err instanceof ChatAttachmentError)
+    return new ApiError(err.code === "attachment_missing" ? 404 : 422, err.message, err.code);
+  if (err instanceof StoragePathError) return new ApiError(422, err.message, "attachment_invalid");
   if (err instanceof RepositoryError)
     return new ApiError(err.code === "duplicate_path" ? 409 : 422, err.message, err.code);
   if (err instanceof RepositoryContextError)
@@ -2335,6 +2339,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   // Establish and migrate the controlled database before route construction,
   // authentication reconciliation, WebSocket hydration, or background work.
   openDatabase(machineDir).close();
+  reconcileChatAttachments(machineDir);
 
   const { host, port } = resolveDaemonBind(
     { host: options.host, port: options.port },
