@@ -82,6 +82,17 @@ describe("task CRUD API", () => {
     expect(list.body).toMatchObject({ tasks: [{ slug: "add-greeting", status: "backlog" }] });
   });
 
+  it("accepts the repository ID in the create body", async () => {
+    const id = repositoryId(repoRoot);
+    const { status, body } = await req(app, "POST", "/api/tasks", {
+      repository_id: id,
+      title: "Body scoped task",
+      spec_markdown: "body scope",
+    });
+    expect(status).toBe(201);
+    expect(body).toMatchObject({ task: { repository_id: id, title: "Body scoped task" } });
+  });
+
   it("disambiguates duplicate titles by appending a numeric suffix", async () => {
     await req(app, "POST", "/api/tasks", { title: "Add Greeting" });
     const second = await req(app, "POST", "/api/tasks", { title: "Add Greeting" });

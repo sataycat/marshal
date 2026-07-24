@@ -1896,8 +1896,8 @@ function registerTaskRoutes(
   machineDir?: string,
   configuredRepositoryId?: string,
 ): void {
-  const resolveFactoryRepository = (c: Context): { id: string; checkoutPath: string } => {
-    const id = c.req.query("repository_id") ?? c.req.header("x-marshal-repository-id") ?? configuredRepositoryId;
+  const resolveFactoryRepository = (c: Context, bodyRepositoryId?: string): { id: string; checkoutPath: string } => {
+    const id = bodyRepositoryId ?? c.req.query("repository_id") ?? c.req.header("x-marshal-repository-id") ?? configuredRepositoryId;
     if (!id) throw new ApiError(409, "repository_id is required", "repository_required");
     const repository = resolveRepositoryRecord(id, machineDir);
     return { id, checkoutPath: repository.path };
@@ -1952,7 +1952,7 @@ function registerTaskRoutes(
       specMarkdown = assertString(body.spec_markdown, "spec_markdown");
     }
     try {
-      const repository = resolveFactoryRepository(c);
+      const repository = resolveFactoryRepository(c, typeof body.repository_id === "string" ? body.repository_id : undefined);
       const repositoryId = repository.id;
       if (body.repository_id !== undefined && body.repository_id !== repositoryId)
         throw new ApiError(409, "repository_id does not match the requested repository", "repository_conflict");
