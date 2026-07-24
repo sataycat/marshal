@@ -29,6 +29,7 @@ import { useToastStore } from "../state/toastStore";
 import { cn } from "../lib/utils";
 import { installedCardState } from "../agents/installedCardState";
 import { authMethodSupport } from "../agents/authMethodSupport";
+import { chatPathForAgent } from "./routes";
 
 const featuredAgentNames = ["claude", "codex", "devin", "copilot", "opencode", "gemini", "amp", "zed"];
 
@@ -277,6 +278,7 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
   const [terminal, setTerminal] = useState<TerminalAuthSnapshot | null>(null);
   const [terminalInput, setTerminalInput] = useState("");
   const terminalSocket = useRef<ReturnType<typeof connectTerminalAuthentication> | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const statusTone = cardState === "ready" ? "success" : cardState === "setup_needed" ? "error" : "neutral";
   const statusLabel = cardState === "ready" ? "Ready" : cardState === "setup_needed" ? "Error" : "Installed";
 
@@ -308,9 +310,10 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
   return (
     <article className={cn(
       "flex flex-col overflow-hidden rounded-xl border bg-panel transition-colors hover:border-input",
+      detailsOpen ? "h-auto" : "h-[20rem]",
       cardState === "setup_needed" ? "border-error-border" : "border-border",
     )}>
-      <div className="p-4">
+      <div className="flex min-h-0 flex-1 flex-col p-4">
       <div className="flex items-start gap-3">
         {registryAgent && <AgentIcon agent={registryAgent} className="size-11 shrink-0 rounded-lg border border-border bg-bg object-cover p-1" />}
         <div className="min-w-0 flex-1">
@@ -320,59 +323,62 @@ function InstalledCard({ entry, registryAgent, activationOperation, onProbe, onR
         <Badge tone={statusTone} className="mt-0.5"><span aria-hidden className={cn("size-1.5 rounded-full", cardState === "ready" ? "bg-success" : cardState === "setup_needed" ? "bg-error" : "bg-muted-foreground")} />{statusLabel}</Badge>
       </div>
 
-      {entry.status === "failed" && <p className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">Installation failed: {entry.failure ?? "unknown error"}</p>}
-      {entry.status === "installed" && entry.readiness_status === "probing" && <p className="mt-3 text-sm text-muted-foreground">Marshal is getting this agent ready.</p>}
-      {entry.readiness_status === "authentication_required" && <p className="mt-3 rounded-lg border border-warn-border bg-warn-bg px-3 py-2 text-xs text-warn">Sign in to this agent, then Marshal will check readiness again automatically.</p>}
-      {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "env_var").map((method) => (
-        <form key={method.id} className="mt-3 rounded-lg border border-border bg-inset p-3" onSubmit={(event) => { event.preventDefault(); onAuthenticate(method.id, authValues); }}>
-          <p className="text-sm font-medium">{method.name}</p>
-          {method.description && <p className="mt-1 text-xs text-muted-foreground">{method.description}</p>}
-          {method.link && <a className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline" href={method.link} target="_blank" rel="noreferrer">Get credentials <ExternalLink className="size-3" /></a>}
-          <div className="mt-3 space-y-2">
-            {method.vars.map((variable) => <label key={variable.name} className="block text-xs"><span className="mb-1 block font-medium text-text">{variable.label ?? variable.name}{variable.optional ? " (optional)" : ""}</span><Input type={variable.secret ? "password" : "text"} name={variable.name} autoComplete="off" required={!variable.optional} value={authValues[variable.name] ?? ""} onChange={(event) => setAuthValues((current) => ({ ...current, [variable.name]: event.target.value }))} /></label>)}
-          </div>
-          <Button className="mt-3" size="sm" type="submit" disabled={busy || activationBusy}><ShieldCheck aria-hidden />Save and check setup</Button>
-        </form>
-      ))}
-      {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "terminal" && authMethodSupport(method).supported).map((method) => (
-        <div key={method.id} className="mt-3 rounded-lg border border-border bg-inset p-3">
-          <p className="text-sm font-medium">{method.name}</p>
-          {method.description && <p className="mt-1 text-xs text-muted-foreground">{method.description}</p>}
-          <p className="mt-2 rounded border border-warn-border bg-warn-bg px-2 py-1.5 text-xs text-warn">This agent setup terminal executes on the Marshal daemon host, not in your browser. It runs the pinned installed agent command with the advertised terminal setup metadata; it is not a general shell.</p>
-          {!terminal && <Button className="mt-3" size="sm" onClick={() => void openTerminal(method.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Open setup terminal</Button>}
-          {terminal && terminal.operation.method_id === method.id && <div className="mt-3">
-            <div className="mb-2 flex items-center justify-between text-xs"><span>{terminal.phase === "running" ? "Connected to setup" : terminal.phase === "reprobing" ? "Checking readiness…" : `Setup ${terminal.operation.status}`}</span><span className="text-muted-foreground">{terminal.host}</span></div>
-            <pre className="h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-black p-3 font-mono text-xs text-green-300">{terminal.output || "Waiting for terminal output…"}{terminal.output_truncated ? "\n[older output truncated]" : ""}</pre>
-            {terminal.phase === "running" && <form className="mt-2 flex gap-2" onSubmit={(event) => { event.preventDefault(); terminalSocket.current?.send(`${terminalInput}\r`); setTerminalInput(""); }}><Input aria-label="Setup terminal input" autoComplete="off" value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} placeholder="Type setup input and press Enter" /><Button type="submit" size="sm">Send</Button><Button type="button" variant="outline" size="sm" onClick={() => void cancel.mutateAsync(terminal.operation.id)}>Cancel</Button></form>}
-            {terminal.operation.terminal_diagnostic && <p className="mt-2 text-xs text-muted-foreground">{terminal.operation.terminal_diagnostic.message} {terminal.operation.terminal_diagnostic.action}</p>}
-          </div>}
-        </div>
-      ))}
-      {entry.readiness_status === "failed" && (entry.readiness_error || activationOperation?.activation_diagnostic) && <div className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error"><p>Setup failed: {entry.readiness_error ?? activationOperation?.activation_diagnostic?.message}</p><p className="mt-1 text-error/80">{activationOperation?.activation_diagnostic?.action ?? "Retry the readiness check after reviewing the installation."}</p></div>}
-      {auth && auth.status !== "succeeded" && (
-        <div className="mt-3 rounded-lg border border-border bg-inset px-3 py-2 text-xs">
-          <div className="flex items-center justify-between gap-2">
-            <span>Authentication {auth.status}</span>
-            {auth.status === "authenticating" && <Button variant="ghost" size="xs" onClick={() => void cancel.mutateAsync(auth.id)} disabled={cancel.isPending}>Cancel</Button>}
-          </div>
-          {auth.error && <p className="mt-1 text-error">{auth.error}</p>}
-        </div>
-      )}
+      <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">{registryAgent?.description ?? "Installed ACP coding agent"}</p>
 
-      <div className="mt-4 flex flex-col gap-2 border-t border-border/80 pt-3 sm:flex-row sm:items-center">
-        {cardState === "ready" && <Link href="/chat" className={cn(buttonVariants({ size: "lg" }), "w-full px-4 sm:w-auto")}><MessageSquare aria-hidden />Start chat</Link>}
+      <div className="mt-auto flex min-h-8 flex-wrap items-center gap-3 border-t border-border/80 pt-3 text-xs">
+        {registryAgent?.repository && <a className="inline-flex items-center gap-1 text-primary hover:underline" href={registryAgent.repository} target="_blank" rel="noreferrer">Source <ExternalLink className="size-3" /></a>}
+        {registryAgent?.website && <a className="inline-flex items-center gap-1 text-primary hover:underline" href={registryAgent.website} target="_blank" rel="noreferrer">Website <ExternalLink className="size-3" /></a>}
+        {cardState === "ready" && <Link href={chatPathForAgent(entry.id, entry.version)} className={cn(buttonVariants({ size: "lg" }), "ml-auto w-full px-4 sm:w-auto")}><MessageSquare aria-hidden />Start chat</Link>}
         {cardState === "sign_in_required" && signInMethod && <Button size="lg" className="w-full px-4 sm:w-auto" onClick={() => onAuthenticate(signInMethod.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Sign in</Button>}
         {cardState === "setup_needed" && <Button size="lg" className="w-full px-4 sm:w-auto" onClick={onProbe} disabled={busy || activationBusy}><Wrench aria-hidden />Retry setup</Button>}
         {cardState === "getting_ready" && <p className="text-sm text-muted-foreground">Setup is running. Details will update when the check finishes.</p>}
       </div>
       </div>
 
-      <details className="group border-t border-border/80 bg-panel/70 text-sm">
+      <details className="group border-t border-border/80 bg-panel/70 text-sm" onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
         <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-inset/70 hover:text-text [&::-webkit-details-marker]:hidden">
           <span>View details</span>
           <ChevronDown aria-hidden className="size-4 transition-transform group-open:rotate-180" />
         </summary>
         <div className="border-t border-border/80 px-4 py-4">
+          {entry.status === "failed" && <p className="rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error">Installation failed: {entry.failure ?? "unknown error"}</p>}
+          {entry.status === "installed" && entry.readiness_status === "probing" && <p className="text-sm text-muted-foreground">Marshal is getting this agent ready.</p>}
+          {entry.readiness_status === "authentication_required" && <p className="rounded-lg border border-warn-border bg-warn-bg px-3 py-2 text-xs text-warn">Sign in to this agent, then Marshal will check readiness again automatically.</p>}
+          {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "env_var").map((method) => (
+            <form key={method.id} className="mt-3 rounded-lg border border-border bg-inset p-3" onSubmit={(event) => { event.preventDefault(); void onAuthenticate(method.id, authValues); }}>
+              <p className="text-sm font-medium">{method.name}</p>
+              {method.description && <p className="mt-1 text-xs text-muted-foreground">{method.description}</p>}
+              {method.link && <a className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline" href={method.link} target="_blank" rel="noreferrer">Get credentials <ExternalLink className="size-3" /></a>}
+              <div className="mt-3 space-y-2">
+                {method.vars.map((variable) => <label key={variable.name} className="block text-xs"><span className="mb-1 block font-medium text-text">{variable.label ?? variable.name}{variable.optional ? " (optional)" : ""}</span><Input type={variable.secret ? "password" : "text"} name={variable.name} autoComplete="off" required={!variable.optional} value={authValues[variable.name] ?? ""} onChange={(event) => setAuthValues((current) => ({ ...current, [variable.name]: event.target.value }))} /></label>)}
+              </div>
+              <Button className="mt-3" size="sm" type="submit" disabled={busy || activationBusy}><ShieldCheck aria-hidden />Save and check setup</Button>
+            </form>
+          ))}
+          {entry.readiness_status === "authentication_required" && entry.auth_methods.filter((method) => method.type === "terminal" && authMethodSupport(method).supported).map((method) => (
+            <div key={method.id} className="mt-3 rounded-lg border border-border bg-inset p-3">
+              <p className="text-sm font-medium">{method.name}</p>
+              {method.description && <p className="mt-1 text-xs text-muted-foreground">{method.description}</p>}
+              <p className="mt-2 rounded border border-warn-border bg-warn-bg px-2 py-1.5 text-xs text-warn">This agent setup terminal executes on the Marshal daemon host, not in your browser. It runs the pinned installed agent command with the advertised terminal setup metadata; it is not a general shell.</p>
+              {!terminal && <Button className="mt-3" size="sm" onClick={() => void openTerminal(method.id)} disabled={busy || activationBusy}><ShieldCheck aria-hidden />Open setup terminal</Button>}
+              {terminal && terminal.operation.method_id === method.id && <div className="mt-3">
+                <div className="mb-2 flex items-center justify-between text-xs"><span>{terminal.phase === "running" ? "Connected to setup" : terminal.phase === "reprobing" ? "Checking readiness…" : `Setup ${terminal.operation.status}`}</span><span className="text-muted-foreground">{terminal.host}</span></div>
+                <pre className="h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-black p-3 font-mono text-xs text-green-300">{terminal.output || "Waiting for terminal output…"}{terminal.output_truncated ? "\n[older output truncated]" : ""}</pre>
+                {terminal.phase === "running" && <form className="mt-2 flex gap-2" onSubmit={(event) => { event.preventDefault(); terminalSocket.current?.send(`${terminalInput}\r`); setTerminalInput(""); }}><Input aria-label="Setup terminal input" autoComplete="off" value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} placeholder="Type setup input and press Enter" /><Button type="submit" size="sm">Send</Button><Button type="button" variant="outline" size="sm" onClick={() => void cancel.mutateAsync(terminal.operation.id)}>Cancel</Button></form>}
+                {terminal.operation.terminal_diagnostic && <p className="mt-2 text-xs text-muted-foreground">{terminal.operation.terminal_diagnostic.message} {terminal.operation.terminal_diagnostic.action}</p>}
+              </div>}
+            </div>
+          ))}
+          {entry.readiness_status === "failed" && (entry.readiness_error || activationOperation?.activation_diagnostic) && <div className="mt-3 rounded-lg border border-error-border bg-error-bg px-3 py-2 text-xs text-error"><p>Setup failed: {entry.readiness_error ?? activationOperation?.activation_diagnostic?.message}</p><p className="mt-1 text-error/80">{activationOperation?.activation_diagnostic?.action ?? "Retry the readiness check after reviewing the installation."}</p></div>}
+          {auth && auth.status !== "succeeded" && (
+            <div className="mt-3 rounded-lg border border-border bg-inset px-3 py-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span>Authentication {auth.status}</span>
+                {auth.status === "authenticating" && <Button variant="ghost" size="xs" onClick={() => void cancel.mutateAsync(auth.id)} disabled={cancel.isPending}>Cancel</Button>}
+              </div>
+              {auth.error && <p className="mt-1 text-error">{auth.error}</p>}
+            </div>
+          )}
           <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
             <div><dt className="text-xs text-muted-foreground">Distribution</dt><dd className="mt-0.5 font-medium text-text">{entry.distribution}</dd></div>
             <div><dt className="text-xs text-muted-foreground">Integrity</dt><dd className="mt-0.5 font-medium capitalize text-text">{entry.integrity_status.replaceAll("_", " ")}</dd></div>

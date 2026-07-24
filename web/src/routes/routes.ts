@@ -8,6 +8,8 @@ export const ROUTES = {
   chatThread: (threadId: string): `/chat/${string}` => `/chat/${threadId}`,
 } as const;
 
+export const CHAT_AGENT_QUERY_PARAM = "agent";
+
 export type StaticPath = (typeof ROUTES)["home" | "chat" | "agents" | "settings"];
 export type ChatPath = `/chat/${string}`;
 export type RoutePath = StaticPath | ChatPath;
@@ -44,6 +46,17 @@ export const ROUTE_LOADERS: RouteLoaders = {
 export function matchChatPath(path: string): string | null {
   const m = /^\/chat\/([^/]+)$/.exec(path);
   return m && m[1] ? m[1] : null;
+}
+
+export function chatPathForAgent(agentId: string, version: string): string {
+  const params = new URLSearchParams({ [CHAT_AGENT_QUERY_PARAM]: `${agentId}@${version}` });
+  return `${ROUTES.chat}?${params.toString()}`;
+}
+
+export function selectedAgentFromSearch(search: string): string | null {
+  const query = search.startsWith("?") ? search.slice(1) : search;
+  const value = new URLSearchParams(query).get(CHAT_AGENT_QUERY_PARAM);
+  return value?.trim() || null;
 }
 
 export function preloadStatic(path: StaticPath): void {

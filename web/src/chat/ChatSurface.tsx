@@ -72,9 +72,8 @@ import { cn } from "@/lib/utils";
 import type { ChatAttachment, ChatMessage, ChatThread, InstalledAgent, PendingPermission, RegistryAgent, SessionConfigGroup, SessionConfigOption } from "../types";
 import { FilesSidebar } from "./FilesSidebar";
 import { groupThreadsByProject } from "./sidebar";
-import { shouldInitializeDraftSession } from "./draft";
 
-export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Element {
+export function ChatSurface({ selectedId, selectedAgent }: { selectedId?: string; selectedAgent?: string | null }): JSX.Element {
   const threads = useChatStore(useShallow(selectThreads));
   const liveMessages = useChatStore(useShallow(selectMessages(selectedId ?? "")));
   const status = useTaskStore((state) => state.socketStatus);
@@ -213,7 +212,7 @@ export function ChatSurface({ selectedId }: { selectedId?: string }): JSX.Elemen
       <section className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !selectedId && !newSessionOpen && "hidden md:flex")}>
         {selectedId
           ? <ThreadWorkspace thread={selected} seeded={threadQuery.data?.messages ?? []} live={liveMessages} loading={threadQuery.isPending} loadError={threadQuery.error?.message ?? null} onRetryLoad={() => void threadQuery.refetch()} onBack={() => void navigate("/chat")} />
-          : <NewChatComposer agents={agents} onStarted={(session) => { void navigate(`/chat/${session.id}`); }} />}
+           : <NewChatComposer agents={agents} selectedAgent={selectedAgent} onStarted={(session) => { void navigate(`/chat/${session.id}`); }} />}
       </section>
       <Dialog open={switcherOpen} onOpenChange={setSwitcherOpen}>
         <DialogContent className="max-w-lg">
@@ -362,15 +361,11 @@ function ThreadActions({ thread, onMutate, onDiscard }: { thread: ChatThread; on
   );
 }
 
-function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onStarted: (session: ChatThread) => void }): JSX.Element {
+function NewChatComposer({ agents, selectedAgent, onStarted }: { agents: InstalledAgent[]; selectedAgent?: string | null; onStarted: (session: ChatThread) => void }): JSX.Element {
   const [sending, setSending] = useState(false);
-  const [draftSession, setDraftSession] = useState<ChatThread | null>(null);
-  const draftSessionRequestKeyRef = useRef<string | null>(null);
+  const [unassignedDraft, setUnassignedDraft] = useState("");
   const createMutation = useCreateThreadMutation();
   const sendMutation = useSendChatMutation();
-  const initializeSessionMutation = useInitializeChatSessionMutation();
-  const setConfigOptionMutation = useSetChatSessionConfigOptionMutation();
-  const setModeMutation = useSetChatSessionModeMutation();
   const pushError = useToastStore((state) => state.pushError);
   const composerDrafts = useChatStore((state) => state.composerDraftsByProject);
   const updateComposerDraft = useChatStore((state) => state.updateComposerDraft);
@@ -392,10 +387,10 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
   const selectedRepository = repositories.data?.repositories.find((item) => item.id === repositories.data?.selected_repository_id);
   const composerDraft = project ? composerDrafts[project] : undefined;
   const defaultAgent = agents[0] ? `${agents[0].id}@${agents[0].version}` : "";
-  const agent = composerDraft?.agent || defaultAgent;
-  const value = composerDraft?.content ?? "";
-  const draftSessionKey = project && agent ? `${project}:${agent}` : null;
-  const initializedSessionKey = draftSession ? `${draftSession.cwd}:${draftSession.agent_id}@${draftSession.agent_version}` : null;
+  const queryAgent = selectedAgent && agents.some((item) => `${item.id}@${item.version}` === selectedAgent) ? selectedAgent : null;
+  const [agentOverride, setAgentOverride] = useState<string | null>(null);
+  const agent = agentOverride ?? queryAgent ?? composerDraft?.agent ?? defaultAgent;
+  const value = project ? composerDraft?.content ?? "" : unassignedDraft;
   useEffect(() => {
     if (project && agent && !agents.some((item) => `${item.id}@${item.version}` === agent)) {
       updateComposerDraft(project, { agent: defaultAgent });
@@ -408,26 +403,6 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
     if (directoryQuery.data?.display_path === "~") setHomePath(directoryQuery.data.path);
   }, [directoryQuery.data]);
   useEffect(() => setHighlightedDirectory(0), [projectPath, projectSearch]);
-  useEffect(() => {
-    if (!shouldInitializeDraftSession(draftSessionKey, initializedSessionKey, draftSessionRequestKeyRef.current)) return;
-    draftSessionRequestKeyRef.current = draftSessionKey;
-    const requestKey = draftSessionKey;
-    const [agentId, agentVersion] = agent.split("@");
-    void createMutation.mutateAsync({ agent_id: agentId, agent_version: agentVersion, cwd: project ?? undefined })
-      .then((created) => {
-        if (draftSessionRequestKeyRef.current !== requestKey) return null;
-        setDraftSession(created);
-        return initializeSessionMutation.mutateAsync(created.id);
-      })
-      .then((initialized) => {
-        if (initialized && draftSessionRequestKeyRef.current === requestKey) setDraftSession(initialized);
-      })
-      .catch((error) => {
-        if (draftSessionRequestKeyRef.current === requestKey) {
-          pushError(error instanceof Error ? error.message : "Unable to inspect the agent session capabilities.");
-        }
-      });
-  }, [agent, createMutation, draftSessionKey, initializeSessionMutation, initializedSessionKey, project, pushError]);
   const breadcrumbItems = (() => {
     const normalized = currentProjectPath.replaceAll("\\", "/");
     const normalizedHome = homePath?.replaceAll("\\", "/").replace(/\/$/, "");
@@ -451,9 +426,10 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
       const existing = repositories.data?.repositories.find((item) => item.path === path);
       const repo = existing ?? await register.mutateAsync(path);
       await select.mutateAsync(repo.id);
+      if (unassignedDraft) updateComposerDraft(path, { content: unassignedDraft });
       setProject(path);
       setProjectPath(path);
-      setDraftSession(null);
+      setUnassignedDraft("");
     } catch (error) {
       setProject(null);
       setProjectPickerOpen(true);
@@ -471,46 +447,21 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
   };
   const send = async (): Promise<void> => {
     const content = value.trim();
-    if (!content || !agent || !project || sending || createMutation.isPending || initializeSessionMutation.isPending) return;
+    if (!content || !agent || !project || sending || createMutation.isPending) return;
     setSending(true);
-    let created: ChatThread | null = null;
     try {
-      created = draftSession && initializedSessionKey === draftSessionKey
-        ? draftSession
-        : await createMutation.mutateAsync({ agent_id: agent.split("@")[0], agent_version: agent.split("@")[1], cwd: project });
+      const created = await createMutation.mutateAsync({ agent_id: agent.split("@")[0], agent_version: agent.split("@")[1], cwd: project });
       await sendMutation.mutateAsync({ id: created.id, content });
       clearComposerDraft(project);
       onStarted(created);
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to start the conversation.");
-      if (created) {
-        clearComposerDraft(project);
-        onStarted(created);
-      }
     } finally { setSending(false); }
   };
 
   const changeAgent = (nextAgent: string): void => {
-    setDraftSession(null);
+    setAgentOverride(nextAgent);
     if (project) updateComposerDraft(project, { agent: nextAgent });
-  };
-
-  const setConfigOption = async (option: SessionConfigOption, nextValue: string | boolean): Promise<void> => {
-    if (!draftSession) return;
-    try {
-      setDraftSession(await setConfigOptionMutation.mutateAsync({ id: draftSession.id, configId: option.id, value: nextValue }));
-    } catch (error) {
-      pushError(error instanceof Error ? error.message : `Unable to change ${option.name}.`);
-    }
-  };
-
-  const setMode = async (modeId: string): Promise<void> => {
-    if (!draftSession) return;
-    try {
-      setDraftSession(await setModeMutation.mutateAsync({ id: draftSession.id, modeId }));
-    } catch (error) {
-      pushError(error instanceof Error ? error.message : "Unable to change the session mode.");
-    }
   };
 
   return (
@@ -520,11 +471,21 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
           <h1 className="text-2xl font-semibold tracking-[-0.02em]">Start a session</h1>
           <p className="mt-1.5 text-sm leading-6 text-muted-foreground">Pick a project and an agent, then describe the work. The conversation is durable — you can leave and come back.</p>
         </div>
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Agent</span>
+          <AgentPicker
+            value={agent}
+            onChange={changeAgent}
+            agents={agents}
+            registryAgents={registry.data?.agents ?? []}
+            disabled={sending || agents.length === 0}
+          />
+        </div>
         <div className="rounded-2xl border border-input bg-panel shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/15">
           <div className="p-4 pb-2">
             <Textarea
               value={value}
-              onChange={(event) => { if (project) updateComposerDraft(project, { content: event.target.value }); }}
+              onChange={(event) => { if (project) updateComposerDraft(project, { content: event.target.value }); else setUnassignedDraft(event.target.value); }}
               onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }}
               placeholder="Describe the task for your agent…"
               rows={4}
@@ -533,43 +494,25 @@ function NewChatComposer({ agents, onStarted }: { agents: InstalledAgent[]; onSt
               className="min-h-28 resize-none border-0 bg-transparent px-0 py-0 text-base shadow-none focus-visible:ring-0"
             />
           </div>
-          <div className="flex flex-wrap items-end gap-2 px-3 pb-3">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-              <AgentPicker
-                value={agent}
-                onChange={changeAgent}
-                agents={agents}
-                registryAgents={registry.data?.agents ?? []}
-                disabled={sending || agents.length === 0}
-              />
-              {(draftSession?.session_config_options.length ?? 0) > 0 || draftSession?.session_modes ? (
-                <SessionConfigurationControls
-                  options={draftSession?.session_config_options ?? []}
-                  modes={draftSession?.session_modes ?? null}
-                  disabled={sending || setConfigOptionMutation.isPending || setModeMutation.isPending}
-                  onOptionChange={setConfigOption}
-                  onModeChange={setMode}
-                />
-              ) : null}
-            </div>
-            <Button type="button" size="icon" className="size-9 shrink-0 rounded-full" onClick={() => void send()} disabled={sending || createMutation.isPending || initializeSessionMutation.isPending || agents.length === 0 || !project || value.trim().length === 0} aria-label="Start session" title="Start session">
-              {sending || createMutation.isPending || initializeSessionMutation.isPending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Send aria-hidden />}
+          <div className="flex flex-wrap items-end justify-end gap-2 px-3 pb-3">
+            <Button type="button" size="icon" className="size-9 shrink-0 rounded-full" onClick={() => void send()} disabled={sending || createMutation.isPending || agents.length === 0 || !project || value.trim().length === 0} aria-label="Start session" title="Start session">
+              {sending || createMutation.isPending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Send aria-hidden />}
             </Button>
           </div>
         </div>
-        <div className="mt-3 rounded-xl border border-border bg-panel p-1 shadow-sm">
+        <div className={cn("mt-3 rounded-xl border p-1 shadow-sm transition-colors", project ? "border-border bg-panel" : "border-warn-border bg-warn-bg ring-2 ring-warn/15")}>
             <button
               type="button"
               className="group flex w-full min-w-0 items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               onClick={openProjectPicker}
               aria-label={project ? `Change project, currently ${project}` : "Choose a project"}
             >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+               <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg", project ? "bg-primary/10 text-primary" : "bg-warn/15 text-warn")}>
                 <FolderGit2 aria-hidden className="size-4" />
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{project ? project.split("/").filter(Boolean).pop() ?? "~" : "Choose project"}</span>
-                <span className="block truncate font-mono text-[0.6875rem] text-muted-foreground">{project ?? "Required - the agent works inside this checkout"}</span>
+               <span className="min-w-0 flex-1">
+               <span className="block truncate text-sm font-medium">{project ? project.split("/").filter(Boolean).pop() ?? "~" : "Choose project"}</span>
+               <span className={cn("block truncate font-mono text-[0.6875rem]", project ? "text-muted-foreground" : "text-warn")}>{project ?? "Required - the agent works inside this checkout"}</span>
               </span>
               <ChevronDown aria-hidden className="size-4 shrink-0 text-muted-foreground" />
             </button>

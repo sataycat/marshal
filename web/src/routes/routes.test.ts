@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { NAV_ITEMS, ROUTES, matchChatPath, preloadStatic, preloadThread } from "./routes";
+import {
+  NAV_ITEMS,
+  ROUTES,
+  chatPathForAgent,
+  matchChatPath,
+  preloadStatic,
+  preloadThread,
+  selectedAgentFromSearch,
+} from "./routes";
 
 describe("ROUTES", () => {
   it("exposes static paths as literals", () => {
@@ -9,6 +17,10 @@ describe("ROUTES", () => {
 
   it("builds a chat session path with the given id", () => {
     expect(ROUTES.chatThread("abc-123")).toBe("/chat/abc-123");
+  });
+
+  it("builds a new chat path for an exact installed agent version", () => {
+    expect(chatPathForAgent("claude-acp", "0.61.0")).toBe("/chat?agent=claude-acp%400.61.0");
   });
 });
 
@@ -42,6 +54,17 @@ describe("matchChatPath", () => {
   it("returns null for unrelated paths", () => {
     expect(matchChatPath("/")).toBeNull();
     expect(matchChatPath("")).toBeNull();
+  });
+});
+
+describe("selectedAgentFromSearch", () => {
+  it("reads the selected agent key from the chat query", () => {
+    expect(selectedAgentFromSearch("?agent=claude-acp%400.61.0")).toBe("claude-acp@0.61.0");
+  });
+
+  it("returns null when the query does not select an agent", () => {
+    expect(selectedAgentFromSearch("?project=%2Frepo")).toBeNull();
+    expect(selectedAgentFromSearch("?agent=")).toBeNull();
   });
 });
 
