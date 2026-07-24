@@ -1,7 +1,7 @@
 import { logger } from "../logger.js";
 import { runOnce, type RunOnceOptions, type RunOnceResult } from "./orchestrator.js";
 import { publishDaemonCycleComplete, publishDaemonIdle, type EventBus } from "./bus.js";
-import { repositoryRoot } from "../repositories/store.js";
+import { repositoryRoot, listRepositories } from "../repositories/store.js";
 import { reconcileInstallationOperations } from "../agents/store.js";
 import { reconcileAgentActivations } from "../agents/activation.js";
 import { getGlobalDir } from "./config.js";
@@ -62,13 +62,11 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<voi
     let result: RunOnceResult | null = null;
     let published = false;
     try {
-      const root = options.root ?? repositoryRoot(machineDir);
-      if (!root) {
-        if (options.bus) publishDaemonIdle(options.bus);
-        await sleep(intervalMs, signal);
-        continue;
+      const repositories = options.repositoryId ? listRepositories(machineDir).filter((repo) => repo.id === options.repositoryId) : listRepositories(machineDir);
+      for (const repository of repositories) {
+        result = await runOnce({ ...options, repositoryId: repository.id, root: repository.path });
+        if (result) break;
       }
-      result = await runOnce({ ...options, root });
     } catch (err) {
       logger.error({ err }, "Daemon cycle failed");
       published = true;

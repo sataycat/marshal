@@ -315,9 +315,9 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerRegistryRoutes(app, options.machineDir);
   registerAgentRoutes(app, options.machineDir, bus, options.terminalAuth);
   registerWorkflowProfileRoutes(app, options.machineDir);
-  registerTaskRoutes(app, root, options.worktreeRoot, bus, options.machineDir);
-  registerRunRoutes(app, root);
-  registerSpecRoutes(app, root, bus, options.specAgent, options.machineDir);
+  registerTaskRoutes(app, root, options.worktreeRoot, bus, options.machineDir, configuredRepositoryId);
+  registerRunRoutes(app, root, options.machineDir, configuredRepositoryId);
+  registerSpecRoutes(app, root, bus, options.specAgent, options.machineDir, configuredRepositoryId);
   registerChatRoutes(app, root, bus, options.chatAgent, options.machineDir, configuredRepositoryId);
   registerStaticRoutes(app, webDir, options.webUrl);
   app.notFound((c) => spaNotFound(c, webDir, options.webUrl));
@@ -482,7 +482,7 @@ function taskCard(task: Task): TaskCardFields {
 }
 
 function taskPayload(task: Task): TaskPayload {
-  return taskCard(task);
+  return { ...taskCard(task), repositoryId: task.repository_id ?? null };
 }
 
 function taskDetail(task: Task): TaskDetailFields {
@@ -1819,7 +1819,15 @@ function registerTaskRoutes(
   worktreeRoot: string | undefined,
   bus: EventBus | undefined,
   machineDir?: string,
+  configuredRepositoryId?: string,
 ): void {
+  const resolveFactoryRepository = (c: Context): { id: string; checkoutPath: string } => {
+    const id = c.req.query("repository_id") ?? c.req.header("x-marshal-repository-id") ?? configuredRepositoryId;
+    if (!id) throw new ApiError(409, "repository_id is required", "repository_required");
+    const context = resolveRepositoryContext(id, machineDir);
+    return { id, checkoutPath: context.checkoutPath };
+  };
+  const configuredRoot = root ?? (configuredRepositoryId ? resolveRepositoryContext(configuredRepositoryId, machineDir).checkoutPath : undefined);
   const makeManager = (): WorktreeManager =>
     (() => {
       const selectedRoot = root ?? repositoryRoot(machineDir);
@@ -1834,15 +1842,16 @@ function registerTaskRoutes(
         : new WorktreeManager(selectedRoot);
     })();
   app.get("/api/tasks", (c) => {
-    const selectedRoot = root ?? repositoryRoot(machineDir);
-    const tasks = selectedRoot ? listTasks(selectedRoot).map(taskCard) : [];
+    const repository = resolveFactoryRepository(c);
+    const tasks = listTasks(repository.id, machineDir).map(taskCard);
     return c.json({ tasks });
   });
 
   app.get("/api/tasks/:slug", (c) => {
     const slug = c.req.param("slug");
     try {
-      const task = getTask(slug, root);
+      const repository = resolveFactoryRepository(c);
+      const task = getTask(repository.id, slug, machineDir);
       return c.json({ task: taskDetail(task) });
     } catch (err) {
       throw mapDomainError(err);
@@ -1867,10 +1876,11 @@ function registerTaskRoutes(
       specMarkdown = assertString(body.spec_markdown, "spec_markdown");
     }
     try {
-      const slug = generateUniqueSlug(titleStr, root);
-      const repository = getSelectedRepository(machineDir);
-      const repositoryId =
-        typeof body.repository_id === "string" ? body.repository_id : repository?.id;
+      const repository = resolveFactoryRepository(c);
+      const repositoryId = repository.id;
+      if (body.repository_id !== undefined && body.repository_id !== repositoryId)
+        throw new ApiError(409, "repository_id does not match the requested repository", "repository_conflict");
+      const slug = generateUniqueSlug(repositoryId, titleStr, machineDir);
       const profileId =
         typeof body.workflow_profile_id === "string" ? body.workflow_profile_id : undefined;
       if (profileId && (!repositoryId || !getWorkflowProfile(repositoryId, profileId, machineDir)))
@@ -1881,7 +1891,7 @@ function registerTaskRoutes(
         );
       const task = createTask(
         { slug, title: titleStr, specMarkdown, repositoryId, workflowProfileId: profileId },
-        root,
+        machineDir,
       );
       if (bus) publishTaskCreated(bus, taskPayload(task));
       return c.json({ task: taskDetail(task) }, 201);
@@ -1902,9 +1912,10 @@ function registerTaskRoutes(
       throw new ApiError(422, `Unknown status: ${toStr}`, "unknown_status");
     }
     try {
-      const fromTask = getTask(slug, root);
+      const repository = resolveFactoryRepository(c);
+      const fromTask = getTask(repository.id, slug, machineDir);
       const from = fromTask.status;
-      const task = transitionTask(slug, toStr, root);
+      const task = transitionTask(repository.id, slug, toStr, machineDir);
       if (bus) publishTaskTransitioned(bus, taskPayload(task), from, toStr);
       return c.json({ task: taskDetail(task) });
     } catch (err) {
@@ -1920,15 +1931,16 @@ function registerTaskRoutes(
       specOverride = assertString(body.specMarkdown, "specMarkdown");
     }
     try {
-      const fromTask = getTask(slug, root);
+      const repository = resolveFactoryRepository(c);
+      const fromTask = getTask(repository.id, slug, machineDir);
       const from = fromTask.status;
       if (specOverride !== undefined) {
-        setSpecMarkdown(slug, specOverride, root);
-        if (bus) publishTaskUpdated(bus, taskPayload(getTask(slug, root)));
+        setSpecMarkdown(repository.id, slug, specOverride, machineDir);
+        if (bus) publishTaskUpdated(bus, taskPayload(getTask(repository.id, slug, machineDir)));
       }
-      const task = transitionTask(slug, "ready", root);
+      const task = transitionTask(repository.id, slug, "ready", machineDir);
       if (bus) publishTaskTransitioned(bus, taskPayload(task), from, "ready");
-      freezeTask(slug, root, makeManager());
+      freezeTask(slug, repository.checkoutPath, makeManager());
       return c.json({ task: taskDetail(task) });
     } catch (err) {
       throw mapDomainError(err);
@@ -1938,7 +1950,8 @@ function registerTaskRoutes(
   app.get("/api/tasks/:slug/diff", (c) => {
     const slug = c.req.param("slug");
     try {
-      const task = getTask(slug, root);
+      const repository = resolveFactoryRepository(c);
+      const task = getTask(repository.id, slug, machineDir);
       if (task.status !== "review") {
         throw new ApiError(409, "task is not in review state", "not_review");
       }
@@ -1954,7 +1967,8 @@ function registerTaskRoutes(
     const body = await readJsonObject(c, new Set<string>());
     void body;
     try {
-      const task = getTask(slug, root);
+      const repository = resolveFactoryRepository(c);
+      const task = getTask(repository.id, slug, machineDir);
       if (task.status !== "review") {
         throw new ApiError(409, "task is not in review state", "not_review");
       }
@@ -1968,7 +1982,7 @@ function registerTaskRoutes(
       // marking Done.
       manager.destroy(slug);
       const from = task.status;
-      const done = transitionTask(slug, "done", root);
+      const done = transitionTask(repository.id, slug, "done", machineDir);
       if (bus) publishTaskTransitioned(bus, taskPayload(done), from, "done");
       return c.json({ merged: true, commitSha, task: taskDetail(done) });
     } catch (err) {
@@ -2055,12 +2069,14 @@ function parseNonNegativeInt(value: string, field: string): number {
   return parsed;
 }
 
-function registerRunRoutes(app: Hono, root: string | undefined): void {
+function registerRunRoutes(app: Hono, root: string | undefined, machineDir?: string, configuredRepositoryId?: string): void {
   app.get("/api/tasks/:slug/runs", (c) => {
     const slug = c.req.param("slug");
     try {
-      const task = getTask(slug, root);
-      const log = new RunLog(root);
+      const repositoryId = c.req.query("repository_id") ?? configuredRepositoryId;
+      if (!repositoryId) throw new ApiError(409, "repository_id is required", "repository_required");
+      const task = getTask(repositoryId, slug, machineDir);
+      const log = new RunLog(repositoryId, machineDir);
       const runs = log.listRunsForTask(task.id).map(runCard);
       return c.json({ runs });
     } catch (err) {
@@ -2070,14 +2086,18 @@ function registerRunRoutes(app: Hono, root: string | undefined): void {
 
   app.get("/api/runs/:id", (c) => {
     const runId = parseRunId(c.req.param("id"));
-    const log = new RunLog(root);
+    const repositoryId = c.req.query("repository_id") ?? configuredRepositoryId;
+    if (!repositoryId) throw new ApiError(409, "repository_id is required", "repository_required");
+    const log = new RunLog(repositoryId, machineDir);
     const run = log.getRun(runId);
     if (run === undefined) throw new ApiError(404, `Run not found: ${runId}`, "run_not_found");
     return c.json({ run: runDetail(run) });
   });
   app.post("/api/runs/:id/recover-authentication", (c) => {
     const runId = parseRunId(c.req.param("id"));
-    const log = new RunLog(root);
+    const repositoryId = c.req.query("repository_id") ?? configuredRepositoryId;
+    if (!repositoryId) throw new ApiError(409, "repository_id is required", "repository_required");
+    const log = new RunLog(repositoryId, machineDir);
     try {
       const run = log.resolveAuthenticationRequired(runId);
       return c.json({ run: runDetail(run) });
@@ -2104,7 +2124,9 @@ function registerRunRoutes(app: Hono, root: string | undefined): void {
         throw new ApiError(422, `limit must be at most ${MAX_RUN_EVENTS_LIMIT}`, "invalid_limit");
       }
     }
-    const log = new RunLog(root);
+    const repositoryId = c.req.query("repository_id") ?? configuredRepositoryId;
+    if (!repositoryId) throw new ApiError(409, "repository_id is required", "repository_required");
+    const log = new RunLog(repositoryId, machineDir);
     if (log.getRun(runId) === undefined) {
       throw new ApiError(404, `Run not found: ${runId}`, "run_not_found");
     }
@@ -2150,7 +2172,14 @@ function registerSpecRoutes(
   bus: EventBus | undefined,
   specAgent: Agent | undefined,
   machineDir?: string,
+  configuredRepositoryId?: string,
 ): void {
+  const repositoryFor = (c: Context): string => {
+    const id = c.req.query("repository_id") ?? configuredRepositoryId;
+    if (!id) throw new ApiError(409, "repository_id is required", "repository_required");
+    resolveRepositoryContext(id, machineDir);
+    return id;
+  };
   const ensureBus = (bus: EventBus | undefined): EventBus => {
     if (!bus) throw new ApiError(500, "event bus not configured", "internal_error");
     return bus;
@@ -2159,7 +2188,8 @@ function registerSpecRoutes(
   app.get("/api/tasks/:slug/spec-messages", (c) => {
     const slug = c.req.param("slug");
     try {
-      const messages = listSpecMessages(slug, root).map(specMessageFields);
+      const repositoryId = repositoryFor(c);
+      const messages = listSpecMessages(repositoryId, slug, machineDir).map(specMessageFields);
       return c.json({ messages });
     } catch (err) {
       throw mapDomainError(err);
@@ -2179,19 +2209,21 @@ function registerSpecRoutes(
     }
     try {
       const busLocal = ensureBus(bus);
+      const repositoryId = repositoryFor(c);
       // Pre-flight: only backlog tasks accept spec chat.
-      const fromTask = getTask(slug, root);
+      const fromTask = getTask(repositoryId, slug, machineDir);
       if (fromTask.status !== "backlog") {
         throw new SpecChatClosedError(slug, fromTask.status);
       }
       const promptEvents = await runSpecAuthorTurn(slug, contentStr, {
-        root,
+        root: resolveRepositoryContext(repositoryId, machineDir).checkoutPath,
+        repositoryId,
         agent: specAgent,
         machineDir,
       });
-      publishSpecMessage(busLocal, slug, promptEvents.userMessage);
+      publishSpecMessage(busLocal, slug, promptEvents.userMessage, repositoryId);
       if (promptEvents.assistantMessage)
-        publishSpecMessage(busLocal, slug, promptEvents.assistantMessage);
+        publishSpecMessage(busLocal, slug, promptEvents.assistantMessage, repositoryId);
       return c.json(
         {
           userMessage: specMessageFields(promptEvents.userMessage),
@@ -2210,15 +2242,17 @@ function registerSpecRoutes(
     if (!Number.isInteger(messageId) || messageId <= 0)
       throw new ApiError(400, "message id must be a positive integer", "invalid_message_id");
     try {
+      const repositoryId = repositoryFor(c);
       const result = await resubmitSpecAuthorTurn(c.req.param("slug"), messageId, {
         root,
+        repositoryId,
         agent: specAgent,
         machineDir,
       });
       const busLocal = ensureBus(bus);
-      publishSpecMessage(busLocal, c.req.param("slug"), result.userMessage);
+      publishSpecMessage(busLocal, c.req.param("slug"), result.userMessage, repositoryId);
       if (result.assistantMessage)
-        publishSpecMessage(busLocal, c.req.param("slug"), result.assistantMessage);
+        publishSpecMessage(busLocal, c.req.param("slug"), result.assistantMessage, repositoryId);
       return c.json(
         {
           userMessage: specMessageFields(result.userMessage),
@@ -2235,11 +2269,12 @@ function registerSpecRoutes(
 
   app.get("/api/tasks/:slug/spec-author-sessions", (c) => {
     try {
-      const task = getTask(c.req.param("slug"), root);
+      const repositoryId = repositoryFor(c);
+      const task = getTask(repositoryId, c.req.param("slug"), machineDir);
       return c.json({
-        sessions: listSpecAuthorSessions(task.id, root).map((session) => ({
+        sessions: listSpecAuthorSessions(repositoryId, task.id, machineDir).map((session) => ({
           ...session,
-          operations: listSpecAuthorOperations(session.id, root),
+          operations: listSpecAuthorOperations(repositoryId, session.id, machineDir),
         })),
       });
     } catch (err) {
@@ -2259,11 +2294,12 @@ function registerSpecRoutes(
       throw new ApiError(422, "spec_markdown must not be empty", "invalid_field");
     }
     try {
-      const task = getTask(slug, root);
+      const repositoryId = repositoryFor(c);
+      const task = getTask(repositoryId, slug, machineDir);
       if (task.status !== "backlog") {
         throw new SpecChatClosedError(slug, task.status);
       }
-      const updated = setSpecMarkdown(slug, specStr, root);
+      const updated = setSpecMarkdown(repositoryId, slug, specStr, machineDir);
       if (bus) publishTaskUpdated(bus, taskPayload(updated));
       return c.json({ task: taskDetail(updated) });
     } catch (err) {
@@ -2352,7 +2388,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
       bus,
       (requestedRepositoryId) => ({
         tasks: (root ?? repositoryRoot(machineDir))
-          ? listTasks(root ?? repositoryRoot(machineDir)).map(taskCard)
+          ? listTasks(requestedRepositoryId ?? undefined, machineDir).map(taskCard)
           : [],
         threads: requestedRepositoryId
           ? listChatThreads(requestedRepositoryId, false, machineDir)

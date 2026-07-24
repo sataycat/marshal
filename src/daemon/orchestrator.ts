@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { cwd } from "node:process";
 import type { Agent, AgentEvent, AgentSession, SpawnOptions } from "../agent/types.js";
 import { logger } from "../logger.js";
-import { openDb } from "../db/index.js";
+import { openDb, openRepositoryDb } from "../db/index.js";
 import {
   getTask,
   transitionTask,
@@ -23,6 +23,7 @@ import { publishTaskTransitioned } from "./bus.js";
 import { getWorkflowProfile } from "../workflows/store.js";
 import { historicalProvenance } from "../agents/provenance.js";
 import { getSelectedRepository } from "../repositories/store.js";
+import { resolveRepositoryContext } from "../repositories/context.js";
 import { AcpSessionSupervisor } from "../acp/supervisor.js";
 import { structuredAcpError } from "../acp/errors.js";
 
@@ -46,6 +47,7 @@ const GATE_FAIL = "fail";
 
 interface ReadyTaskRow {
   slug: string;
+  repository_id_v2: string;
 }
 
 interface BuildRunRow {
@@ -161,6 +163,7 @@ export interface BuildTaskOptions {
   builderAgentId?: string;
   bus?: EventBus;
   machineDir?: string;
+  repositoryId?: string;
 }
 
 function workflowAssignment(task: Task, role: "builder" | "validator", machineDir?: string) {
@@ -178,13 +181,14 @@ export async function buildTask(
   options: BuildTaskOptions = {},
 ): Promise<RunOnceResult> {
   const root = options.root;
-  const task = getTask(slug, root);
+  const repositoryId = options.repositoryId ?? "";
+  const task = repositoryId ? getTask(repositoryId, slug, options.machineDir) : getTask(slug, root);
 
   const manager = options.manager ?? new WorktreeManager(root ?? cwd());
    const resolved = workflowAssignment(task, "builder", options.machineDir);
    const builderAgentId = options.builderAgentId ?? resolved.assignment?.agent_id ?? (options.agent ? resolveAgentId("builder") : "test-builder");
    const builderVersion = resolved.assignment?.agent_version ?? "legacy";
-  const runLog = new RunLog(root, options.bus);
+   const runLog = new RunLog(repositoryId || root, options.bus);
 
   const worktree = manager.create(slug);
   const prompt = renderBuilderPrompt(task);
@@ -263,6 +267,7 @@ export interface RunOnceOptions {
   maxRetries?: number;
   bus?: EventBus;
   machineDir?: string;
+  repositoryId?: string;
 }
 
 export interface ValidateTaskOptions {
@@ -273,6 +278,7 @@ export interface ValidateTaskOptions {
   trunkRef?: string;
   bus?: EventBus;
   machineDir?: string;
+  repositoryId?: string;
 }
 
 export interface RenderValidatorPromptOptions {
@@ -335,7 +341,7 @@ function computeTruncatedDiff(
 
 function lastBuilderCommitSha(slug: string, root?: string): string | null {
   const db = openDb(root);
-  const row = db
+   const row = db
     .prepare(
       `SELECT r.commit_sha AS commit_sha
          FROM runs r
@@ -353,13 +359,14 @@ export async function validateTask(
   options: ValidateTaskOptions = {},
 ): Promise<RunOnceResult> {
   const root = options.root;
-  const task = getTask(slug, root);
+  const repositoryId = options.repositoryId ?? "";
+  const task = repositoryId ? getTask(repositoryId, slug, options.machineDir) : getTask(slug, root);
 
   const manager = options.manager ?? new WorktreeManager(root ?? cwd());
    const resolved = workflowAssignment(task, "validator", options.machineDir);
    const validatorAgentId = options.validatorAgentId ?? resolved.assignment?.agent_id ?? (options.agent ? resolveAgentId("validator") : "test-validator");
    const validatorVersion = resolved.assignment?.agent_version ?? "legacy";
-  const runLog = new RunLog(root, options.bus);
+   const runLog = new RunLog(repositoryId || root, options.bus);
 
   const worktree = manager.create(slug);
   const buildCommit = lastBuilderCommitSha(slug, root);
@@ -494,19 +501,19 @@ function runDeterministicVerification(commands: string[], cwdPath: string): { pa
 export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResult | null> {
   const root = options.root;
 
-  const db = openDb(root);
+   const db = options.repositoryId ? openRepositoryDb(options.repositoryId, options.machineDir) : openDb(root);
   const row = db
     .prepare(
-      "SELECT t.slug, t.status FROM tasks t WHERE t.status IN ('ready', 'validating') AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status = 'authentication_required' AND r.auth_recovery_resolved_at IS NULL) ORDER BY t.created_at ASC, t.id ASC LIMIT 1",
+       "SELECT t.slug, t.status, t.repository_id_v2 FROM tasks t WHERE t.repository_id_v2 = ? AND t.status IN ('ready', 'validating') AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.repository_id = t.repository_id_v2 AND r.status = 'authentication_required' AND r.auth_recovery_resolved_at IS NULL) ORDER BY t.created_at ASC, t.id ASC LIMIT 1",
     )
-    .get() as (ReadyTaskRow & { status: string }) | undefined;
+     .get(options.repositoryId) as (ReadyTaskRow & { status: string }) | undefined;
   if (!row) {
     return null;
   }
 
   const slug = row.slug;
   const taskStatus = row.status;
-  const task = getTask(slug, root);
+   const task = options.repositoryId ? getTask(options.repositoryId, slug, options.machineDir) : getTask(slug, root);
 
   const manager = options.manager ?? new WorktreeManager(root ?? cwd());
 
@@ -606,6 +613,7 @@ function taskCardPayload(task: Task): {
   retry_count: number;
   created_at: string;
   updated_at: string;
+  repositoryId?: string | null;
 } {
   return {
     id: task.id,
@@ -615,5 +623,6 @@ function taskCardPayload(task: Task): {
     retry_count: task.retry_count,
     created_at: task.created_at,
     updated_at: task.updated_at,
+    repositoryId: task.repository_id,
   };
 }

@@ -399,14 +399,14 @@ export interface MergeResponse {
   task: TaskDetail;
 }
 
-export async function fetchTasks(signal?: AbortSignal): Promise<TaskCard[]> {
-  const res = await fetch("/api/tasks", { signal });
+export async function fetchTasks(repositoryId: string, signal?: AbortSignal): Promise<TaskCard[]> {
+  const res = await fetch(`/api/tasks?repository_id=${encodeURIComponent(repositoryId)}`, { signal });
   const body = await jsonOrThrow<{ tasks: TaskCard[] }>(res);
   return body.tasks;
 }
 
-export async function fetchTaskDetail(slug: string, signal?: AbortSignal): Promise<TaskDetail> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}`, { signal });
+export async function fetchTaskDetail(slug: string, repositoryId: string, signal?: AbortSignal): Promise<TaskDetail> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}?repository_id=${encodeURIComponent(repositoryId)}`, { signal });
   const body = await jsonOrThrow<{ task: TaskDetail }>(res);
   return body.task;
 }
@@ -482,18 +482,19 @@ export interface SpecAuthorSessionEvidence {
 }
 export async function fetchSpecAuthorSessions(
   slug: string,
+  repositoryId: string,
   signal?: AbortSignal,
 ): Promise<SpecAuthorSessionEvidence[]> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-author-sessions`, {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-author-sessions?repository_id=${encodeURIComponent(repositoryId)}`, {
     signal,
   });
   return (await jsonOrThrow<{ sessions: SpecAuthorSessionEvidence[] }>(res)).sessions;
 }
 
-export async function freezeTask(slug: string, specMarkdown?: string): Promise<TaskDetail> {
+export async function freezeTask(slug: string, repositoryId: string, specMarkdown?: string): Promise<TaskDetail> {
   const body: Record<string, string> = {};
   if (specMarkdown !== undefined) body.specMarkdown = specMarkdown;
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/ready`, {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/ready?repository_id=${encodeURIComponent(repositoryId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -502,8 +503,8 @@ export async function freezeTask(slug: string, specMarkdown?: string): Promise<T
   return json.task;
 }
 
-export async function transitionTask(slug: string, to: TaskStatus): Promise<TaskDetail> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/transition`, {
+export async function transitionTask(slug: string, repositoryId: string, to: TaskStatus): Promise<TaskDetail> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/transition?repository_id=${encodeURIComponent(repositoryId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ to }),
@@ -512,13 +513,13 @@ export async function transitionTask(slug: string, to: TaskStatus): Promise<Task
   return json.task;
 }
 
-export async function fetchTaskDiff(slug: string, signal?: AbortSignal): Promise<DiffResponse> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/diff`, { signal });
+export async function fetchTaskDiff(slug: string, repositoryId: string, signal?: AbortSignal): Promise<DiffResponse> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/diff?repository_id=${encodeURIComponent(repositoryId)}`, { signal });
   return jsonOrThrow<DiffResponse>(res);
 }
 
-export async function mergeTask(slug: string): Promise<MergeResponse> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/merge`, {
+export async function mergeTask(slug: string, repositoryId: string): Promise<MergeResponse> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/merge?repository_id=${encodeURIComponent(repositoryId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -528,9 +529,10 @@ export async function mergeTask(slug: string): Promise<MergeResponse> {
 
 export async function fetchSpecMessages(
   slug: string,
+  repositoryId: string,
   signal?: AbortSignal,
 ): Promise<SpecMessage[]> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-messages`, { signal });
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-messages?repository_id=${encodeURIComponent(repositoryId)}`, { signal });
   const body = await jsonOrThrow<{ messages: SpecMessage[] }>(res);
   return body.messages;
 }
@@ -541,28 +543,30 @@ export interface SendSpecMessageResponse {
 }
 export async function resubmitSpecMessage(
   slug: string,
+  repositoryId: string,
   messageId: number,
 ): Promise<SendSpecMessageResponse> {
   const res = await fetch(
-    `/api/tasks/${encodeURIComponent(slug)}/spec-messages/${messageId}/resubmit`,
+    `/api/tasks/${encodeURIComponent(slug)}/spec-messages/${messageId}/resubmit?repository_id=${encodeURIComponent(repositoryId)}`,
     { method: "POST" },
   );
   return jsonOrThrow<SendSpecMessageResponse>(res);
 }
-export async function fetchTaskRuns(slug: string, signal?: AbortSignal): Promise<WorkflowRun[]> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/runs`, { signal });
+export async function fetchTaskRuns(slug: string, repositoryId: string, signal?: AbortSignal): Promise<WorkflowRun[]> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/runs?repository_id=${encodeURIComponent(repositoryId)}`, { signal });
   return (await jsonOrThrow<{ runs: WorkflowRun[] }>(res)).runs;
 }
-export async function recoverRunAuthentication(runId: number): Promise<WorkflowRun> {
-  const res = await fetch(`/api/runs/${runId}/recover-authentication`, { method: "POST" });
+export async function recoverRunAuthentication(runId: number, repositoryId: string): Promise<WorkflowRun> {
+  const res = await fetch(`/api/runs/${runId}/recover-authentication?repository_id=${encodeURIComponent(repositoryId)}`, { method: "POST" });
   return (await jsonOrThrow<{ run: WorkflowRun }>(res)).run;
 }
 
 export async function sendSpecMessage(
   slug: string,
+  repositoryId: string,
   content: string,
 ): Promise<SendSpecMessageResponse> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-messages`, {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec-messages?repository_id=${encodeURIComponent(repositoryId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
@@ -570,8 +574,8 @@ export async function sendSpecMessage(
   return jsonOrThrow<SendSpecMessageResponse>(res);
 }
 
-export async function updateTaskSpec(slug: string, specMarkdown: string): Promise<TaskDetail> {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec`, {
+export async function updateTaskSpec(slug: string, repositoryId: string, specMarkdown: string): Promise<TaskDetail> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(slug)}/spec?repository_id=${encodeURIComponent(repositoryId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ spec_markdown: specMarkdown }),

@@ -6,22 +6,24 @@ import { isTerminalInstallationOperation } from "../state/installationOperations
 
 const queryOptions = { retry: 1, refetchOnWindowFocus: false } as const;
 
-export function useTaskDetailQuery(slug: string) {
+export function useTaskDetailQuery(slug: string, repositoryId: string | null) {
   return useQuery({
-    queryKey: queryKeys.task(slug),
-    queryFn: ({ signal }) => api.fetchTaskDetail(slug, signal),
+    queryKey: queryKeys.task(slug, repositoryId),
+    queryFn: ({ signal }) => api.fetchTaskDetail(slug, repositoryId!, signal),
+    enabled: Boolean(repositoryId),
     ...queryOptions,
   });
 }
-export function useTaskRunsQuery(slug: string) {
+export function useTaskRunsQuery(slug: string, repositoryId: string | null) {
   return useQuery({
-    queryKey: queryKeys.taskRuns(slug),
-    queryFn: ({ signal }) => api.fetchTaskRuns(slug, signal),
+    queryKey: queryKeys.taskRuns(slug, repositoryId),
+    queryFn: ({ signal }) => api.fetchTaskRuns(slug, repositoryId!, signal),
+    enabled: Boolean(repositoryId),
     ...queryOptions,
   });
 }
 export const useRecoverRunAuthenticationMutation = () =>
-  useMutation({ mutationFn: api.recoverRunAuthentication });
+  useMutation({ mutationFn: ({ runId, repositoryId }: { runId: number; repositoryId: string }) => api.recoverRunAuthentication(runId, repositoryId) });
 export function useRepositoriesQuery() {
   return useQuery({
     queryKey: queryKeys.repositories,
@@ -239,25 +241,27 @@ export const useSelectRepositoryMutation = () => {
   });
 };
 export const useRemoveRepositoryMutation = () => useMutation({ mutationFn: api.removeRepository });
-export function useTaskDiffQuery(slug: string, enabled: boolean) {
+export function useTaskDiffQuery(slug: string, repositoryId: string | null, enabled: boolean) {
   return useQuery({
-    queryKey: queryKeys.taskDiff(slug),
-    queryFn: ({ signal }) => api.fetchTaskDiff(slug, signal),
-    enabled,
+    queryKey: queryKeys.taskDiff(slug, repositoryId),
+    queryFn: ({ signal }) => api.fetchTaskDiff(slug, repositoryId!, signal),
+    enabled: enabled && Boolean(repositoryId),
     ...queryOptions,
   });
 }
-export function useSpecMessagesQuery(slug: string) {
+export function useSpecMessagesQuery(slug: string, repositoryId: string | null) {
   return useQuery({
-    queryKey: queryKeys.specMessages(slug),
-    queryFn: ({ signal }) => api.fetchSpecMessages(slug, signal),
+    queryKey: queryKeys.specMessages(slug, repositoryId),
+    queryFn: ({ signal }) => api.fetchSpecMessages(slug, repositoryId!, signal),
+    enabled: Boolean(repositoryId),
     ...queryOptions,
   });
 }
-export function useSpecAuthorSessionsQuery(slug: string) {
+export function useSpecAuthorSessionsQuery(slug: string, repositoryId: string | null) {
   return useQuery({
-    queryKey: [...queryKeys.specMessages(slug), "sessions"],
-    queryFn: ({ signal }) => api.fetchSpecAuthorSessions(slug, signal),
+    queryKey: [...queryKeys.specMessages(slug, repositoryId), "sessions"],
+    queryFn: ({ signal }) => api.fetchSpecAuthorSessions(slug, repositoryId!, signal),
+    enabled: Boolean(repositoryId),
     ...queryOptions,
   });
 }
@@ -387,27 +391,27 @@ export const useUploadAttachmentMutation = () =>
   });
 export const useSendSpecMessageMutation = () =>
   useMutation({
-    mutationFn: ({ slug, content }: { slug: string; content: string }) =>
-      api.sendSpecMessage(slug, content),
+      mutationFn: ({ slug, repositoryId, content }: { slug: string; repositoryId: string; content: string }) =>
+      api.sendSpecMessage(slug, repositoryId, content),
   });
 export const useResubmitSpecMessageMutation = () =>
   useMutation({
-    mutationFn: ({ slug, messageId }: { slug: string; messageId: number }) =>
-      api.resubmitSpecMessage(slug, messageId),
+      mutationFn: ({ slug, repositoryId, messageId }: { slug: string; repositoryId: string; messageId: number }) =>
+      api.resubmitSpecMessage(slug, repositoryId, messageId),
   });
 export const useCreateTaskMutation = () => useMutation({ mutationFn: api.createTask });
 export const useFreezeTaskMutation = () =>
   useMutation({
-    mutationFn: ({ slug, specMarkdown }: { slug: string; specMarkdown?: string }) =>
-      api.freezeTask(slug, specMarkdown),
+    mutationFn: ({ slug, repositoryId, specMarkdown }: { slug: string; repositoryId: string; specMarkdown?: string }) =>
+      api.freezeTask(slug, repositoryId, specMarkdown),
   });
 export const useTransitionTaskMutation = () =>
   useMutation({
-    mutationFn: ({ slug, to }: { slug: string; to: TaskStatus }) => api.transitionTask(slug, to),
+    mutationFn: ({ slug, repositoryId, to }: { slug: string; repositoryId: string; to: TaskStatus }) => api.transitionTask(slug, repositoryId, to),
   });
-export const useMergeTaskMutation = () => useMutation({ mutationFn: api.mergeTask });
+export const useMergeTaskMutation = () => useMutation({ mutationFn: ({ slug, repositoryId }: { slug: string; repositoryId: string }) => api.mergeTask(slug, repositoryId) });
 export const useUpdateTaskSpecMutation = () =>
   useMutation({
-    mutationFn: ({ slug, specMarkdown }: { slug: string; specMarkdown: string }) =>
-      api.updateTaskSpec(slug, specMarkdown),
+    mutationFn: ({ slug, repositoryId, specMarkdown }: { slug: string; repositoryId: string; specMarkdown: string }) =>
+      api.updateTaskSpec(slug, repositoryId, specMarkdown),
   });

@@ -38,7 +38,7 @@ interface TaskStore {
 
 function toCard(detail: TaskDetail): TaskCard {
   const { spec_markdown: _spec, last_failure: _failure, ...card } = detail;
-  return card;
+  return { ...card, repository_id: detail.repository_id };
 }
 
 function nowIso(): string {
@@ -71,7 +71,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
   freezeTask: async (slug, previous, specMarkdown) => {
     useTaskStore.getState().applyTaskEvent({ type: "optimistic.apply", payload: { ...previous, status: "ready" }, timestamp: nowIso() });
     try {
-      const task = await apiFreezeTask(slug, specMarkdown);
+      const task = await apiFreezeTask(slug, previous.repository_id ?? "", specMarkdown);
       useTaskStore.getState().applyTaskEvent({ type: "optimistic.commit", payload: toCard(task), timestamp: nowIso() });
       return task;
     } catch (error) {
@@ -83,7 +83,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
   transitionTask: async (slug, to, previous) => {
     useTaskStore.getState().applyTaskEvent({ type: "optimistic.apply", payload: { ...previous, status: to }, timestamp: nowIso() });
     try {
-      const task = await apiTransitionTask(slug, to);
+      const task = await apiTransitionTask(slug, previous.repository_id ?? "", to);
       useTaskStore.getState().applyTaskEvent({ type: "optimistic.commit", payload: toCard(task), timestamp: nowIso() });
       return task;
     } catch (error) {
@@ -95,7 +95,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
   mergeTask: async (slug, previous) => {
     useTaskStore.getState().applyTaskEvent({ type: "optimistic.apply", payload: { ...previous, status: "done" }, timestamp: nowIso() });
     try {
-      const result = await apiMergeTask(slug);
+      const result = await apiMergeTask(slug, previous.repository_id ?? "");
       useTaskStore.getState().applyTaskEvent({ type: "optimistic.commit", payload: toCard(result.task), timestamp: nowIso() });
       return result.task;
     } catch (error) {
@@ -106,7 +106,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
   },
   sendSpecMessage: async (slug, content) => {
     try {
-      const result = await apiSendSpecMessage(slug, content);
+      const result = await apiSendSpecMessage(slug, "", content);
       const apply = useTaskStore.getState().applyTaskEvent;
       apply({ type: "spec.message", payload: { taskSlug: slug, message: result.userMessage }, timestamp: nowIso() });
       if (result.assistantMessage) apply({ type: "spec.message", payload: { taskSlug: slug, message: result.assistantMessage }, timestamp: nowIso() });
@@ -118,7 +118,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
   },
   updateTaskSpec: async (slug, specMarkdown) => {
     try {
-      const task = await apiUpdateTaskSpec(slug, specMarkdown);
+      const task = await apiUpdateTaskSpec(slug, "", specMarkdown);
       useTaskStore.getState().applyTaskEvent({ type: "task.updated", payload: toCard(task), timestamp: nowIso() });
       return task;
     } catch (error) {

@@ -153,6 +153,7 @@ export interface RunSpecAuthorTurnOptions {
   agentId?: AgentId;
   chatBudgetChars?: number;
   machineDir?: string;
+  repositoryId?: string;
 }
 
 export interface SpecAuthorTurnResult {
@@ -167,14 +168,14 @@ export async function runSpecAuthorTurn(
   recoveryMessageId?: number,
 ): Promise<SpecAuthorTurnResult> {
   const root = options.root;
-  const task = getTask(slug, root);
+  const task = options.repositoryId ? getTask(options.repositoryId, slug, options.machineDir) : getTask(slug, root);
   if (task.status !== "backlog") {
     throw new SpecChatClosedError(slug, task.status);
   }
 
-  const existingMessage = recoveryMessageId === undefined ? undefined : getSpecMessage(recoveryMessageId, root);
+  const existingMessage = recoveryMessageId === undefined ? undefined : options.repositoryId ? getSpecMessage(options.repositoryId, recoveryMessageId, options.machineDir) : getSpecMessage(recoveryMessageId, root);
   if (recoveryMessageId !== undefined && (!existingMessage || existingMessage.task_id !== task.id || existingMessage.role !== "user" || existingMessage.prompt_status !== "authentication_required" || existingMessage.content !== userContent)) throw new Error("Only the preserved authentication-required spec message can be resubmitted");
-  const userMessage = existingMessage ?? appendSpecMessage(slug, "user", userContent, root);
+  const userMessage = existingMessage ?? (options.repositoryId ? appendSpecMessage(options.repositoryId, slug, "user", userContent, options.machineDir) : appendSpecMessage(slug, "user", userContent, root));
 
   const repositoryId = task.repository_id ?? undefined;
   const profile = task.workflow_profile_id && repositoryId
@@ -186,7 +187,7 @@ export async function runSpecAuthorTurn(
   }
   const agentId: AgentId = options.agentId ?? assignment?.agent_id ?? "test-spec-author";
 
-  const specMessages = listSpecMessages(slug, root);
+  const specMessages = options.repositoryId ? listSpecMessages(options.repositoryId, slug, options.machineDir) : listSpecMessages(slug, root);
   const prompt = renderSpecAuthoringPrompt(task, specMessages, {
     chatBudgetChars: options.chatBudgetChars,
   });
@@ -204,21 +205,21 @@ export async function runSpecAuthorTurn(
       assistantText = collectAgentText(events);
       await options.agent!.close(session);
     } else {
-      appendSpecAuthorOperation(authorRecord.id, "author", "running", null, root);
+      appendSpecAuthorOperation(options.repositoryId!, authorRecord.id, "author", "running", null, options.machineDir, null);
       const supervisor = new AcpSessionSupervisor({ repositoryId: repositoryId!, root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: profile!.permission_policy });
       const started = await supervisor.start("spec-author", authorRecord.id, root ?? process.cwd(), assignment!.agent_id, assignment!.agent_version, { agentProvenance: authorRecord.agent_provenance });
-      updateSpecAuthorSession(authorRecord.id, { supervisorSessionId: started.record.id, acpSessionId: started.record.acp_session_id, capabilities: started.record.capabilities }, root);
+      updateSpecAuthorSession(options.repositoryId!, authorRecord.id, { supervisorSessionId: started.record.id, acpSessionId: started.record.acp_session_id, capabilities: started.record.capabilities }, options.machineDir);
       const events: AgentEvent[] = [];
       await supervisor.prompt(started.record.id, prompt, undefined, (event) => events.push(event), { messageId: userMessage.id, ...(recoveryMessageId === undefined ? {} : { resubmissionOf: String(recoveryMessageId) }) });
       assistantText = collectAgentText(events);
       await supervisor.close(started.record.id);
-      appendSpecAuthorOperation(authorRecord.id, "author", "succeeded", null, root);
-      updateSpecAuthorSession(authorRecord.id, { status: "completed" }, root);
+      appendSpecAuthorOperation(options.repositoryId!, authorRecord.id, "author", "succeeded", null, options.machineDir, null);
+      updateSpecAuthorSession(options.repositoryId!, authorRecord.id, { status: "completed" }, options.machineDir);
     }
   } catch (err) {
     const failure = structuredAcpError(err);
-    if (failure.kind === "authentication_required") markSpecMessageAuthenticationRequired(userMessage.id, failure, root);
-    if (authorRecord) { appendSpecAuthorOperation(authorRecord.id, "author", failure.kind === "authentication_required" ? "authentication_required" : "failed", failure.message, root, failure); updateSpecAuthorSession(authorRecord.id, { status: failure.kind === "authentication_required" ? "authentication_required" : "failed", failure }, root); }
+    if (failure.kind === "authentication_required") options.repositoryId ? markSpecMessageAuthenticationRequired(options.repositoryId, userMessage.id, failure, options.machineDir) : markSpecMessageAuthenticationRequired(userMessage.id, failure, root);
+    if (authorRecord) { appendSpecAuthorOperation(options.repositoryId!, authorRecord.id, "author", failure.kind === "authentication_required" ? "authentication_required" : "failed", failure.message, options.machineDir, failure); updateSpecAuthorSession(options.repositoryId!, authorRecord.id, { status: failure.kind === "authentication_required" ? "authentication_required" : "failed", failure }, options.machineDir); }
     logger.error({ err, slug }, "Spec authoring prompt stream failed");
     throw new StructuredAcpFailureError(failure);
   }
@@ -229,8 +230,8 @@ export async function runSpecAuthorTurn(
     assistantText,
     root,
   );
-  const finalUserMessage = recoveryMessageId !== undefined ? clearSpecMessagePromptFailure(userMessage.id, root) : userMessage;
+  const finalUserMessage = recoveryMessageId !== undefined ? options.repositoryId ? clearSpecMessagePromptFailure(options.repositoryId, userMessage.id, options.machineDir) : clearSpecMessagePromptFailure(userMessage.id, root) : userMessage;
   return { userMessage: finalUserMessage, assistantMessage };
 }
 
-export function resubmitSpecAuthorTurn(slug: string, messageId: number, options: RunSpecAuthorTurnOptions = {}): Promise<SpecAuthorTurnResult> { const message = getSpecMessage(messageId, options.root); if (!message) throw new Error("Spec message not found"); return runSpecAuthorTurn(slug, message.content, options, messageId); }
+export function resubmitSpecAuthorTurn(slug: string, messageId: number, options: RunSpecAuthorTurnOptions = {}): Promise<SpecAuthorTurnResult> { const message = options.repositoryId ? getSpecMessage(options.repositoryId, messageId, options.machineDir) : getSpecMessage(messageId, options.root); if (!message) throw new Error("Spec message not found"); return runSpecAuthorTurn(slug, message.content, options, messageId); }

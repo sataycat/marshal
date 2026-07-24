@@ -1,4 +1,5 @@
 import { openDb } from "../db/index.js";
+import { openRepositoryDb } from "../db/index.js";
 import { asTaskStatus, assertTransition, isEscapeHatch, type TaskStatus } from "./state-machine.js";
 
 export interface Task {
@@ -49,23 +50,35 @@ interface TaskRow {
   updated_at: string;
   repository_id: string | null;
   workflow_profile_id: string | null;
+  repository_id_v2?: string | null;
 }
 
 function rowToTask(row: TaskRow): Task {
-  return { ...row, status: asTaskStatus(row.status) };
+  return { ...row, repository_id: row.repository_id_v2 ?? row.repository_id, status: asTaskStatus(row.status) };
 }
 
-export function listTasks(root?: string): Task[] {
-  const db = openDb(root);
+function scopedDb(repositoryId: string, machineDir?: string) {
+  return openRepositoryDb(repositoryId, machineDir);
+}
+
+/** Repository-scoped task list. The root overload is retained for pre-Slice-3 unit fixtures. */
+export function listTasks(repositoryId?: string, machineDir?: string): Task[] {
+  if (!repositoryId) return (openDb(machineDir).prepare("SELECT * FROM tasks ORDER BY created_at DESC, id DESC").all() as TaskRow[]).map(rowToTask);
+  const db = repositoryId.includes("/") ? openDb(repositoryId) : scopedDb(repositoryId, machineDir);
   const rows = db
-    .prepare("SELECT * FROM tasks ORDER BY created_at DESC, id DESC")
-    .all() as TaskRow[];
+    .prepare(repositoryId.includes("/") ? "SELECT * FROM tasks ORDER BY created_at DESC, id DESC" : "SELECT * FROM tasks WHERE repository_id_v2 = ? ORDER BY created_at DESC, id DESC")
+    .all(...(repositoryId.includes("/") ? [] : [repositoryId])) as TaskRow[];
   return rows.map(rowToTask);
 }
 
-export function getTask(slug: string, root?: string): Task {
-  const db = openDb(root);
-  const row = db.prepare("SELECT * FROM tasks WHERE slug = ?").get(slug) as TaskRow | undefined;
+export function getTask(repositoryId: string, slug: string, machineDir?: string): Task;
+export function getTask(slug: string, root?: string): Task;
+export function getTask(first: string, second?: string, third?: string): Task {
+  const legacy = second === undefined || second.startsWith("/") || second.startsWith(".");
+  const repositoryId = legacy ? undefined : first;
+  const slug = legacy ? first : second!;
+  const db = legacy ? openDb(second) : scopedDb(repositoryId!, third);
+  const row = db.prepare(legacy ? "SELECT * FROM tasks WHERE slug = ?" : "SELECT * FROM tasks WHERE repository_id_v2 = ? AND slug = ?").get(...(legacy ? [slug] : [repositoryId, slug])) as TaskRow | undefined;
   if (!row) {
     throw new TaskNotFoundError(slug);
   }
@@ -73,15 +86,16 @@ export function getTask(slug: string, root?: string): Task {
 }
 
 export function createTask(input: CreateTaskInput, root?: string): Task {
-  const db = openDb(root);
-  const existing = db.prepare("SELECT 1 FROM tasks WHERE slug = ?").get(input.slug);
+  const legacy = !input.repositoryId;
+  const db = legacy ? openDb(root) : scopedDb(input.repositoryId!, root);
+  const existing = db.prepare(legacy ? "SELECT 1 FROM tasks WHERE slug = ?" : "SELECT 1 FROM tasks WHERE repository_id_v2 = ? AND slug = ?").get(...(legacy ? [input.slug] : [input.repositoryId, input.slug]));
   if (existing) {
     throw new DuplicateSlugError(input.slug);
   }
 
   const info = db
-    .prepare("INSERT INTO tasks (slug, title, spec_markdown, repository_id, workflow_profile_id) VALUES (?, ?, ?, ?, ?)")
-    .run(input.slug, input.title, input.specMarkdown ?? "", input.repositoryId ?? null, input.workflowProfileId ?? null);
+    .prepare(legacy ? "INSERT INTO tasks (slug, title, spec_markdown, repository_id, workflow_profile_id) VALUES (?, ?, ?, ?, ?)" : "INSERT INTO tasks (slug, title, spec_markdown, repository_id, workflow_profile_id, repository_id_v2) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(...(legacy ? [input.slug, input.title, input.specMarkdown ?? "", null, input.workflowProfileId ?? null] : [input.slug, input.title, input.specMarkdown ?? "", null, input.workflowProfileId ?? null, input.repositoryId]));
 
   return {
     id: Number(info.lastInsertRowid),
@@ -98,10 +112,17 @@ export function createTask(input: CreateTaskInput, root?: string): Task {
   };
 }
 
-export function transitionTask(slug: string, to: TaskStatus, root?: string): Task {
-  const db = openDb(root);
+export function transitionTask(repositoryId: string, slug: string, to: TaskStatus, machineDir?: string): Task;
+export function transitionTask(slug: string, to: TaskStatus, root?: string): Task;
+export function transitionTask(first: string, second: TaskStatus | string, third?: TaskStatus | string, fourth?: string): Task {
+  const legacy = third === undefined || (typeof third === "string" && (third.startsWith("/") || third.startsWith(".")));
+  const repositoryId = legacy ? undefined : first;
+  const slug = legacy ? first : second as string;
+  const to = (legacy ? second : third) as TaskStatus;
+  const root = legacy ? third as string | undefined : fourth;
+  const db = legacy ? openDb(root) : scopedDb(repositoryId!, root);
   const tx = db.transaction(() => {
-    const row = db.prepare("SELECT * FROM tasks WHERE slug = ?").get(slug) as TaskRow | undefined;
+  const row = db.prepare(legacy ? "SELECT * FROM tasks WHERE slug = ?" : "SELECT * FROM tasks WHERE repository_id_v2 = ? AND slug = ?").get(...(legacy ? [slug] : [repositoryId, slug])) as TaskRow | undefined;
     if (!row) {
       throw new TaskNotFoundError(slug);
     }
@@ -111,68 +132,83 @@ export function transitionTask(slug: string, to: TaskStatus, root?: string): Tas
     if (isEscapeHatch(from, to)) {
       const updated = db
         .prepare(
-          "UPDATE tasks SET status = ?, retry_count = 0, last_failure = NULL, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *",
+          legacy ? "UPDATE tasks SET status = ?, retry_count = 0, last_failure = NULL, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *" : "UPDATE tasks SET status = ?, retry_count = 0, last_failure = NULL, updated_at = CURRENT_TIMESTAMP WHERE repository_id_v2 = ? AND slug = ? RETURNING *",
         )
-        .get(to, slug) as TaskRow | undefined;
+        .get(...(legacy ? [to, slug] : [to, repositoryId, slug])) as TaskRow | undefined;
       return rowToTask(updated!);
     }
 
-    db.prepare("UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?").run(
-      to,
-      slug,
-    );
+    db.prepare(legacy ? "UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?" : "UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE repository_id_v2 = ? AND slug = ?").run(...(legacy ? [to, slug] : [to, repositoryId, slug]));
     return rowToTask({ ...row, status: to });
   });
 
   return tx();
 }
 
-export function incrementRetryCount(slug: string, lastFailure: string, root?: string): Task {
-  const db = openDb(root);
+export function incrementRetryCount(repositoryId: string, slug: string, lastFailure: string, machineDir?: string): Task;
+export function incrementRetryCount(slug: string, lastFailure: string, root?: string): Task;
+export function incrementRetryCount(first: string, second: string, third?: string, fourth?: string): Task {
+  const legacy = third === undefined || (fourth === undefined && (third.startsWith("/") || third.startsWith(".")));
+  const repositoryId = legacy ? undefined : first;
+  const slug = legacy ? first : second;
+  const lastFailure = legacy ? second : third!;
+  const root = legacy ? third : fourth;
+  const db = legacy ? openDb(root) : scopedDb(repositoryId!, root);
   const row = db
-    .prepare(
-      "UPDATE tasks SET retry_count = retry_count + 1, last_failure = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *",
-    )
-    .get(lastFailure, slug) as TaskRow | undefined;
+    .prepare(legacy ? "UPDATE tasks SET retry_count = retry_count + 1, last_failure = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *" : "UPDATE tasks SET retry_count = retry_count + 1, last_failure = ?, updated_at = CURRENT_TIMESTAMP WHERE repository_id_v2 = ? AND slug = ? RETURNING *")
+    .get(...(legacy ? [lastFailure, slug] : [lastFailure, repositoryId, slug])) as TaskRow | undefined;
   if (!row) {
     throw new TaskNotFoundError(slug);
   }
   return rowToTask(row);
 }
 
-export function setLastFailure(slug: string, lastFailure: string, root?: string): Task {
-  const db = openDb(root);
+export function setLastFailure(repositoryId: string, slug: string, lastFailure: string, machineDir?: string): Task;
+export function setLastFailure(slug: string, lastFailure: string, root?: string): Task;
+export function setLastFailure(first: string, second: string, third?: string, fourth?: string): Task {
+  const legacy = third === undefined || (fourth === undefined && (third.startsWith("/") || third.startsWith(".")));
+  const repositoryId = legacy ? undefined : first;
+  const slug = legacy ? first : second;
+  const lastFailure = legacy ? second : third!;
+  const root = legacy ? third : fourth;
+  const db = legacy ? openDb(root) : scopedDb(repositoryId!, root);
   const row = db
-    .prepare(
-      "UPDATE tasks SET last_failure = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *",
-    )
-    .get(lastFailure, slug) as TaskRow | undefined;
+    .prepare(legacy ? "UPDATE tasks SET last_failure = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *" : "UPDATE tasks SET last_failure = ?, updated_at = CURRENT_TIMESTAMP WHERE repository_id_v2 = ? AND slug = ? RETURNING *")
+    .get(...(legacy ? [lastFailure, slug] : [lastFailure, repositoryId, slug])) as TaskRow | undefined;
   if (!row) {
     throw new TaskNotFoundError(slug);
   }
   return rowToTask(row);
 }
 
-export function clearRetryState(slug: string, root?: string): Task {
-  const db = openDb(root);
+export function clearRetryState(repositoryId: string, slug: string, machineDir?: string): Task;
+export function clearRetryState(slug: string, root?: string): Task;
+export function clearRetryState(first: string, second?: string, third?: string): Task {
+  const legacy = second === undefined || second.startsWith("/") || second.startsWith(".");
+  const repositoryId = legacy ? undefined : first;
+  const slug = legacy ? first : second!;
+  const db = legacy ? openDb(second) : scopedDb(repositoryId!, third);
   const row = db
-    .prepare(
-      "UPDATE tasks SET retry_count = 0, last_failure = NULL, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *",
-    )
-    .get(slug) as TaskRow | undefined;
+    .prepare(legacy ? "UPDATE tasks SET retry_count = 0, last_failure = NULL, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *" : "UPDATE tasks SET retry_count = 0, last_failure = NULL, updated_at = CURRENT_TIMESTAMP WHERE repository_id_v2 = ? AND slug = ? RETURNING *")
+    .get(...(legacy ? [slug] : [repositoryId, slug])) as TaskRow | undefined;
   if (!row) {
     throw new TaskNotFoundError(slug);
   }
   return rowToTask(row);
 }
 
-export function setSpecMarkdown(slug: string, specMarkdown: string, root?: string): Task {
-  const db = openDb(root);
+export function setSpecMarkdown(repositoryId: string, slug: string, specMarkdown: string, machineDir?: string): Task;
+export function setSpecMarkdown(slug: string, specMarkdown: string, root?: string): Task;
+export function setSpecMarkdown(first: string, second: string, third?: string, fourth?: string): Task {
+  const legacy = third === undefined || (fourth === undefined && (third.startsWith("/") || third.startsWith(".")));
+  const repositoryId = legacy ? undefined : first;
+  const slug = legacy ? first : second;
+  const specMarkdown = legacy ? second : third!;
+  const root = legacy ? third : fourth;
+  const db = legacy ? openDb(root) : scopedDb(repositoryId!, root);
   const row = db
-    .prepare(
-      "UPDATE tasks SET spec_markdown = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *",
-    )
-    .get(specMarkdown, slug) as TaskRow | undefined;
+    .prepare(legacy ? "UPDATE tasks SET spec_markdown = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ? RETURNING *" : "UPDATE tasks SET spec_markdown = ?, updated_at = CURRENT_TIMESTAMP WHERE repository_id_v2 = ? AND slug = ? RETURNING *")
+    .get(...(legacy ? [specMarkdown, slug] : [specMarkdown, repositoryId, slug])) as TaskRow | undefined;
   if (!row) {
     throw new TaskNotFoundError(slug);
   }

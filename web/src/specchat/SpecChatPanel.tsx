@@ -13,11 +13,12 @@ import type { SpecMessage, TaskDetail } from "../types";
 
 interface Props {
   slug: string;
+  repositoryId: string | null;
   onSpecUpdated: (task: TaskDetail) => void;
   onFrozen: (task: TaskDetail | null) => void;
 }
 
-export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
+export function SpecChatPanel({ slug, repositoryId, onSpecUpdated, onFrozen }: Props) {
   const streamed = useTaskStore(useShallow(selectSpecMessages(slug)));
   const applyTaskEvent = useTaskStore((state) => state.applyTaskEvent);
   const sendSpecMessage = useSendSpecMessageMutation();
@@ -26,8 +27,8 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
   const freezeTask = useFreezeTaskMutation();
   const pushError = useToastStore((state) => state.pushError);
   const pushInfo = useToastStore((state) => state.pushInfo);
-  const messagesQuery = useSpecMessagesQuery(slug);
-  const evidenceQuery = useSpecAuthorSessionsQuery(slug);
+  const messagesQuery = useSpecMessagesQuery(slug, repositoryId);
+  const evidenceQuery = useSpecAuthorSessionsQuery(slug, repositoryId);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -68,7 +69,7 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
     setSending(true);
     setDraft("");
     try {
-      const res = await sendSpecMessage.mutateAsync({ slug, content: text });
+      const res = await sendSpecMessage.mutateAsync({ slug, repositoryId: repositoryId!, content: text });
       applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.userMessage }, timestamp: new Date().toISOString() });
       if (res.assistantMessage) applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.assistantMessage }, timestamp: new Date().toISOString() });
     } catch (err) {
@@ -78,13 +79,13 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
       setSending(false);
     }
   };
-  const resubmit = async (message: SpecMessage): Promise<void> => { if (sending) return; setSending(true); try { const res = await resubmitSpecMessage.mutateAsync({ slug, messageId: message.id }); applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.userMessage }, timestamp: new Date().toISOString() }); if (res.assistantMessage) applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.assistantMessage }, timestamp: new Date().toISOString() }); await evidenceQuery.refetch(); } catch (err) { pushError(err instanceof Error ? err.message : String(err)); } finally { setSending(false); } };
+  const resubmit = async (message: SpecMessage): Promise<void> => { if (sending || !repositoryId) return; setSending(true); try { const res = await resubmitSpecMessage.mutateAsync({ slug, repositoryId, messageId: message.id }); applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.userMessage }, timestamp: new Date().toISOString() }); if (res.assistantMessage) applyTaskEvent({ type: "spec.message", payload: { taskSlug: slug, message: res.assistantMessage }, timestamp: new Date().toISOString() }); await evidenceQuery.refetch(); } catch (err) { pushError(err instanceof Error ? err.message : String(err)); } finally { setSending(false); } };
 
   const applySpec = async (): Promise<void> => {
     if (proposedSpec === null || applying) return;
     setApplying(true);
     try {
-      const updated = await updateTaskSpec.mutateAsync({ slug, specMarkdown: proposedSpec });
+      const updated = await updateTaskSpec.mutateAsync({ slug, repositoryId: repositoryId!, specMarkdown: proposedSpec });
       if (updated) {
         const { spec_markdown: _spec, last_failure: _failure, ...card } = updated;
         applyTaskEvent({ type: "task.updated", payload: card, timestamp: new Date().toISOString() });
@@ -102,7 +103,7 @@ export function SpecChatPanel({ slug, onSpecUpdated, onFrozen }: Props) {
     if (freezing) return;
     setFreezing(true);
     try {
-      const result = await freezeTask.mutateAsync({ slug });
+      const result = await freezeTask.mutateAsync({ slug, repositoryId: repositoryId! });
       if (result) onFrozen(result);
     } finally {
       setFreezing(false);

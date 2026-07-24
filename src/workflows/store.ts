@@ -220,7 +220,7 @@ export function listWorkflowProfiles(repositoryId: string, machineDir?: string):
   const rows = database
     .prepare("SELECT * FROM workflow_profiles WHERE repository_id = ? ORDER BY name COLLATE NOCASE")
     .all(repositoryId) as Record<string, unknown>[];
-  return rows.map((row) => profile(row, listAssignments(String(row.id), machineDir)));
+  return rows.map((row) => profile(row, listAssignments(repositoryId, String(row.id), machineDir)));
 }
 export function getWorkflowProfile(
   repositoryId: string,
@@ -231,13 +231,13 @@ export function getWorkflowProfile(
   const row = database
     .prepare("SELECT * FROM workflow_profiles WHERE repository_id = ? AND id = ?")
     .get(repositoryId, id) as Record<string, unknown> | undefined;
-  return row ? profile(row, listAssignments(id, machineDir)) : undefined;
+  return row ? profile(row, listAssignments(repositoryId, id, machineDir)) : undefined;
 }
-function listAssignments(profileId: string, machineDir?: string): AgentAssignment[] {
+function listAssignments(repositoryId: string, profileId: string, machineDir?: string): AgentAssignment[] {
   return (
     db(machineDir)
-      .prepare("SELECT * FROM agent_assignments WHERE profile_id = ? ORDER BY role")
-      .all(profileId) as Record<string, unknown>[]
+      .prepare("SELECT a.* FROM agent_assignments a JOIN workflow_profiles p ON p.id = a.profile_id WHERE p.repository_id = ? AND a.profile_id = ? ORDER BY a.role")
+      .all(repositoryId, profileId) as Record<string, unknown>[]
   ).map(assignment);
 }
 export function saveWorkflowProfile(
@@ -268,7 +268,7 @@ export function saveWorkflowProfile(
         now,
         now,
       );
-    database.prepare("DELETE FROM agent_assignments WHERE profile_id = ?").run(id);
+    database.prepare("DELETE FROM agent_assignments WHERE profile_id = ? AND profile_id IN (SELECT id FROM workflow_profiles WHERE repository_id = ?)").run(id, repositoryId);
     for (const item of input.assignments) {
       const installed = getInstalledAgent(item.agent_id, item.agent_version, machineDir);
       database

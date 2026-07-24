@@ -22,6 +22,7 @@ import { workflowAuthRecoveryAvailable, workflowAuthRecoveryCopy } from "../work
 import { DiffView } from "../diff/DiffView";
 import { parseUnifiedDiff } from "../diff/parseDiff";
 import { SpecChatPanel } from "../specchat/SpecChatPanel";
+import { useRepositoriesQuery } from "../api/queries";
 
 interface Props {
   slug: string;
@@ -34,19 +35,21 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
   const transitionTask = useTransitionTaskMutation();
   const mergeTask = useMergeTaskMutation();
   const queryClient = useQueryClient();
+  const repositories = useRepositoriesQuery();
+  const repositoryId = repositories.data?.selected_repository_id ?? null;
   const { confirm } = useConfirmContext();
-  const detailQuery = useTaskDetailQuery(slug);
-  const runsQuery = useTaskRunsQuery(slug);
+  const detailQuery = useTaskDetailQuery(slug, repositoryId);
+  const runsQuery = useTaskRunsQuery(slug, repositoryId);
   const recoverRun = useRecoverRunAuthenticationMutation();
   const detail = detailQuery.data ?? null;
   const [localDetail, setLocalDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const effectiveDetail = localDetail?.slug === slug ? localDetail : detail;
-  const diffQuery = useTaskDiffQuery(slug, effectiveDetail?.status === "review");
+  const diffQuery = useTaskDiffQuery(slug, repositoryId, effectiveDetail?.status === "review");
   const diff = diffQuery.data?.diff ?? null;
   const diffStats = diffQuery.data?.stats ?? null;
   const blockedRun = runsQuery.data?.find(workflowAuthRecoveryAvailable) ?? null;
-  const recoverAuthentication = async (): Promise<void> => { if (!blockedRun || busy) return; setBusy(true); try { await recoverRun.mutateAsync(blockedRun.id); await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.task(slug) }), queryClient.invalidateQueries({ queryKey: queryKeys.taskRuns(slug) }), queryClient.invalidateQueries({ queryKey: queryKeys.tasks() })]); const refreshed = await detailQuery.refetch(); if (refreshed.data) setLocalDetail(refreshed.data); } finally { setBusy(false); } };
+  const recoverAuthentication = async (): Promise<void> => { if (!blockedRun || busy || !repositoryId) return; setBusy(true); try { await recoverRun.mutateAsync({ runId: blockedRun.id, repositoryId }); await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.task(slug, repositoryId) }), queryClient.invalidateQueries({ queryKey: queryKeys.taskRuns(slug, repositoryId) }), queryClient.invalidateQueries({ queryKey: queryKeys.tasks(repositoryId) })]); const refreshed = await detailQuery.refetch(); if (refreshed.data) setLocalDetail(refreshed.data); } finally { setBusy(false); } };
 
   const runAction = async (action: BoardAction): Promise<void> => {
     if (effectiveDetail === null || busy) return;
@@ -64,16 +67,16 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
     try {
       let result: TaskDetail | null;
       if (action.kind === "freeze") {
-        result = await freezeTask.mutateAsync({ slug });
+         result = await freezeTask.mutateAsync({ slug, repositoryId: repositoryId! });
       } else if (action.kind === "merge") {
-        result = (await mergeTask.mutateAsync(slug)).task;
+         result = (await mergeTask.mutateAsync({ slug, repositoryId: repositoryId! })).task;
       } else {
-        result = await transitionTask.mutateAsync({ slug, to: action.to });
+         result = await transitionTask.mutateAsync({ slug, repositoryId: repositoryId!, to: action.to });
       }
       if (result) {
         const { spec_markdown: _spec, last_failure: _failure, ...card } = result;
         applyTaskEvent({ type: "task.updated", payload: card, timestamp: new Date().toISOString() });
-        queryClient.setQueryData(queryKeys.task(slug), result);
+         queryClient.setQueryData(queryKeys.task(slug, repositoryId), result);
         setLocalDetail(result);
       } else {
         setLocalDetail(previous);
@@ -144,7 +147,8 @@ export function TaskDetailPanel({ slug, onClose }: Props) {
               </section>
               {effectiveDetail.status === "backlog" && (
                 <SpecChatPanel
-                  slug={slug}
+                   slug={slug}
+                   repositoryId={repositoryId}
                   onSpecUpdated={(updated) => setLocalDetail(updated)}
                   onFrozen={(frozen) => {
                     if (frozen) setLocalDetail(frozen);

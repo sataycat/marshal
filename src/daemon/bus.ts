@@ -57,6 +57,7 @@ export function publishInstallationOperationUpdated(bus: EventBus, operation: un
 export interface SpecMessagePayload {
   taskSlug: string;
   message: SpecMessage;
+  repositoryId?: string;
 }
 
 export interface TaskPayload {
@@ -67,6 +68,7 @@ export interface TaskPayload {
   retry_count: number;
   created_at: string;
   updated_at: string;
+  repositoryId?: string | null;
 }
 
 export interface TaskTransitionedPayload extends TaskPayload {
@@ -144,8 +146,8 @@ export function publishDaemonCycleComplete(bus: EventBus): void {
   bus.publish(DaemonCycleCompleteType, {});
 }
 
-export function publishSpecMessage(bus: EventBus, taskSlug: string, message: SpecMessage): void {
-  const payload: SpecMessagePayload = { taskSlug, message };
+export function publishSpecMessage(bus: EventBus, taskSlug: string, message: SpecMessage, repositoryId?: string): void {
+  const payload: SpecMessagePayload = { taskSlug, message, repositoryId };
   bus.publish(SpecMessageType, payload);
 }
 

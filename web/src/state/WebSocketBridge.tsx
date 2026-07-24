@@ -29,19 +29,16 @@ export function WebSocketBridge({ children }: { children: ReactNode }): JSX.Elem
         }
       }, { repositoryId, onStatus: (status) => useTaskStore.getState().setSocketStatus(status) });
     };
-    fetchTasks().then((tasks) => {
-      if (!cancelled) {
-        applyTaskEvent({ type: "connected", payload: { tasks }, timestamp: new Date().toISOString() });
-        queryClient.setQueryData(queryKeys.tasks(), tasks);
-      }
-    }).catch(() => undefined);
     if (!repositoryId) {
       connect(null);
-      return () => {
-        cancelled = true;
-        handle?.close();
-      };
+      return () => { cancelled = true; handle?.close(); };
     }
+    fetchTasks(repositoryId).then((tasks) => {
+      if (!cancelled) {
+        applyTaskEvent({ type: "connected", payload: { tasks }, timestamp: new Date().toISOString() });
+        queryClient.setQueryData(queryKeys.tasks(repositoryId), tasks);
+      }
+    }).catch(() => undefined);
     fetchChatThreads(repositoryId).then((threads) => {
         if (cancelled) return;
         useChatStore.getState().replaceThreads(threads);

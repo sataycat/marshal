@@ -43,6 +43,13 @@ export function openRepositoryDb(repositoryId: string, machineDir?: string): Dat
   // A split database has one unambiguous registered owner. Backfill only
   // legacy NULLs; all subsequent store writes carry the immutable ID.
   const tables = [
+    "tasks",
+    "runs",
+    "run_operations",
+    "run_events",
+    "spec_messages",
+    "spec_author_sessions",
+    "spec_author_operations",
     "chat_threads",
     "chat_messages",
     "chat_attachments",
@@ -53,10 +60,16 @@ export function openRepositoryDb(repositoryId: string, machineDir?: string): Dat
   ];
   db.transaction(() => {
     for (const table of tables) {
-      db.prepare(`UPDATE ${table} SET repository_id = ? WHERE repository_id IS NULL`).run(
-        repositoryId,
-      );
+      const column = table === "tasks" || table === "spec_author_sessions" ? "repository_id_v2" : "repository_id";
+      db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} IS NULL`).run(repositoryId);
     }
+    db.prepare("UPDATE tasks SET repository_id_v2 = ? WHERE repository_id_v2 IS NULL").run(repositoryId);
+    db.prepare("UPDATE spec_author_sessions SET repository_id_v2 = ? WHERE repository_id_v2 IS NULL").run(repositoryId);
+    db.prepare("UPDATE spec_messages SET repository_id = ? WHERE repository_id IS NULL AND task_id IN (SELECT id FROM tasks WHERE repository_id_v2 = ?)").run(repositoryId, repositoryId);
+    db.prepare("UPDATE runs SET repository_id = ? WHERE repository_id IS NULL AND task_id IN (SELECT id FROM tasks WHERE repository_id_v2 = ?)").run(repositoryId, repositoryId);
+    db.prepare("UPDATE run_operations SET repository_id = ? WHERE repository_id IS NULL AND run_id IN (SELECT id FROM runs WHERE repository_id = ?)").run(repositoryId, repositoryId);
+    db.prepare("UPDATE run_events SET repository_id = ? WHERE repository_id IS NULL AND run_id IN (SELECT id FROM runs WHERE repository_id = ?)").run(repositoryId, repositoryId);
+    db.prepare("UPDATE spec_author_operations SET repository_id = ? WHERE repository_id IS NULL AND author_session_id IN (SELECT id FROM spec_author_sessions WHERE repository_id_v2 = ?)").run(repositoryId, repositoryId);
   })();
   return db;
 }

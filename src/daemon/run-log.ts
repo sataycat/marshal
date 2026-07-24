@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import { openDb } from "../db/index.js";
+import { openDb, openRepositoryDb } from "../db/index.js";
 import type { AgentEvent } from "../agent/types.js";
 import type { HistoricalAgentProvenance } from "../agents/provenance.js";
 import type { StructuredAcpError } from "../acp/errors.js";
@@ -44,6 +44,7 @@ export interface RunRecord {
   failure?: StructuredAcpError | null;
   authRecoveryResolvedAt?: string | null;
   supersededByRunId?: number | null;
+  repositoryId?: string;
 }
 
 export interface RunEventRecord {
@@ -91,6 +92,7 @@ interface RunRow {
   failure: string | null;
   auth_recovery_resolved_at: string | null;
   superseded_by_run_id: number | null;
+  repository_id: string | null;
 }
 
 interface RunEventRow {
@@ -139,6 +141,7 @@ function rowToRun(row: RunRow): RunRecord {
     failure: parseJson(row.failure, null) as StructuredAcpError | null,
     authRecoveryResolvedAt: row.auth_recovery_resolved_at,
     supersededByRunId: row.superseded_by_run_id,
+    repositoryId: row.repository_id ?? undefined,
   };
 }
 
@@ -157,21 +160,28 @@ export class RunLog {
   private db: Database.Database;
   private bus?: EventBus;
 
-  constructor(root?: string, bus?: EventBus) {
-    this.db = openDb(root);
+  readonly repositoryId?: string;
+  constructor(repositoryIdOrRoot?: string, machineDirOrBus?: string | EventBus, maybeBus?: EventBus) {
+    this.repositoryId = repositoryIdOrRoot && !repositoryIdOrRoot.includes("/") ? repositoryIdOrRoot : undefined;
+    const bus = typeof machineDirOrBus === "object" ? machineDirOrBus : maybeBus;
+    this.db = this.repositoryId ? openRepositoryDb(this.repositoryId, typeof machineDirOrBus === "string" ? machineDirOrBus : undefined) : openDb(repositoryIdOrRoot);
     this.bus = bus;
   }
 
   startRun(taskId: number, role: RunRole, agentId: string, prompt: string, provenance: { agentVersion?: string; agentProvenance?: HistoricalAgentProvenance; assignmentConfig?: unknown } = {}): number {
     const info = this.db
       .prepare(
-        "INSERT INTO runs (task_id, role, agent_id, status, prompt, agent_version, agent_provenance, assignment_config, operation_id) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?)",
+        this.repositoryId
+          ? "INSERT INTO runs (task_id, repository_id, role, agent_id, status, prompt, agent_version, agent_provenance, assignment_config, operation_id) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)"
+          : "INSERT INTO runs (task_id, role, agent_id, status, prompt, agent_version, agent_provenance, assignment_config, operation_id) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?)",
       )
-      .run(taskId, role, agentId, prompt, provenance.agentVersion ?? "legacy", JSON.stringify(provenance.agentProvenance ?? {}), JSON.stringify(provenance.assignmentConfig ?? {}), randomUUID());
+      .run(...(this.repositoryId
+        ? [taskId, this.repositoryId, role, agentId, prompt, provenance.agentVersion ?? "legacy", JSON.stringify(provenance.agentProvenance ?? {}), JSON.stringify(provenance.assignmentConfig ?? {}), randomUUID()]
+        : [taskId, role, agentId, prompt, provenance.agentVersion ?? "legacy", JSON.stringify(provenance.agentProvenance ?? {}), JSON.stringify(provenance.assignmentConfig ?? {}), randomUUID()]));
     const runId = Number(info.lastInsertRowid);
     this.db.prepare("UPDATE runs SET superseded_by_run_id = ? WHERE id = (SELECT id FROM runs WHERE task_id = ? AND role = ? AND status = 'authentication_required' AND auth_recovery_resolved_at IS NOT NULL AND superseded_by_run_id IS NULL ORDER BY id DESC LIMIT 1)").run(runId, taskId, role);
     const operationId = (this.db.prepare("SELECT operation_id FROM runs WHERE id = ?").get(runId) as { operation_id: string }).operation_id;
-    this.db.prepare("INSERT INTO run_operations (id, run_id, operation, status) VALUES (?, ?, ?, 'running')").run(operationId, runId, role);
+    this.db.prepare(this.repositoryId ? "INSERT INTO run_operations (id, repository_id, run_id, operation, status) VALUES (?, ?, ?, ?, 'running')" : "INSERT INTO run_operations (id, run_id, operation, status) VALUES (?, ?, ?, 'running')").run(...(this.repositoryId ? [operationId, this.repositoryId, runId, role] : [operationId, runId, role]));
     if (this.bus) {
       const run = this.getRun(runId);
       if (run) publishRunStarted(this.bus, toRunPayload(run));
@@ -189,8 +199,8 @@ export class RunLog {
 
   insertEvent(runId: number, seq: number, event: AgentEvent): void {
     this.db
-      .prepare("INSERT INTO run_events (run_id, seq, type, payload) VALUES (?, ?, ?, ?)")
-      .run(runId, seq, event.type, JSON.stringify(event));
+      .prepare(this.repositoryId ? "INSERT INTO run_events (repository_id, run_id, seq, type, payload) VALUES (?, ?, ?, ?, ?)" : "INSERT INTO run_events (run_id, seq, type, payload) VALUES (?, ?, ?, ?)")
+      .run(...(this.repositoryId ? [this.repositoryId, runId, seq, event.type, JSON.stringify(event)] : [runId, seq, event.type, JSON.stringify(event)]));
     if (this.bus) publishRunEvent(this.bus, runId, event);
   }
 
