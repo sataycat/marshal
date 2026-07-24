@@ -753,7 +753,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
 
   const send = async (text = draft): Promise<void> => {
     const content = text.trim();
-    if (!thread || !content || draftSending || externalSending) return;
+    if (!thread || (!content && attachments.length === 0) || draftSending || externalSending) return;
     setDraftSending(true);
     setSendError(null);
     onDraftChange("");
@@ -782,8 +782,14 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
     setUploading(true);
     try {
       const uploaded = [...attachments];
-       for (const file of [...files]) uploaded.push(await uploadMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "", file }));
-      onAttachments(uploaded);
+      for (const file of [...files]) {
+        const attachment = await uploadMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "", file });
+        uploaded.push(attachment);
+        // Publish each successful upload immediately. If a later file fails,
+        // the browser still retains the successfully uploaded attachment and
+        // can send it or let thread deletion clean it up.
+        onAttachments([...uploaded]);
+      }
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "Image upload failed. Check the type and 10 MiB limit.");
     } finally { setUploading(false); }

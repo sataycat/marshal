@@ -21,7 +21,7 @@ import {
 import { expandChatFileMentions } from "../chat/files.js";
 import type { PermissionRequestRecord } from "../acp/permission-store.js";
 import { reconcileThreadPermissions } from "../acp/permission-store.js";
-import { MAX_ATTACHMENTS_PER_MESSAGE, readChatAttachment } from "../chat/attachments.js";
+import { ChatAttachmentError, MAX_ATTACHMENTS_PER_MESSAGE, readChatAttachment } from "../chat/attachments.js";
 import { AcpSessionSupervisor } from "../acp/supervisor.js";
 import { structuredAcpError } from "../acp/errors.js";
 import type { AgentSessionConfigOption, AgentSessionModeState } from "../agent/types.js";
@@ -157,7 +157,7 @@ export class ChatTurnRunner {
       attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE ||
       new Set(attachmentIds).size !== attachmentIds.length
     )
-      throw new Error("A message may include at most 8 unique images");
+      throw new ChatAttachmentError("A message may include at most 8 unique images.", "attachment_limit");
     const attachments = attachmentIds.map((id) => readChatAttachment(this.repositoryId, threadId, id, this.machineDir));
     const expandedContent = expandChatFileMentions(content, thread.cwd);
     const userMessage = appendChatMessage(

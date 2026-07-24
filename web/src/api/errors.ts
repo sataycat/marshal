@@ -52,5 +52,17 @@ export function friendlyErrorMessage(err: unknown): string {
   if (code === "agent_cleanup_failed") {
     return "Marshal could not clean up the agent payload. Fix the payload permissions and retry cleanup.";
   }
+  if (code === "attachment_quota") {
+    return "This session has reached its 40 MiB image quota. Remove an image or start a new session.";
+  }
+  if (code === "attachment_limit") {
+    return "A message can include at most 8 unique images.";
+  }
+  if (code === "unsupported_image" || code === "invalid_image") {
+    return "That upload is not a supported image. Use a valid PNG, JPEG, WebP, or GIF with a matching extension.";
+  }
+  if (code === "attachment_missing") {
+    return "That image is no longer available. Remove it and upload it again.";
+  }
   return base;
 }

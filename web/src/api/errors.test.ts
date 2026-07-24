@@ -87,4 +87,11 @@ describe("friendlyErrorMessage", () => {
     expect(friendlyErrorMessage(Object.assign(new Error("live references"), { code: "agent_removal_conflict" }))).toMatch(/resolve|removal/i);
     expect(friendlyErrorMessage(Object.assign(new Error("payload locked"), { code: "agent_cleanup_failed" }))).toMatch(/retry|cleanup/i);
   });
+
+  it("keeps attachment failures actionable", () => {
+    expect(friendlyErrorMessage(Object.assign(new Error("quota"), { code: "attachment_quota" }))).toMatch(/40 MiB/);
+    expect(friendlyErrorMessage(Object.assign(new Error("too many"), { code: "attachment_limit" }))).toMatch(/8 unique/);
+    expect(friendlyErrorMessage(Object.assign(new Error("bad image"), { code: "invalid_image" }))).toMatch(/supported image/);
+    expect(friendlyErrorMessage(Object.assign(new Error("gone"), { code: "attachment_missing" }))).toMatch(/upload it again/);
+  });
 });

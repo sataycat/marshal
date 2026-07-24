@@ -1,11 +1,13 @@
 import { execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Agent } from "../agent/types.js";
 import { createInstallation, finishInstallation, setAgentReadiness } from "../agents/store.js";
 import { registerRepository } from "../repositories/store.js";
+import { attachmentPath } from "../chat/attachment-storage.js";
+import { openDatabase } from "../db/index.js";
 import { buildApp } from "./http.js";
 
 const testAgent: Agent = {
@@ -84,6 +86,78 @@ async function req(app: ReturnType<typeof buildApp>, method: string, path: strin
 }
 
 describe("chat session API", () => {
+  it("completes the attachment HTTP lifecycle with repository scope and daemon-owned bytes", async () => {
+    const firstRoot = mkdtempSync(join(tmpdir(), "marshal-chat-attachment-first-"));
+    const secondRoot = mkdtempSync(join(tmpdir(), "marshal-chat-attachment-second-"));
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-chat-attachment-machine-"));
+    initGitRepo(firstRoot);
+    initGitRepo(secondRoot);
+    const first = registerRepository(firstRoot, machineDir);
+    const second = registerRepository(secondRoot, machineDir);
+    const app = buildApp("0.0.1", { root: firstRoot, machineDir, chatAgent: testAgent });
+    const created = await req(app, "POST", "/api/threads", { repository_id: first.id, agent_id: "agent-a", agent_version: "1.0.0" });
+    const threadId = created.body.thread.id;
+    const movedRoot = `${firstRoot}-moved`;
+    renameSync(firstRoot, movedRoot);
+    chmodSync(movedRoot, 0o500);
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    const upload = new FormData();
+    upload.append("file", new File([png], "proof.png", { type: "image/png" }));
+    const uploadedResponse = await app.request(`/api/threads/${threadId}/attachments?repository_id=${first.id}`, { method: "POST", body: upload });
+    expect(uploadedResponse.status).toBe(201);
+    const attachment = (await uploadedResponse.json() as any).attachment;
+    expect(attachment).toMatchObject({ repository_id: first.id, thread_id: threadId, mime_type: "image/png", byte_size: png.byteLength });
+
+    const metadata = await app.request(`/api/threads/${threadId}/attachments?repository_id=${first.id}`);
+    expect((await metadata.json() as any).attachments).toHaveLength(1);
+    const download = await app.request(`/api/threads/${threadId}/attachments/${attachment.id}?repository_id=${first.id}`);
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-type")).toContain("image/png");
+    expect(new Uint8Array(await download.arrayBuffer())).toEqual(png);
+    expect((await app.request(`/api/threads/${threadId}/attachments/${attachment.id}?repository_id=${second.id}`)).status).toBe(404);
+
+    const row = openDatabase(machineDir).prepare("SELECT storage_key FROM chat_attachments WHERE id = ?").get(attachment.id) as { storage_key: string };
+    const storedPath = attachmentPath(first.id, threadId, row.storage_key, machineDir);
+    expect(storedPath).toContain(join(machineDir, "repositories", first.id, "attachments", threadId));
+    expect(storedPath).not.toContain(firstRoot);
+    expect(readFileSync(storedPath)).toEqual(Buffer.from(png));
+
+    const storedAsDirectory = storedPath;
+    rmSync(storedAsDirectory);
+    mkdirSync(storedAsDirectory);
+    expect((await req(app, "DELETE", `/api/threads/${threadId}?repository_id=${first.id}`)).status).toBe(500);
+    expect((await app.request(`/api/threads/${threadId}/attachments?repository_id=${first.id}`)).status).toBe(200);
+    rmSync(storedAsDirectory, { recursive: true });
+    expect((await req(app, "DELETE", `/api/threads/${threadId}?repository_id=${first.id}`)).status).toBe(200);
+    expect(existsSync(storedPath)).toBe(false);
+    expect((await app.request(`/api/threads/${threadId}/attachments?repository_id=${first.id}`)).status).toBe(404);
+  });
+
+  it("enforces MIME, signature, byte-size, quota, and attachment-count validation at HTTP boundaries", async () => {
+    const root = mkdtempSync(join(tmpdir(), "marshal-chat-attachment-validation-"));
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-chat-attachment-validation-machine-"));
+    initGitRepo(root);
+    const repository = registerRepository(root, machineDir);
+    const app = buildApp("0.0.1", { root, machineDir, chatAgent: testAgent });
+    const created = await req(app, "POST", "/api/threads", { repository_id: repository.id, agent_id: "agent-a", agent_version: "1.0.0" });
+    const threadId = created.body.thread.id;
+    const post = async (file: File): Promise<{ status: number; body: any }> => {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await app.request(`/api/threads/${threadId}/attachments?repository_id=${repository.id}`, { method: "POST", body: form });
+      return { status: response.status, body: await response.json() };
+    };
+    expect(await post(new File(["not an image"], "proof.png", { type: "image/png" }))).toMatchObject({ status: 422, body: { code: "invalid_image" } });
+    expect(await post(new File([new Uint8Array([1])], "proof.svg", { type: "image/svg+xml" }))).toMatchObject({ status: 422, body: { code: "unsupported_image" } });
+    const tooLarge = new Uint8Array(10 * 1024 * 1024 + 1);
+    expect((await post(new File([tooLarge], "proof.png", { type: "image/png" }))).body.code).toBe("attachment_too_large");
+
+    const db = openDatabase(machineDir);
+    db.prepare("INSERT INTO chat_attachments (id, repository_id, thread_id, filename, mime_type, byte_size, storage_key) VALUES (?, ?, ?, ?, ?, ?, ?)").run(crypto.randomUUID(), repository.id, threadId, "quota.png", "image/png", 40 * 1024 * 1024, crypto.randomUUID());
+    expect(await post(new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "proof.png", { type: "image/png" }))).toMatchObject({ status: 422, body: { code: "attachment_quota" } });
+    expect((await req(app, "POST", `/api/threads/${threadId}/send?repository_id=${repository.id}`, { content: "too many", attachment_ids: Array.from({ length: 9 }, (_, index) => `attachment-${index}`) })).body.code).toBe("attachment_limit");
+  });
+
   it("returns an empty session list before a repository is selected", async () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-chat-machine-"));
     const app = buildApp("0.0.1", { machineDir });

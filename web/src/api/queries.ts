@@ -348,7 +348,18 @@ export const useUpdateThreadMutation = () =>
        input: Parameters<typeof api.updateChatThread>[2];
     }) => api.updateChatThread(id, repositoryId, input),
   });
-export const useDeleteThreadMutation = () => useMutation({ mutationFn: ({ id, repositoryId }: { id: string; repositoryId: string }) => api.deleteChatThread(id, repositoryId) });
+export const useDeleteThreadMutation = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, repositoryId }: { id: string; repositoryId: string }) => api.deleteChatThread(id, repositoryId),
+    onSuccess: (_result, { id, repositoryId }) => {
+      queryClient.removeQueries({ queryKey: queryKeys.thread(id, repositoryId) });
+      queryClient.removeQueries({ queryKey: queryKeys.attachments(id, repositoryId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.threads(false, repositoryId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.threads(true, repositoryId) });
+    },
+  });
+};
 export const useInitializeChatSessionMutation = () =>
   useMutation({ mutationFn: ({ id, repositoryId }: { id: string; repositoryId: string }) => api.initializeChatSession(id, repositoryId) });
 export const useSetChatSessionConfigOptionMutation = () =>
@@ -404,10 +415,15 @@ export const usePermissionMutation = () =>
        repositoryId: string;
     }) => api.decideChatPermission(id, repositoryId, requestId, action),
   });
-export const useUploadAttachmentMutation = () =>
-  useMutation({
+export const useUploadAttachmentMutation = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
     mutationFn: ({ id, repositoryId, file }: { id: string; repositoryId: string; file: File }) => api.uploadChatAttachment(id, repositoryId, file),
+    onSuccess: (_attachment, { id, repositoryId }) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.attachments(id, repositoryId) });
+    },
   });
+};
 export const useSendSpecMessageMutation = () =>
   useMutation({
       mutationFn: ({ slug, repositoryId, content }: { slug: string; repositoryId: string; content: string }) =>

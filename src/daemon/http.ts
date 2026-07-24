@@ -1701,7 +1701,15 @@ function registerChatRoutes(
   app.delete("/api/threads/:id", async (c) => {
     try {
       const repositoryId = resolveRequestRepository(c);
-      await turnsFor(repositoryId).closeThread(c.req.param("id"));
+      // Attachment cleanup is daemon-owned and must remain available when a
+      // checkout has moved, disappeared, or is read-only. Close an active ACP
+      // session when source execution is still available, but do not make
+      // thread deletion depend on resolving the checkout path.
+      try {
+        await turnsFor(repositoryId).closeThread(c.req.param("id"));
+      } catch (error) {
+        if (!(error instanceof RepositoryContextError) || !["repository_unavailable", "repository_unregistered"].includes(error.code)) throw error;
+      }
       reconcileThreadPermissions(repositoryId, c.req.param("id"), machineDir);
       deleteChatThread(repositoryId, c.req.param("id"), machineDir);
       if (bus) publishThreadDeleted(bus, c.req.param("id"), repositoryId);
@@ -1847,21 +1855,22 @@ function registerChatRoutes(
   });
   app.post("/api/threads/:id/send", async (c) => {
     const body = await readJsonObject(c, new Set(["content", "attachment_ids"]));
-    if (body.content === undefined) throw new ApiError(422, "content is required", "missing_field");
-    const content = assertString(body.content, "content");
-    if (!content.trim()) throw new ApiError(422, "content must not be empty", "invalid_field");
+    const content = body.content === undefined ? "" : assertString(body.content, "content");
     if (
       body.attachment_ids !== undefined &&
       (!Array.isArray(body.attachment_ids) ||
         body.attachment_ids.some((id) => typeof id !== "string"))
     )
       throw new ApiError(422, "attachment_ids must be an array of strings", "invalid_field");
+    const attachmentIds = (body.attachment_ids as string[] | undefined) ?? [];
+    if (!content.trim() && attachmentIds.length === 0)
+      throw new ApiError(422, "content must not be empty unless an image is attached", "invalid_field");
     try {
       const repositoryId = resolveRequestRepository(c);
       const result = await turnsFor(repositoryId).send(
         c.req.param("id"),
         content,
-        body.attachment_ids as string[] | undefined,
+        attachmentIds,
       );
       return c.json(result, 201);
     } catch (err) {

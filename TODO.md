@@ -149,11 +149,11 @@ Implement the ADR as the following dependency-ordered vertical slices. Each slic
 
 ### 5. Move attachment bytes into daemon-owned repository namespaces
 
-- [ ] Store attachment bytes beneath `$MARSHAL_HOME/repositories/<repository-id>/attachments/` using daemon-generated attachment and thread identifiers, with no repository name, checkout path, filename, or other client-provided path component.
-- [ ] Keep attachment ownership, quota, MIME validation, byte size, and opaque storage key in `marshal.db`; never persist an absolute checkout-derived path.
-- [ ] Define bounded file/database write ordering so a failed metadata insert removes the new file and a failed file deletion remains discoverable for retry.
-- [ ] Add startup or maintenance reconciliation for orphaned attachment files and missing-file metadata without weakening repository access checks.
-- [ ] Test upload, read, quota enforcement, thread deletion cleanup, interrupted cleanup recovery, a moved or read-only checkout, and path-containment attacks.
+ - [x] Store attachment bytes beneath `$MARSHAL_HOME/repositories/<repository-id>/attachments/` using daemon-generated attachment and thread identifiers, with no repository name, checkout path, filename, or other client-provided path component. (Opaque UUID keys and repository/thread-scoped daemon namespaces are enforced by `attachment-storage.ts`.)
+ - [x] Keep attachment ownership, quota, MIME validation, byte size, and opaque storage key in `marshal.db`; never persist an absolute checkout-derived path. (HTTP upload/download/list routes resolve repository ownership explicitly and expose only attachment metadata.)
+ - [x] Define bounded file/database write ordering so a failed metadata insert removes the new file and a failed file deletion remains discoverable for retry. (Upload writes bytes before metadata with orphan cleanup; deletion removes bytes before deleting thread metadata.)
+ - [x] Add startup or maintenance reconciliation for orphaned attachment files and missing-file metadata without weakening repository access checks. (Daemon startup/cycles and HTTP startup reconcile only the daemon namespace; missing bytes remain a scoped 404.)
+ - [x] Test upload, read, quota enforcement, thread deletion cleanup, interrupted cleanup recovery, a moved or read-only checkout, and path-containment attacks. (Focused storage and daemon API coverage includes MIME/signature/size limits, cross-repository 404s, cleanup retry, relocation/read-only checkouts, and hostile storage keys.)
 
 ### 6. Move task worktrees into stable repository namespaces
 
