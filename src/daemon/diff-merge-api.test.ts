@@ -57,7 +57,6 @@ describe("diff review & merge HTTP contract", () => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-diff-api-"));
     worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-diff-api-wt-"));
     initGitRepo(repoRoot);
-    mkdirSync(join(repoRoot, ".marshal"), { recursive: true });
     options = { root: repoRoot, worktreeRoot };
     app = buildApp("0.0.1", options);
   });

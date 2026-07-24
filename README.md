@@ -76,6 +76,29 @@ Marshal serves HTTP and requires the browser password session for API and WebSoc
 
 Authentication protects the control plane but does not sandbox ACP agents. Run the daemon with an appropriately restricted OS account and use an explicit process/container/VM isolation policy for untrusted or unattended agent work.
 
+### Storage, backup, and reset
+
+`MARSHAL_HOME` is Marshal's complete persistence boundary. It defaults to
+`~/.marshal`; set it to a mounted persistent volume for a VPS or container:
+
+```sh
+MARSHAL_HOME=/var/lib/marshal marshal start
+```
+
+Back up and restore the whole directory, including `marshal.db`, namespace
+files, credentials, installations, and lifecycle metadata. For a consistent
+backup, stop the daemon first or use SQLite's supported online backup API;
+copying a live `marshal.db` and its WAL/SHM files independently is not a
+reliable snapshot. Restore with the daemon stopped, then start it and review
+Diagnostics.
+
+To reset a development installation, stop Marshal and remove or replace the
+entire `MARSHAL_HOME`; the next start creates a fresh database. Never delete a
+registered source checkout to reset Marshal. Pre-1.0 releases used a split
+layout (`machine.db` and repository `.marshal/state.db`); that layout is not
+imported or scanned. Preserve any source configuration separately, remove the
+old Marshal home, and reconnect repositories in the browser.
+
 ## Configuration
 
 ### Browser-owned configuration

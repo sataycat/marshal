@@ -21,16 +21,6 @@ export function initGlobalConfig(): string {
   return ensureStorageLayout().root;
 }
 
-/** Repository checkouts no longer receive a Marshal state directory. */
-export function initRepoState(_root = process.cwd()): string {
-  return ensureStorageLayout().root;
-}
-
-/** @deprecated Repository-local databases were removed in ADR-0012. */
-export function getRepoStateDir(_root = process.cwd()): string {
-  return ensureStorageLayout().root;
-}
-
 /** Resolve the daemon-owned path contract for the current or explicit home. */
 export function getStorageLayout(machineDir?: string): StorageLayout {
   return storageLayout(machineDir);

@@ -18,9 +18,8 @@ describe("CLI smoke tests", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-"));
     const { stdout } = runCli(["init"], root);
     expect(stdout).toContain("machine already configured");
-    expect(stdout).toContain("repo initialized");
-    expect(existsSync(join(root, ".marshal"))).toBe(true);
-    expect(existsSync(join(root, ".marshal", "state.db"))).toBe(true);
+    expect(stdout).toContain("daemon database initialized");
+    expect(existsSync(join(root, ".marshal"))).toBe(false);
   });
 
   it("lists no tasks with task list", () => {
@@ -156,11 +155,12 @@ describe("CLI smoke tests", () => {
     runCli(["task", "create", "--slug", "bricked", "--title", "Bricked"], root);
     runCli(["task", "transition", "bricked", "ready"], root);
     runCli(["task", "transition", "bricked", "building"], root);
-    const db = new Database(join(root, ".marshal", "state.db"));
+    const db = new Database(join(process.env.MARSHAL_HOME!, "marshal.db"));
     const task = db.prepare("SELECT id FROM tasks WHERE slug = ?").get("bricked") as { id: number };
+    const repository = db.prepare("SELECT repository_id FROM tasks WHERE id = ?").get(task.id) as { repository_id: string };
     db.prepare(
-      "INSERT INTO runs (task_id, role, agent_id, status, error) VALUES (?, 'builder', 'opencode', 'error', ?)",
-    ).run(task.id, "spawn failed: acpx missing");
+      "INSERT INTO runs (repository_id, task_id, role, agent_id, status, error) VALUES (?, ?, 'builder', 'opencode', 'error', ?)",
+    ).run(repository.repository_id, task.id, "spawn failed: acpx missing");
     db.close();
 
     const showOut = runCli(["task", "show", "bricked"], root).stdout;

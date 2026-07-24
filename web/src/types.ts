@@ -257,6 +257,19 @@ export interface DiagnosticIssue {
 }
 export interface DiagnosticsResponse {
   daemon: { status: string; version: string; host: string | null };
+  storage: {
+    root: string;
+    database_path: string;
+    default_root: string;
+    custom_home: boolean;
+    legacy_layout: boolean;
+    repository_namespaces: Array<{
+      repositoryId: string;
+      path: string;
+      exists: boolean;
+      directories: { attachments: boolean; artifacts: boolean; worktrees: boolean };
+    }>;
+  };
   repository: { selected: Repository | null; registered_count: number; root: string | null; repositories: Repository[] };
   registry: { snapshot: RegistrySnapshot | null; refresh: RegistryRefresh | null };
   agents: InstalledAgent[];

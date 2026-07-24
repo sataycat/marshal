@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -47,6 +47,20 @@ export interface StorageLayout {
   credentialFile(referenceId: string): string;
   repositoryNamespace(repositoryId: string): RepositoryNamespace;
   temporaryFile(name: string): string;
+}
+
+export interface StorageBoundaryDiagnostics {
+  root: string;
+  databasePath: string;
+  defaultRoot: string;
+  customHome: boolean;
+  legacyMachineLayout: boolean;
+  repositoryNamespaces: Array<{
+    repositoryId: string;
+    path: string;
+    exists: boolean;
+    directories: { attachments: boolean; artifacts: boolean; worktrees: boolean };
+  }>;
 }
 
 export type StorageRoot = string | undefined;
@@ -197,6 +211,36 @@ export function storageLayout(explicitRoot?: string): StorageLayout {
     temporaryFile(name) {
       return child(root, "tmp", validateNamespaceComponent(name, "temporary file"));
     },
+  };
+}
+
+/** Inspect the daemon boundary without creating directories or scanning checkouts. */
+export function inspectStorageBoundary(
+  explicitRoot?: string,
+  repositoryIds: string[] = [],
+): StorageBoundaryDiagnostics {
+  const layout = storageLayout(explicitRoot);
+  const repositoryNamespaces = repositoryIds.map((repositoryId) => {
+    const namespace = layout.repositoryNamespace(repositoryId);
+    const exists = existsSync(namespace.root) && statSync(namespace.root).isDirectory();
+    return {
+      repositoryId,
+      path: namespace.root,
+      exists,
+      directories: {
+        attachments: existsSync(namespace.attachmentsDirectory),
+        artifacts: existsSync(namespace.artifactsDirectory),
+        worktrees: existsSync(namespace.worktreesDirectory),
+      },
+    };
+  });
+  return {
+    root: layout.root,
+    databasePath: layout.databasePath,
+    defaultRoot: defaultMarshalHome(),
+    customHome: layout.root !== defaultMarshalHome(),
+    legacyMachineLayout: existsSync(join(layout.root, "machine.db")),
+    repositoryNamespaces,
   };
 }
 

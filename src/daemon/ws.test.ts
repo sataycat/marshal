@@ -20,7 +20,6 @@ function initGitRepo(root: string): void {
   writeFileSync(join(root, "README.md"), "# Test\n");
   execSync("git add README.md", { cwd: root, stdio: "ignore" });
   execSync("git commit -m init", { cwd: root, stdio: "ignore" });
-  mkdirSync(join(root, ".marshal"), { recursive: true });
 }
 
 interface MessageCollector {

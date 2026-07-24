@@ -50,7 +50,6 @@ describe("board interactions HTTP contract", () => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-board-api-"));
     worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-board-api-wt-"));
     initGitRepo(repoRoot);
-    mkdirSync(join(repoRoot, ".marshal"), { recursive: true });
     options = { root: repoRoot, worktreeRoot };
     app = buildApp("0.0.1", options);
   });

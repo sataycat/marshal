@@ -54,7 +54,6 @@ describe("WorktreeManager diff & merge", () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-diff-repo-"));
     initGitRepo(repoRoot);
-    mkdirSync(join(repoRoot, ".marshal"), { recursive: true });
   });
 
   afterEach(() => {

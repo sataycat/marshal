@@ -583,7 +583,6 @@ describe("startHttpServer", () => {
   });
 
   it("overwrites a stale port file on a fresh start", async () => {
-    mkdirSync(join(root, ".marshal"), { recursive: true });
     writeFileSync(portFilePath(), "99999");
     const handle = await startHttpServer({ root, port: 0, version: "0.0.1" });
     try {

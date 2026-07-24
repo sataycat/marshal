@@ -219,7 +219,6 @@ describe("spec chat HTTP contract", () => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-spec-api-"));
     const worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-spec-api-wt-"));
     initGitRepo(repoRoot);
-    mkdirSync(join(repoRoot, ".marshal"), { recursive: true });
     // ADR-023: specAuthor must be configured — resolveAgentId throws on missing.
     const cfgDir = mkdtempSync(join(tmpdir(), "marshal-spec-api-cfg-"));
     const cfgPath = join(cfgDir, "config.json");

@@ -27,6 +27,6 @@ describe("installed agent launch environment", () => {
     expect(JSON.stringify(binding)).not.toContain(secret);
     const rows = openMachineDb(machineDir).prepare("SELECT * FROM agent_credential_bindings").all();
     expect(JSON.stringify(rows)).not.toContain(secret);
-    expect(readFileSync(join(machineDir, "machine.db"))).not.toContain(Buffer.from(secret));
+    expect(readFileSync(join(machineDir, "marshal.db"))).not.toContain(Buffer.from(secret));
   });
 });

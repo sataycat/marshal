@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -14,10 +14,6 @@ function initGitRepo(root: string): void {
   writeFileSync(join(root, "README.md"), "# Test\n");
   execSync("git add README.md", { cwd: root, stdio: "ignore" });
   execSync("git commit -m init", { cwd: root, stdio: "ignore" });
-}
-
-function initMarshalState(root: string): void {
-  mkdirSync(join(root, ".marshal"), { recursive: true });
 }
 
 function gitRevList(path: string, ref: string = "HEAD"): string {
@@ -35,7 +31,6 @@ describe("freezeTask", () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
     initGitRepo(repoRoot);
-    initMarshalState(repoRoot);
     manager = new WorktreeManager("test-repository", repoRoot);
   });
 

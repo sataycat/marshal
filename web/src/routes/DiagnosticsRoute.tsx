@@ -48,6 +48,16 @@ export function DiagnosticsRoute({ embedded = false }: { embedded?: boolean }): 
           ok={data.registry.snapshot !== null}
         />
       </div>
+      <section className="mt-8" aria-labelledby="storage-boundary-heading">
+        <h2 id="storage-boundary-heading" className="text-sm font-semibold">Daemon storage boundary</h2>
+        <p className="mt-1 text-sm text-muted-foreground">All durable Marshal state belongs beneath this root. Registered checkouts remain source inputs only.</p>
+        <div className="mt-3 grid gap-3 rounded-xl border border-border bg-panel p-4 text-xs sm:grid-cols-2">
+          <div><p className="font-semibold text-muted-foreground">Storage root</p><p className="mt-1 break-all font-mono">{data.storage.root}</p></div>
+          <div><p className="font-semibold text-muted-foreground">SQLite database</p><p className="mt-1 break-all font-mono">{data.storage.database_path}</p></div>
+          <div><p className="font-semibold text-muted-foreground">Home mode</p><p className="mt-1">{data.storage.custom_home ? "Custom MARSHAL_HOME" : "Default ~/.marshal"}</p></div>
+          <div><p className="font-semibold text-muted-foreground">Repository namespaces</p><p className="mt-1">{data.storage.repository_namespaces.filter((item) => item.exists).length} of {data.storage.repository_namespaces.length} materialized</p></div>
+        </div>
+      </section>
       <h2 className="mt-8 text-sm font-semibold">Issues</h2>
       {data.issues.length === 0 ? (
         <div className="mt-3 flex items-center gap-2.5 rounded-xl border border-success-border bg-success-bg px-4 py-3 text-sm text-success">

@@ -44,7 +44,7 @@ describe("runInit", () => {
     expect(written.agents).toEqual(AGENT_COMMAND_DEFAULTS);
     expect(written.acpx).toBeUndefined();
     expect(calls.some((call) => call.includes("acpx"))).toBe(false);
-    expect(existsSync(join(repoRoot, ".marshal", "state.db"))).toBe(true);
+    expect(existsSync(join(repoRoot, ".marshal"))).toBe(false);
   });
 
   it("migrates legacy string roles to direct defaults", async () => {

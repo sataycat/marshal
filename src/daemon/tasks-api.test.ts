@@ -52,7 +52,6 @@ describe("task CRUD API", () => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-task-api-"));
     worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-task-api-wt-"));
     initGitRepo(repoRoot);
-    mkdirSync(join(repoRoot, ".marshal"), { recursive: true });
     options = { root: repoRoot, worktreeRoot };
     app = buildApp("0.0.1", options);
   });

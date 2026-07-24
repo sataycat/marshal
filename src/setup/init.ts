@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { initGlobalConfig } from "../daemon/config.js";
 import { openDb } from "../db/index.js";
 import { AGENT_COMMAND_DEFAULTS, isAgentCommand, type GlobalConfig } from "../worktree/config.js";
@@ -28,8 +27,6 @@ export interface InitResult {
   skippedMachine: boolean;
 }
 
-function repoAlreadyInitialized(_repoRoot: string): boolean { return existsSync(initGlobalConfig()); }
-
 function print(line: string): void {
   process.stdout.write(`${line}\n`);
 }
@@ -58,7 +55,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   // Fast path — machine already configured, just ensure repo state.
   if (alreadyConfigured) {
     print("✓ machine already configured");
-    openDb(repoRoot);
+    openDb();
     print("✓ daemon database initialized");
     printReady();
     return { ok: true, skippedMachine: true };
@@ -85,12 +82,10 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
     existing && Object.keys(existing).length > 0 ? mergeConfig(existing, generated) : generated;
 
   const machineNeedsConfig = !machineAlreadyConfigured(configPath);
-  const repoNeedsInit = !repoAlreadyInitialized(repoRoot);
-
-  if (machineNeedsConfig || repoNeedsInit) {
-    writeInitFiles(machineNeedsConfig, merged, configPath, repoRoot);
+  if (machineNeedsConfig) {
+    writeInitFiles(machineNeedsConfig, merged, configPath);
   } else {
-    openDb(repoRoot);
+    openDb();
     print("✓ daemon database initialized");
   }
 
@@ -102,7 +97,6 @@ function writeInitFiles(
   machineNeedsConfig: boolean,
   config: GlobalConfig,
   configPath: string,
-  repoRoot: string,
 ): void {
   if (machineNeedsConfig) {
     writeGlobalConfig(config, configPath);
@@ -111,7 +105,7 @@ function writeInitFiles(
     print(`✓ config present at ${configPath}`);
   }
   initGlobalConfig();
-  openDb(repoRoot);
+  openDb();
   print("✓ daemon database initialized");
 }
 

@@ -50,7 +50,6 @@ describe("run history API", () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-run-api-"));
     initGitRepo(repoRoot);
-    mkdirSync(join(repoRoot, ".marshal"), { recursive: true });
     options = { root: repoRoot };
     app = buildApp("0.0.1", options);
     const task = createTask(

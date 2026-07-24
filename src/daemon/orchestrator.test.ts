@@ -46,12 +46,8 @@ function initGitRepo(root: string): void {
   execSync("git commit -m init", { cwd: root, stdio: "ignore" });
 }
 
-function initMarshalState(root: string): void {
-  mkdirSync(join(root, ".marshal"), { recursive: true });
-}
-
 function initAgentConfig(root: string): void {
-  const cfgPath = join(root, ".marshal", "config.json");
+  const cfgPath = join(mkdtempSync(join(tmpdir(), "marshal-agent-config-")), "config.json");
   writeFileSync(
     cfgPath,
     JSON.stringify({
@@ -171,7 +167,6 @@ describe("runOnce", () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
     initGitRepo(repoRoot);
-    initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
     manager = new WorktreeManager("test-repository", repoRoot);
   });
@@ -415,7 +410,6 @@ describe("buildTask", () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
     initGitRepo(repoRoot);
-    initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
     manager = new WorktreeManager("test-repository", repoRoot);
   });
@@ -580,7 +574,6 @@ describe("validateTask", () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
     initGitRepo(repoRoot);
-    initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
     manager = new WorktreeManager("test-repository", repoRoot);
   });
@@ -884,7 +877,6 @@ describe("runOnce (validator dispatch)", () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
     initGitRepo(repoRoot);
-    initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
     manager = new WorktreeManager("test-repository", repoRoot);
   });
@@ -1126,7 +1118,6 @@ describe("runOnce event bus", () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-bus-"));
     initGitRepo(repoRoot);
-    initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
     manager = new WorktreeManager("test-repository", repoRoot);
   });

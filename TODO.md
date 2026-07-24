@@ -173,12 +173,12 @@ Implement the ADR as the following dependency-ordered vertical slices. Each slic
 
 ### 8. Remove repository-local daemon state and expose the operational boundary
 
-- [ ] Delete repository-state initialization, `getRepoStateDir`, `.marshal/state.db`, `.marshal/worktrees.json`, repository-local attachment paths, and legacy-state scanning once their replacements are active.
-- [ ] Retire recovery/setup behavior and tests that create a repository `.marshal` directory; keep source configuration files explicitly separate from daemon state.
-- [ ] Audit every daemon filesystem write and prove all durable output is beneath the resolved `MARSHAL_HOME` or an explicitly temporary OS directory used only before atomic publication.
-- [ ] Extend the diagnostics API and browser page with the resolved storage root, database path, repository namespace status, custom-home status, and actionable legacy-layout or integrity failures.
-- [ ] Document backup, restore, persistent-volume mounting, stopped-daemon reset, SQLite live-backup constraints, and the pre-1.0 split-layout reset in the README and operator/development guidance.
-- [ ] Add tests proving registered read-only and ephemeral checkouts work for non-mutating flows and no daemon operation creates `<repository>/.marshal`.
+ - [x] Delete repository-state initialization, `getRepoStateDir`, `.marshal/state.db`, `.marshal/worktrees.json`, repository-local attachment paths, and legacy-state scanning once their replacements are active.
+ - [x] Retire recovery/setup behavior and tests that create a repository `.marshal` directory; keep source configuration files explicitly separate from daemon state.
+ - [x] Audit every daemon filesystem write and prove all durable output is beneath the resolved `MARSHAL_HOME` or an explicitly temporary OS directory used only before atomic publication.
+ - [x] Extend the diagnostics API and browser page with the resolved storage root, database path, repository namespace status, custom-home status, and actionable legacy-layout or integrity failures.
+ - [x] Document backup, restore, persistent-volume mounting, stopped-daemon reset, SQLite live-backup constraints, and the pre-1.0 split-layout reset in the README and operator/development guidance.
+ - [x] Add tests proving registered read-only and ephemeral checkouts work for non-mutating flows and no daemon operation creates `<repository>/.marshal`.
 
 ### 9. Verify the complete consolidated-storage lifecycle
 

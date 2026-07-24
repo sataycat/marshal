@@ -16,17 +16,12 @@ function initGitRepo(root: string): void {
   execSync("git commit -m init", { cwd: root, stdio: "ignore" });
 }
 
-function initMarshalState(root: string): void {
-  mkdirSync(join(root, ".marshal"), { recursive: true });
-}
-
 describe("WorktreeManager", () => {
   let repoRoot: string;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
     initGitRepo(repoRoot);
-    initMarshalState(repoRoot);
   });
 
   afterEach(() => {
@@ -162,7 +157,7 @@ describe("WorktreeManager", () => {
   it("recovers an interrupted setup record on restart", () => {
     const manager = new WorktreeManager("repo-recovery", repoRoot);
     const info = manager.create("recover-me");
-    const db = openDb(repoRoot);
+    const db = openDb();
     db.prepare("UPDATE worktrees SET status = 'creating' WHERE id = ?").run(info.id);
     rmSync(info.path, { recursive: true, force: true });
     const restarted = new WorktreeManager("repo-recovery", repoRoot);
@@ -173,7 +168,7 @@ describe("WorktreeManager", () => {
   it("does not write daemon files into the source checkout", () => {
     const manager = new WorktreeManager("repo-no-source-write", repoRoot);
     manager.create("source-clean");
-    expect(existsSync(join(repoRoot, ".marshal", "worktrees.json"))).toBe(false);
+    expect(existsSync(join(repoRoot, ".marshal"))).toBe(false);
     expect(existsSync(join(repoRoot, "marshal.db"))).toBe(false);
   });
 

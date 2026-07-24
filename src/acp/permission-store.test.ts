@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initRepoState } from "../daemon/config.js";
 import { registerRepository } from "../repositories/store.js";
 import { createSession } from "./supervisor-store.js";
 import { createPermissionRequest, getPermissionRequestForThread, listPermissionRequests, reconcilePermissionRequests, resolvePermissionRequest } from "./permission-store.js";
@@ -11,7 +10,6 @@ describe("durable permission requests", () => {
   it("persists raw ACP choices and reconciles unresolved requests", () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-permissions-"));
     const machine = mkdtempSync(join(tmpdir(), "marshal-permissions-machine-"));
-    initRepoState(root);
     const repository = registerRepository(root, machine);
     const session = createSession(repository.id, { ownerType: "thread", ownerId: "thread-1", agentId: "fake", agentVersion: "1" }, machine);
     const request = createPermissionRequest(repository.id, session.id, "thread-1", { requestId: "req", sessionId: "acp", tool: "write", kind: "file", rawInput: { path: "x" }, options: [{ optionId: "deny-id", name: "No", kind: "reject_once" }, { optionId: "allow-id", name: "Yes", kind: "allow_once" }] }, machine);

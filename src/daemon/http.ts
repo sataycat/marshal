@@ -24,6 +24,7 @@ import {
   storageLayout,
   STORAGE_FILE_MODE,
   StoragePathError,
+  inspectStorageBoundary,
 } from "../storage/layout.js";
 import {
   DEFAULT_DAEMON_HOST,
@@ -796,12 +797,42 @@ function registerDiagnosticsRoute(
     const selected = getSelectedRepository(machineDir);
     const catalog = getRegistryCatalog(machineDir);
     const agents = listInstalledAgents(machineDir);
+    const storage = inspectStorageBoundary(machineDir, repositories.map((repository) => repository.id));
     const issues: Array<{
       code: string;
       message: string;
       action: string;
       severity: "error" | "warning";
     }> = [];
+    if (storage.legacyMachineLayout) {
+      issues.push({
+        code: "LEGACY_LAYOUT_RESET_REQUIRED",
+        message: `Legacy machine.db layout detected beneath ${storage.root}.`,
+        action: "Stop the daemon, preserve needed configuration separately, remove or replace MARSHAL_HOME, and start again with a fresh home.",
+        severity: "error",
+      });
+    }
+    try {
+      const db = openDatabase(machineDir);
+      const integrity = db.pragma("integrity_check") as Array<{ integrity_check: string }>;
+      const foreignKeys = db.pragma("foreign_key_check") as unknown[];
+      db.close();
+      if (integrity[0]?.integrity_check !== "ok" || foreignKeys.length > 0) {
+        issues.push({
+          code: "DATABASE_INTEGRITY_FAILED",
+          message: "The consolidated Marshal database failed an integrity check.",
+          action: "Stop the daemon and restore MARSHAL_HOME from a known-good backup before deleting or replacing the damaged home.",
+          severity: "error",
+        });
+      }
+    } catch (error) {
+      issues.push({
+        code: "DATABASE_OPEN_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+        action: "Stop the daemon, inspect the migration or reset guidance, and start with a valid MARSHAL_HOME.",
+        severity: "error",
+      });
+    }
     if (!selected)
       issues.push({
         code: "REPOSITORY_NOT_SELECTED",
@@ -875,6 +906,14 @@ function registerDiagnosticsRoute(
     }
     return c.json({
       daemon: { status: "ok", version, host: c.req.header("host") ?? null },
+      storage: {
+        root: storage.root,
+        database_path: storage.databasePath,
+        default_root: storage.defaultRoot,
+        custom_home: storage.customHome,
+        legacy_layout: storage.legacyMachineLayout,
+        repository_namespaces: storage.repositoryNamespaces,
+      },
       repository: {
         selected: selected ?? null,
         registered_count: repositories.filter((repository) => repository.registration_status === "registered").length,

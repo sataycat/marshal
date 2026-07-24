@@ -26,12 +26,8 @@ function initGitRepo(root: string): void {
   execSync("git commit -m init", { cwd: root, stdio: "ignore" });
 }
 
-function initMarshalState(root: string): void {
-  mkdirSync(join(root, ".marshal"), { recursive: true });
-}
-
 function initAgentConfig(root: string): void {
-  const cfgPath = join(root, ".marshal", "config.json");
+  const cfgPath = join(mkdtempSync(join(tmpdir(), "marshal-loop-config-")), "config.json");
   writeFileSync(
     cfgPath,
     JSON.stringify({
@@ -152,7 +148,6 @@ describe("startDaemon", () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-daemon-"));
     initGitRepo(repoRoot);
-    initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
     manager = new WorktreeManager("test-repository", repoRoot);
   });
