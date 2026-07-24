@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -175,5 +175,30 @@ describe("WorktreeManager", () => {
     manager.create("source-clean");
     expect(existsSync(join(repoRoot, ".marshal", "worktrees.json"))).toBe(false);
     expect(existsSync(join(repoRoot, "marshal.db"))).toBe(false);
+  });
+
+  it("keeps same-named repositories in separate ID namespaces", () => {
+    const parent = mkdtempSync(join(tmpdir(), "marshal-same-name-"));
+    const firstRoot = join(parent, "one", "project");
+    const secondRoot = join(parent, "two", "project");
+    mkdirSync(firstRoot, { recursive: true });
+    mkdirSync(secondRoot, { recursive: true });
+    initGitRepo(firstRoot);
+    initGitRepo(secondRoot);
+    const first = new WorktreeManager("same-name-one", firstRoot).create("same-task");
+    const second = new WorktreeManager("same-name-two", secondRoot).create("same-task");
+    expect(first.path).not.toBe(second.path);
+    expect(first.path).toContain("repositories/same-name-one/worktrees/");
+    expect(second.path).toContain("repositories/same-name-two/worktrees/");
+  });
+
+  it("repairs and reuses a worktree after checkout relocation", () => {
+    const movedPath = `${repoRoot}-moved`;
+    const first = new WorktreeManager("relocated-repository", repoRoot);
+    const info = first.create("relocate-me");
+    renameSync(repoRoot, movedPath);
+    const restarted = new WorktreeManager("relocated-repository", movedPath);
+    expect(restarted.inspect("relocate-me")?.sourceCheckout).toBe(movedPath);
+    expect(restarted.create("relocate-me").path).toBe(info.path);
   });
 });

@@ -165,6 +165,11 @@ export class WorktreeManager {
           logger.warn({ err, path: record.worktree_path }, "Failed to repair relocated worktree");
         }
       }
+      if (record.source_checkout !== this.sourcePath) {
+        this.db()
+          .prepare("UPDATE worktrees SET source_checkout = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND repository_id = ?")
+          .run(this.sourcePath, record.id, this.repositoryId);
+      }
       if (record.status === "creating") {
         if (existsSync(record.worktree_path) && this.isGitWorktree(record.worktree_path)) {
           this.update(record.id, "ready");
