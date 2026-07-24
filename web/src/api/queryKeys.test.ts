@@ -15,5 +15,11 @@ describe("query keys", () => {
     expect(queryKeys.attachments("thread", "repository-a")).not.toEqual(
       queryKeys.attachments("thread", "repository-b"),
     );
+    expect(queryKeys.task("same-slug", "repository-a")).not.toEqual(
+      queryKeys.task("same-slug", "repository-b"),
+    );
+    expect(queryKeys.threads(false, "repository-a")).not.toEqual(
+      queryKeys.threads(false, "repository-b"),
+    );
   });
 });

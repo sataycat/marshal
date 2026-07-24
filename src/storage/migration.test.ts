@@ -11,7 +11,7 @@ describe("consolidated database migrations", () => {
     const home = mkdtempSync(join(tmpdir(), "marshal-empty-"));
     const db = openDatabase(home);
     expect(existsSync(join(home, "marshal.db"))).toBe(true);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations").get()).toEqual({ count: 4 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations").get()).toEqual({ count: 5 });
     expect(readdirSync(home).filter((name) => name === "marshal.db")).toHaveLength(1);
     expect(readdirSync(home).filter((name) => name === "machine.db")).toHaveLength(0);
     expect(readdirSync(home).filter((name) => name === "state.db")).toHaveLength(0);
@@ -45,5 +45,24 @@ describe("consolidated database migrations", () => {
     db.close();
     expect(() => openDatabase(home)).toThrow(/legacy_layout_reset_required/);
     rmSync(home, { recursive: true, force: true });
+  });
+
+  it("keeps a fresh reset free of all split-layout state", () => {
+    const home = mkdtempSync(join(tmpdir(), "marshal-reset-"));
+    const checkout = mkdtempSync(join(tmpdir(), "marshal-reset-checkout-"));
+    const legacyCheckoutState = join(checkout, ".marshal");
+    const legacyMachine = new Database(join(home, "machine.db"));
+    legacyMachine.close();
+    expect(() => openDatabase(home)).toThrow(/legacy_layout_reset_required/);
+
+    rmSync(home, { recursive: true, force: true });
+    rmSync(legacyCheckoutState, { recursive: true, force: true });
+    const db = openDatabase(home);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations").get()).toEqual({ count: 5 });
+    expect(readdirSync(home).filter((name) => /^(marshal\.db|machine\.db|state\.db)$/.test(name))).toEqual(["marshal.db"]);
+    expect(existsSync(join(checkout, ".marshal"))).toBe(false);
+    db.close();
+    rmSync(home, { recursive: true, force: true });
+    rmSync(checkout, { recursive: true, force: true });
   });
 });

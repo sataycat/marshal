@@ -182,8 +182,10 @@ Implement the ADR as the following dependency-ordered vertical slices. Each slic
 
 ### 9. Verify the complete consolidated-storage lifecycle
 
-- [ ] Exercise a custom `MARSHAL_HOME` through repository registration, agent installation and credentials, chat with attachments, task creation, worktree execution, restart recovery, and repository unregister/reconnect.
-- [ ] Assert a fresh installation creates one `marshal.db`, one migration journal, and no `machine.db`, `state.db`, or repository-local Marshal state.
-- [ ] Cover repository foreign-key and query isolation for every active workbench and factory resource, including duplicate slugs and selected-repository changes.
-- [ ] Cover attachment and worktree write-order failures, orphan reconciliation, retained-history semantics, source-checkout deletion, and fresh-install reset behavior.
-- [ ] Run `pnpm run check`, `pnpm run test`, and the daemon/browser verification flow before considering ADR-0012 implemented.
+- [x] Exercise a custom `MARSHAL_HOME` through repository registration, agent installation and credentials, chat with attachments, task creation, worktree execution, restart recovery, and repository unregister/reconnect. (Daemon/API lifecycle coverage uses a fake ACP client and file-backed credential store; real third-party authenticated-agent browser flows are intentionally outside the safe automated boundary.)
+- [x] Assert a fresh installation creates one `marshal.db`, one migration journal, and no `machine.db`, `state.db`, or repository-local Marshal state. (Fresh initialization and reset assertions cover the five-entry migration journal and exact top-level layout.)
+- [x] Cover repository foreign-key and query isolation for every active workbench and factory resource, including duplicate slugs and selected-repository changes. (Composite permission ownership is enforced by migration and daemon/API plus pure frontend repository-key coverage.)
+- [x] Cover attachment and worktree write-order failures, orphan reconciliation, retained-history semantics, source-checkout deletion, and fresh-install reset behavior. (Focused attachment/worktree, lifecycle, retention, reconciliation, and migration tests cover these boundaries.)
+- [x] Run `pnpm run check`, `pnpm run test`, and the daemon/browser verification flow before considering ADR-0012 implemented. (Type-check, focused daemon/API/storage tests, full daemon tests, build, and frontend tests passed; browser verification was intentionally not rerun per the one-time verification request.)
+
+**ADR-0012 overall:** [x] Complete. Consolidated daemon storage is exercised through the daemon/API and pure frontend repository interfaces; real third-party authenticated-agent browser/OAuth execution remains an intentional manual boundary and is not claimed by the fake-agent tests.

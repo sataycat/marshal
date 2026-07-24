@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { getGlobalDir } from "../daemon/config.js";
 import { ensureStorageLayout } from "../storage/layout.js";
 import { DatabaseMigrationError, migrateDatabase } from "../storage/migration.js";
@@ -19,7 +19,7 @@ function storageRoot(candidate?: string): string {
   // arguments are daemon-owned MARSHAL_HOME test seams and intentionally win
   // over the process environment so independent lifecycle tests cannot share
   // state accidentally.
-  if (!candidate || process.env.MARSHAL_HOME) return getGlobalDir();
+  if (!candidate || (process.env.MARSHAL_HOME && !isAbsolute(candidate))) return getGlobalDir();
   // Legacy call sites sometimes still pass a source checkout while the
   // repository-ID migration is being completed. Never create daemon state in
   // that checkout; resolve it to the controlled home instead.

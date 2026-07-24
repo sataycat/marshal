@@ -2288,7 +2288,7 @@ function registerSpecRoutes(
     const slug = c.req.param("slug");
     try {
       const repositoryId = repositoryFor(c);
-      const messages = listSpecMessages(repositoryId, slug, machineDir).map(specMessageFields);
+      const messages = listSpecMessages(repositoryId, slug, machineDir ?? getGlobalDir()).map(specMessageFields);
       return c.json({ messages });
     } catch (err) {
       throw mapDomainError(err);
@@ -2318,7 +2318,7 @@ function registerSpecRoutes(
         root: resolveRepositoryContext(repositoryId, machineDir).checkoutPath,
         repositoryId,
         agent: specAgent,
-        machineDir,
+        machineDir: machineDir ?? getGlobalDir(),
       });
       publishSpecMessage(busLocal, slug, promptEvents.userMessage, repositoryId);
       if (promptEvents.assistantMessage)
@@ -2346,7 +2346,7 @@ function registerSpecRoutes(
         root: resolveRepositoryContext(repositoryId, machineDir).checkoutPath,
         repositoryId,
         agent: specAgent,
-        machineDir,
+        machineDir: machineDir ?? getGlobalDir(),
       });
       const busLocal = ensureBus(bus);
       publishSpecMessage(busLocal, c.req.param("slug"), result.userMessage, repositoryId);

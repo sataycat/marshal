@@ -27,6 +27,8 @@ import {
 } from "../agents/store.js";
 import { completeRegistryRefresh, beginRegistryRefresh } from "../registry/store.js";
 import { registerRepository } from "../repositories/store.js";
+import { bindAgentCredential, resolveAgentCredentialValues } from "../agents/credentials.js";
+import { openDatabase } from "../db/index.js";
 
 function fetchJson(url: string): Promise<{ status: number; body: unknown }> {
   return fetch(url).then(async (res) => ({ status: res.status, body: await res.json() }));
@@ -153,6 +155,43 @@ describe("repository retention API", () => {
       repository: { id: repository.id, registration_status: "registered" },
     });
     expect((await app.request(`/api/repositories/${repository.id}/select`, { method: "POST" })).status).toBe(200);
+  });
+});
+
+describe("repository-scoped API isolation", () => {
+  it("keeps duplicate slugs, selected repository changes, and credentials scoped", async () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-repository-api-isolation-"));
+    const firstRoot = mkdtempSync(join(tmpdir(), "marshal-repository-api-first-"));
+    const secondRoot = mkdtempSync(join(tmpdir(), "marshal-repository-api-second-"));
+    execFileSync("git", ["init", "-q", firstRoot]);
+    execFileSync("git", ["init", "-q", secondRoot]);
+    const first = registerRepository(firstRoot, machineDir);
+    const second = registerRepository(secondRoot, machineDir);
+    const app = buildApp("0.0.1", { machineDir, chatAgent: {
+      async spawn(cwd, agentId) { return { cwd, agentId, name: "fixture", recordId: "fixture" }; },
+      async *prompt() { yield { type: "done", stopReason: "end_turn" }; },
+      async cancel() {}, async close() {},
+    } });
+    const create = (repositoryId: string) => app.request(`/api/tasks?repository_id=${repositoryId}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Duplicate slug" }),
+    });
+    const firstTask = await create(first.id);
+    const secondTask = await create(second.id);
+    const firstCreated = (await firstTask.json() as any).task;
+    const secondCreated = (await secondTask.json() as any).task;
+    expect(firstCreated.slug).toBe(secondCreated.slug);
+    const sharedSlug = firstCreated.slug;
+    expect((await app.request(`/api/tasks/${sharedSlug}?repository_id=${second.id}`)).status).toBe(200);
+    expect((await app.request(`/api/tasks/${sharedSlug}?repository_id=${first.id}`)).status).toBe(200);
+    expect((await app.request(`/api/repositories/${first.id}/select`, { method: "POST" })).status).toBe(200);
+    expect(await (await app.request("/api/repositories")).json()).toMatchObject({ selected_repository_id: first.id });
+    expect((await app.request(`/api/repositories/${second.id}/select`, { method: "POST" })).status).toBe(200);
+    expect(await (await app.request("/api/repositories")).json()).toMatchObject({ selected_repository_id: second.id });
+    bindAgentCredential("isolation-install", "TOKEN", "secret", true, machineDir);
+    expect(resolveAgentCredentialValues("isolation-install", machineDir)).toEqual({ TOKEN: "secret" });
+    expect(resolveAgentCredentialValues("other-install", machineDir)).toEqual({});
+    const db = openDatabase(machineDir);
+    expect(db.pragma("foreign_key_check")).toEqual([]);
   });
 });
 

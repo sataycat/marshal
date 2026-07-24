@@ -42,7 +42,9 @@ describe("interactive repository ownership", () => {
     const second = repo(machineDir);
     const thread = createChatThread(first.id, { agentId: "agent", agentVersion: "1" }, machineDir);
     const db = openDatabase(machineDir);
+    const session = createSession(first.id, { ownerType: "thread", ownerId: thread.id, agentId: "agent", agentVersion: "1" }, machineDir);
     expect(() => db.prepare("INSERT INTO chat_messages (repository_id, thread_id, role, content) VALUES (?, ?, 'user', 'bad')").run(second.id, thread.id)).toThrow();
     expect(() => db.prepare("INSERT INTO tasks (repository_id, slug, title, workflow_profile_id) VALUES (?, 'bad', 'bad', NULL)").run("missing-repository")).toThrow();
+    expect(() => db.prepare("INSERT INTO permission_requests (id, repository_id, session_id, thread_id, request_id, tool, raw_request, options) VALUES ('bad', ?, ?, ?, 'request', 'write', '{}', '[]')").run(second.id, session.id, thread.id)).toThrow();
   });
 });
