@@ -169,19 +169,17 @@ export class RunLog {
   }
 
   startRun(taskId: number, role: RunRole, agentId: string, prompt: string, provenance: { agentVersion?: string; agentProvenance?: HistoricalAgentProvenance; assignmentConfig?: unknown } = {}): number {
+    const ownerRepositoryId = this.repositoryId ?? (this.db.prepare("SELECT repository_id FROM tasks WHERE id = ?").get(taskId) as { repository_id: string } | undefined)?.repository_id;
+    if (!ownerRepositoryId) throw new Error(`Task not found: ${taskId}`);
     const info = this.db
       .prepare(
-        this.repositoryId
-          ? "INSERT INTO runs (task_id, repository_id, role, agent_id, status, prompt, agent_version, agent_provenance, assignment_config, operation_id) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)"
-          : "INSERT INTO runs (task_id, role, agent_id, status, prompt, agent_version, agent_provenance, assignment_config, operation_id) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?)",
+        "INSERT INTO runs (repository_id, task_id, role, agent_id, status, prompt, agent_version, agent_provenance, assignment_config, operation_id) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)",
       )
-      .run(...(this.repositoryId
-        ? [taskId, this.repositoryId, role, agentId, prompt, provenance.agentVersion ?? "legacy", JSON.stringify(provenance.agentProvenance ?? {}), JSON.stringify(provenance.assignmentConfig ?? {}), randomUUID()]
-        : [taskId, role, agentId, prompt, provenance.agentVersion ?? "legacy", JSON.stringify(provenance.agentProvenance ?? {}), JSON.stringify(provenance.assignmentConfig ?? {}), randomUUID()]));
+      .run(ownerRepositoryId, taskId, role, agentId, prompt, provenance.agentVersion ?? "legacy", JSON.stringify(provenance.agentProvenance ?? {}), JSON.stringify(provenance.assignmentConfig ?? {}), randomUUID());
     const runId = Number(info.lastInsertRowid);
     this.db.prepare("UPDATE runs SET superseded_by_run_id = ? WHERE id = (SELECT id FROM runs WHERE task_id = ? AND role = ? AND status = 'authentication_required' AND auth_recovery_resolved_at IS NOT NULL AND superseded_by_run_id IS NULL ORDER BY id DESC LIMIT 1)").run(runId, taskId, role);
     const operationId = (this.db.prepare("SELECT operation_id FROM runs WHERE id = ?").get(runId) as { operation_id: string }).operation_id;
-    this.db.prepare(this.repositoryId ? "INSERT INTO run_operations (id, repository_id, run_id, operation, status) VALUES (?, ?, ?, ?, 'running')" : "INSERT INTO run_operations (id, run_id, operation, status) VALUES (?, ?, ?, 'running')").run(...(this.repositoryId ? [operationId, this.repositoryId, runId, role] : [operationId, runId, role]));
+    this.db.prepare("INSERT INTO run_operations (id, repository_id, run_id, operation, status) VALUES (?, ?, ?, ?, 'running')").run(operationId, ownerRepositoryId, runId, role);
     if (this.bus) {
       const run = this.getRun(runId);
       if (run) publishRunStarted(this.bus, toRunPayload(run));
@@ -198,9 +196,11 @@ export class RunLog {
   }
 
   insertEvent(runId: number, seq: number, event: AgentEvent): void {
+    const ownerRepositoryId = this.repositoryId ?? (this.db.prepare("SELECT repository_id FROM runs WHERE id = ?").get(runId) as { repository_id: string } | undefined)?.repository_id;
+    if (!ownerRepositoryId) throw new Error(`Run not found: ${runId}`);
     this.db
-      .prepare(this.repositoryId ? "INSERT INTO run_events (repository_id, run_id, seq, type, payload) VALUES (?, ?, ?, ?, ?)" : "INSERT INTO run_events (run_id, seq, type, payload) VALUES (?, ?, ?, ?)")
-      .run(...(this.repositoryId ? [this.repositoryId, runId, seq, event.type, JSON.stringify(event)] : [runId, seq, event.type, JSON.stringify(event)]));
+      .prepare("INSERT INTO run_events (repository_id, run_id, seq, type, payload) VALUES (?, ?, ?, ?, ?)")
+      .run(ownerRepositoryId, runId, seq, event.type, JSON.stringify(event));
     if (this.bus) publishRunEvent(this.bus, runId, event);
   }
 
@@ -228,7 +228,7 @@ export class RunLog {
   }
 
   getRun(runId: number): RunRecord | undefined {
-    const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow | undefined;
+    const row = this.db.prepare(this.repositoryId ? "SELECT * FROM runs WHERE id = ? AND repository_id = ?" : "SELECT * FROM runs WHERE id = ?").get(...(this.repositoryId ? [runId, this.repositoryId] : [runId])) as RunRow | undefined;
     return row ? rowToRun(row) : undefined;
   }
 

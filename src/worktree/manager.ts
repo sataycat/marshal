@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { getGlobalDir, getRepoStateDir } from "../daemon/config.js";
+import { getGlobalDir } from "../daemon/config.js";
 import { storageLayout } from "../storage/layout.js";
 import { logger } from "../logger.js";
 import { loadGlobalConfig, loadMarshalJson } from "./config.js";
@@ -66,7 +66,7 @@ export class WorktreeManager {
     const repoHash = createHash("sha256").update(repoRoot).digest("hex").slice(0, 8);
     this.sourcePath = repoRoot;
     this.worktreeRoot = resolve(root, repoHash);
-    this.indexPath = resolve(getRepoStateDir(repoRoot), "worktrees.json");
+    this.indexPath = resolve(storageLayout(getGlobalDir()).legacyWorktreesDirectory, `${repoHash}.json`);
   }
 
   private readIndex(): WorktreeIndex {

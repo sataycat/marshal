@@ -5,6 +5,7 @@ import { repositoryRoot, listRepositories } from "../repositories/store.js";
 import { reconcileInstallationOperations } from "../agents/store.js";
 import { reconcileAgentActivations } from "../agents/activation.js";
 import { getGlobalDir } from "./config.js";
+import { openDatabase } from "../db/index.js";
 
 export const DEFAULT_DAEMON_INTERVAL_MS = 5000;
 
@@ -54,6 +55,7 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<voi
   const intervalMs = options.intervalMs ?? DEFAULT_DAEMON_INTERVAL_MS;
   const signal = options.signal;
   const machineDir = options.machineDir ?? getGlobalDir();
+  openDatabase(machineDir).close();
   reconcileInstallationOperations(machineDir);
   reconcileAgentActivations(machineDir, options.bus);
 

@@ -748,7 +748,7 @@ function removalReferences(
   }
   for (const repository of listRepositories(machineDir)) {
     try {
-      const database = openDb(repository.path);
+      const database = openDb(machineDir);
       for (const row of database
         .prepare(
           "SELECT id, status FROM acp_sessions WHERE agent_id = ? AND agent_version = ? AND status IN ('starting','running','idle','cancelling','recoverable')",

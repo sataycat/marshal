@@ -236,7 +236,7 @@ export function getWorkflowProfile(
 function listAssignments(repositoryId: string, profileId: string, machineDir?: string): AgentAssignment[] {
   return (
     db(machineDir)
-      .prepare("SELECT a.* FROM agent_assignments a JOIN workflow_profiles p ON p.id = a.profile_id WHERE p.repository_id = ? AND a.profile_id = ? ORDER BY a.role")
+      .prepare("SELECT a.* FROM agent_assignments a JOIN workflow_profiles p ON p.repository_id = a.repository_id AND p.id = a.profile_id WHERE a.repository_id = ? AND a.profile_id = ? ORDER BY a.role")
       .all(repositoryId, profileId) as Record<string, unknown>[]
   ).map(assignment);
 }
@@ -253,7 +253,7 @@ export function saveWorkflowProfile(
   database.transaction(() => {
     database
       .prepare(
-        "INSERT INTO workflow_profiles (id, repository_id, name, permission_policy, unattended_authorized, timeout_ms, max_retries, verification_commands, require_decorrelated_builder_validator, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, permission_policy=excluded.permission_policy, unattended_authorized=excluded.unattended_authorized, timeout_ms=excluded.timeout_ms, max_retries=excluded.max_retries, verification_commands=excluded.verification_commands, require_decorrelated_builder_validator=excluded.require_decorrelated_builder_validator, updated_at=excluded.updated_at",
+        "INSERT INTO workflow_profiles (id, repository_id, name, permission_policy, unattended_authorized, timeout_ms, max_retries, verification_commands, require_decorrelated_builder_validator, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(repository_id, id) DO UPDATE SET name=excluded.name, permission_policy=excluded.permission_policy, unattended_authorized=excluded.unattended_authorized, timeout_ms=excluded.timeout_ms, max_retries=excluded.max_retries, verification_commands=excluded.verification_commands, require_decorrelated_builder_validator=excluded.require_decorrelated_builder_validator, updated_at=excluded.updated_at",
       )
       .run(
         id,
@@ -268,16 +268,17 @@ export function saveWorkflowProfile(
         now,
         now,
       );
-    database.prepare("DELETE FROM agent_assignments WHERE profile_id = ? AND profile_id IN (SELECT id FROM workflow_profiles WHERE repository_id = ?)").run(id, repositoryId);
+    database.prepare("DELETE FROM agent_assignments WHERE repository_id = ? AND profile_id = ?").run(repositoryId, id);
     for (const item of input.assignments) {
       const installed = getInstalledAgent(item.agent_id, item.agent_version, machineDir);
       database
         .prepare(
-          "INSERT INTO agent_assignments (id, profile_id, role, agent_id, agent_version, model, mode, agent_provenance, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO agent_assignments (id, repository_id, profile_id, role, agent_id, agent_version, model, mode, agent_provenance, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .run(
-          randomUUID(),
-          id,
+           randomUUID(),
+           repositoryId,
+           id,
           item.role,
           item.agent_id,
           item.agent_version,

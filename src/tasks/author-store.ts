@@ -41,7 +41,7 @@ const parse = (value: unknown): unknown => {
 function map(row: Record<string, unknown>): SpecAuthorSession {
   return {
     ...(row as unknown as SpecAuthorSession),
-    repository_id: String(row.repository_id_v2 ?? row.repository_id),
+    repository_id: String(row.repository_id),
     agent_provenance: parse(row.agent_provenance) as HistoricalAgentProvenance,
     capabilities: parse(row.capabilities),
     assignment_config: parse(row.assignment_config),
@@ -55,9 +55,10 @@ function mapOperation(row: Record<string, unknown>): SpecAuthorOperation {
 
 export function createSpecAuthorSession(input: { taskId: number; repositoryId: string; workflowProfileId: string; assignmentId: string; agentId: string; agentVersion: string; agentProvenance?: HistoricalAgentProvenance; assignmentConfig: unknown; messageId?: number }, machineDir?: string): SpecAuthorSession {
   const id = randomUUID();
-  openRepositoryDb(input.repositoryId, machineDir)
-    .prepare("INSERT INTO spec_author_sessions (id, task_id, repository_id, repository_id_v2, workflow_profile_id, assignment_id, agent_id, agent_version, agent_provenance, assignment_config, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(id, input.taskId, null, input.repositoryId, input.workflowProfileId, input.assignmentId, input.agentId, input.agentVersion, JSON.stringify(input.agentProvenance ?? {}), JSON.stringify(input.assignmentConfig ?? {}), input.messageId ?? null);
+  const database = openRepositoryDb(input.repositoryId, machineDir);
+  database
+    .prepare("INSERT INTO spec_author_sessions (id, repository_id, task_id, workflow_profile_id, assignment_id, agent_id, agent_version, agent_provenance, assignment_config, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+     .run(id, input.repositoryId, input.taskId, input.workflowProfileId, input.assignmentId, input.agentId, input.agentVersion, JSON.stringify(input.agentProvenance ?? {}), JSON.stringify(input.assignmentConfig ?? {}), input.messageId ?? null);
   return getSpecAuthorSession(input.repositoryId, id, machineDir)!;
 }
 
@@ -67,7 +68,7 @@ export function getSpecAuthorSession(first: string, second?: string, third?: str
   const scoped = second !== undefined && third !== undefined;
   const id = scoped ? second! : first;
   const db = scoped ? openRepositoryDb(first, third) : openDb(second);
-  const row = db.prepare(scoped ? "SELECT * FROM spec_author_sessions WHERE repository_id_v2 = ? AND id = ?" : "SELECT * FROM spec_author_sessions WHERE id = ?").get(...(scoped ? [first, id] : [id])) as Record<string, unknown> | undefined;
+  const row = db.prepare(scoped ? "SELECT * FROM spec_author_sessions WHERE repository_id = ? AND id = ?" : "SELECT * FROM spec_author_sessions WHERE id = ?").get(...(scoped ? [first, id] : [id])) as Record<string, unknown> | undefined;
   return row ? map(row) : undefined;
 }
 
@@ -76,7 +77,7 @@ export function listSpecAuthorSessions(taskId: number, root?: string): SpecAutho
 export function listSpecAuthorSessions(first: string | number, second?: number | string, third?: string): SpecAuthorSession[] {
   const scoped = typeof first === "string";
   const db = scoped ? openRepositoryDb(first, third) : openDb(second as string | undefined);
-  const rows = db.prepare(scoped ? "SELECT * FROM spec_author_sessions WHERE repository_id_v2 = ? AND task_id = ? ORDER BY created_at" : "SELECT * FROM spec_author_sessions WHERE task_id = ? ORDER BY created_at").all(...(scoped ? [first, second] : [first])) as Record<string, unknown>[];
+  const rows = db.prepare(scoped ? "SELECT * FROM spec_author_sessions WHERE repository_id = ? AND task_id = ? ORDER BY created_at" : "SELECT * FROM spec_author_sessions WHERE task_id = ? ORDER BY created_at").all(...(scoped ? [first, second] : [first])) as Record<string, unknown>[];
   return rows.map(map);
 }
 
@@ -93,7 +94,7 @@ export function updateSpecAuthorSession(first: string, second: string | SessionU
   const current = scoped ? getSpecAuthorSession(repositoryId!, id, machineDir) : getSpecAuthorSession(id, machineDir);
   if (!current) throw new Error("Spec author session not found");
   const db = scoped ? openRepositoryDb(repositoryId!, machineDir) : openDb(machineDir);
-  db.prepare(scoped ? "UPDATE spec_author_sessions SET supervisor_session_id = ?, acp_session_id = ?, capabilities = ?, status = ?, failure = ?, updated_at = CURRENT_TIMESTAMP WHERE repository_id_v2 = ? AND id = ?" : "UPDATE spec_author_sessions SET supervisor_session_id = ?, acp_session_id = ?, capabilities = ?, status = ?, failure = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(...(scoped ? [input.supervisorSessionId ?? current.supervisor_session_id, input.acpSessionId ?? current.acp_session_id, JSON.stringify(input.capabilities ?? current.capabilities), input.status ?? current.status, input.failure === undefined ? current.failure ? JSON.stringify(current.failure) : null : input.failure ? JSON.stringify(input.failure) : null, repositoryId, id] : [input.supervisorSessionId ?? current.supervisor_session_id, input.acpSessionId ?? current.acp_session_id, JSON.stringify(input.capabilities ?? current.capabilities), input.status ?? current.status, input.failure === undefined ? current.failure ? JSON.stringify(current.failure) : null : input.failure ? JSON.stringify(input.failure) : null, id]));
+  db.prepare(scoped ? "UPDATE spec_author_sessions SET supervisor_session_id = ?, acp_session_id = ?, capabilities = ?, status = ?, failure = ?, updated_at = CURRENT_TIMESTAMP WHERE repository_id = ? AND id = ?" : "UPDATE spec_author_sessions SET supervisor_session_id = ?, acp_session_id = ?, capabilities = ?, status = ?, failure = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(...(scoped ? [input.supervisorSessionId ?? current.supervisor_session_id, input.acpSessionId ?? current.acp_session_id, JSON.stringify(input.capabilities ?? current.capabilities), input.status ?? current.status, input.failure === undefined ? current.failure ? JSON.stringify(current.failure) : null : input.failure ? JSON.stringify(input.failure) : null, repositoryId, id] : [input.supervisorSessionId ?? current.supervisor_session_id, input.acpSessionId ?? current.acp_session_id, JSON.stringify(input.capabilities ?? current.capabilities), input.status ?? current.status, input.failure === undefined ? current.failure ? JSON.stringify(current.failure) : null : input.failure ? JSON.stringify(input.failure) : null, id]));
   return scoped ? getSpecAuthorSession(repositoryId!, id, machineDir)! : getSpecAuthorSession(id, machineDir)!;
 }
 

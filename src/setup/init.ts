@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { initGlobalConfig, initRepoState, getRepoStateDir } from "../daemon/config.js";
+import { initGlobalConfig } from "../daemon/config.js";
 import { openDb } from "../db/index.js";
 import { AGENT_COMMAND_DEFAULTS, isAgentCommand, type GlobalConfig } from "../worktree/config.js";
 import { createStorageTemporaryDirectory } from "../storage/layout.js";
@@ -29,9 +28,7 @@ export interface InitResult {
   skippedMachine: boolean;
 }
 
-function repoAlreadyInitialized(repoRoot: string): boolean {
-  return existsSync(join(getRepoStateDir(repoRoot), "state.db"));
-}
+function repoAlreadyInitialized(_repoRoot: string): boolean { return existsSync(initGlobalConfig()); }
 
 function print(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -61,9 +58,8 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   // Fast path — machine already configured, just ensure repo state.
   if (alreadyConfigured) {
     print("✓ machine already configured");
-    initRepoState(repoRoot);
     openDb(repoRoot);
-    print(`✓ repo initialized at ${getRepoStateDir(repoRoot)}`);
+    print("✓ daemon database initialized");
     printReady();
     return { ok: true, skippedMachine: true };
   }
@@ -94,9 +90,8 @@ export async function runInit(options: InitOptions = {}): Promise<InitResult> {
   if (machineNeedsConfig || repoNeedsInit) {
     writeInitFiles(machineNeedsConfig, merged, configPath, repoRoot);
   } else {
-    initRepoState(repoRoot);
     openDb(repoRoot);
-    print(`✓ repo initialized at ${getRepoStateDir(repoRoot)}`);
+    print("✓ daemon database initialized");
   }
 
   printReady();
@@ -116,9 +111,8 @@ function writeInitFiles(
     print(`✓ config present at ${configPath}`);
   }
   initGlobalConfig();
-  initRepoState(repoRoot);
   openDb(repoRoot);
-  print(`✓ repo initialized at ${getRepoStateDir(repoRoot)}`);
+  print("✓ daemon database initialized");
 }
 
 function printReady(): void {

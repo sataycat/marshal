@@ -139,13 +139,13 @@ Implement the ADR as the following dependency-ordered vertical slices. Each slic
 
 ### 4. Cut fresh installations over to one `marshal.db`
 
-- [ ] Merge the machine and repository Drizzle schemas into one authoritative schema, one Drizzle configuration, one ordered migration directory, and one migration journal.
-- [ ] Define the repository-ownership matrix and add required non-null `repository_id` columns, foreign keys, composite ownership constraints where needed, and repository-leading indexes to every repository-scoped table.
-- [ ] Replace `openMachineDb` and repository-path-derived `openDb` behavior with one controlled daemon database open at `$MARSHAL_HOME/marshal.db`; run migrations before routes, stores, reconciliation, or background work start.
-- [ ] Preserve parameterized raw SQL where it remains clear, but move all schema mutation and backfill logic into checked-in migrations.
-- [ ] Implement the reset-only legacy contract: never open or import `machine.db` or `<repository>/.marshal/state.db`, never dual-read or dual-write them, and surface stable reset guidance for a recognized old machine layout.
-- [ ] Remove the split schemas, migration streams, Drizzle configs, and packaged migration paths only after every active store uses `marshal.db`.
-- [ ] Test empty initialization, packaged migration discovery, unknown-newer migration rejection, transactional migration failure, `PRAGMA integrity_check`, and `PRAGMA foreign_key_check`.
+- [x] Merge the machine and repository Drizzle schemas into one authoritative schema, one Drizzle configuration, one ordered migration directory, and one migration journal.
+- [x] Define the repository-ownership matrix and add required non-null `repository_id` columns, foreign keys, composite ownership constraints where needed, and repository-leading indexes to every repository-scoped table.
+- [x] Replace `openMachineDb` and repository-path-derived `openDb` behavior with one controlled daemon database open at `$MARSHAL_HOME/marshal.db`; run migrations before routes, stores, reconciliation, or background work start.
+- [x] Preserve parameterized raw SQL where it remains clear, but move all schema mutation and backfill logic into checked-in migrations.
+- [x] Implement the reset-only legacy contract: never open or import `machine.db` or `<repository>/.marshal/state.db`, never dual-read or dual-write them, and surface stable reset guidance for a recognized old machine layout.
+- [x] Remove the split schemas, migration streams, Drizzle configs, and packaged migration paths only after every active store uses `marshal.db`.
+- [x] Test empty initialization, packaged migration discovery, unknown-newer migration rejection, transactional migration failure, `PRAGMA integrity_check`, and `PRAGMA foreign_key_check`.
 
 ### 5. Move attachment bytes into daemon-owned repository namespaces
 

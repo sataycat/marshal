@@ -24,13 +24,13 @@ export function slugifyTitle(title: string): string {
 export function generateUniqueSlug(repositoryId: string, title: string, machineDir?: string): string;
 export function generateUniqueSlug(title: string, root?: string): string;
 export function generateUniqueSlug(first: string, second?: string, third?: string): string {
-  const scoped = second !== undefined;
+  const scoped = second !== undefined && !second.startsWith("/") && !second.startsWith(".");
   const title = scoped ? second! : first;
   const base = slugifyTitle(title);
   const db = scoped ? openRepositoryDb(first, third) : openDb(second);
 
   const exists = (slug: string): boolean => {
-    const row = db.prepare(scoped ? "SELECT 1 FROM tasks WHERE repository_id_v2 = ? AND slug = ?" : "SELECT 1 FROM tasks WHERE slug = ?").get(...(scoped ? [first, slug] : [slug]));
+    const row = db.prepare(scoped ? "SELECT 1 FROM tasks WHERE repository_id = ? AND slug = ?" : "SELECT 1 FROM tasks WHERE slug = ?").get(...(scoped ? [first, slug] : [slug]));
     return row !== undefined;
   };
 

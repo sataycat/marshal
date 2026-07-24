@@ -12,7 +12,7 @@ export interface Repository {
   created_at: string;
   updated_at: string;
   preferences: Record<string, unknown>;
-  legacy_state: "preserved" | "none";
+  legacy_state: "none";
 }
 
 export class RepositoryError extends Error {
@@ -28,7 +28,7 @@ function rowToRepository(row: Record<string, unknown>): Repository {
   return {
     id: String(row.id), path: String(row.path), name: String(row.name),
     created_at: String(row.created_at), updated_at: String(row.updated_at), preferences,
-    legacy_state: existsSync(resolve(String(row.path), ".marshal", "state.db")) ? "preserved" : "none",
+    legacy_state: "none",
   };
 }
 

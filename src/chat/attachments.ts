@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { openRepositoryDb } from "../db/index.js";
 import { getChatThread, type ChatThread } from "./store.js";
+import { ensureRepositoryNamespace } from "../storage/layout.js";
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_THREAD = 40 * 1024 * 1024;
@@ -28,9 +29,7 @@ export class ChatAttachmentError extends Error {
 }
 
 function attachmentDir(thread: ChatThread): string {
-  // Slice 5 moves these bytes into the repository-ID namespace. Until then
-  // this path is execution metadata only; ownership checks use repository_id.
-  return resolve(thread.repo_root, ".marshal", "attachments", thread.id);
+  return resolve(ensureRepositoryNamespace(thread.repository_id).attachmentsDirectory, thread.id);
 }
 
 function rowToAttachment(row: Record<string, unknown>): ChatAttachment {

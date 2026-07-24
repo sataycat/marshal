@@ -155,6 +155,7 @@ import { TerminalAuthManager } from "../acp/terminal-auth.js";
 import { listSessionEvents, listSessionsForOwner } from "../acp/supervisor-store.js";
 import { randomUUID } from "node:crypto";
 import { reconcileThreadPermissions } from "../acp/permission-store.js";
+import { openDatabase } from "../db/index.js";
 
 function fuzzyDirectoryScore(name: string, query: string): number | null {
   if (!query) return 0;
@@ -2331,6 +2332,9 @@ async function waitForListening(server: ServerType): Promise<{ host: string; por
 export async function startHttpServer(options: HttpServerOptions = {}): Promise<HttpServerHandle> {
   const root = options.root;
   const machineDir = options.machineDir ?? getGlobalDir();
+  // Establish and migrate the controlled database before route construction,
+  // authentication reconciliation, WebSocket hydration, or background work.
+  openDatabase(machineDir).close();
 
   const { host, port } = resolveDaemonBind(
     { host: options.host, port: options.port },

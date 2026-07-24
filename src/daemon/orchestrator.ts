@@ -47,7 +47,7 @@ const GATE_FAIL = "fail";
 
 interface ReadyTaskRow {
   slug: string;
-  repository_id_v2: string;
+  repository_id: string;
 }
 
 interface BuildRunRow {
@@ -502,11 +502,12 @@ export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResu
   const root = options.root;
 
    const db = options.repositoryId ? openRepositoryDb(options.repositoryId, options.machineDir) : openDb(root);
+   const repositoryFilter = options.repositoryId ?? (root ? (db.prepare("SELECT id FROM repositories WHERE path = ?").get(resolve(root)) as { id: string } | undefined)?.id : undefined);
   const row = db
     .prepare(
-       "SELECT t.slug, t.status, t.repository_id_v2 FROM tasks t WHERE t.repository_id_v2 = ? AND t.status IN ('ready', 'validating') AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.repository_id = t.repository_id_v2 AND r.status = 'authentication_required' AND r.auth_recovery_resolved_at IS NULL) ORDER BY t.created_at ASC, t.id ASC LIMIT 1",
+       "SELECT t.slug, t.status, t.repository_id FROM tasks t WHERE t.repository_id = ? AND t.status IN ('ready', 'validating') AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.repository_id = t.repository_id AND r.status = 'authentication_required' AND r.auth_recovery_resolved_at IS NULL) ORDER BY t.created_at ASC, t.id ASC LIMIT 1",
     )
-     .get(options.repositoryId) as (ReadyTaskRow & { status: string }) | undefined;
+      .get(repositoryFilter) as (ReadyTaskRow & { status: string }) | undefined;
   if (!row) {
     return null;
   }

@@ -4,10 +4,7 @@ import { ensureStorageLayout, storageLayout } from "./layout.js";
 import { migrateDatabase } from "./migration.js";
 
 export function machineDbPath(machineDir = getGlobalDir()): string {
-  // The machine/repository database consolidation is Slice 4.  Until then,
-  // the legacy machine schema stays on machine.db, but its path is still
-  // resolved by the single storage contract.
-  return storageLayout(machineDir).legacyMachineDatabasePath;
+  return storageLayout(machineDir).databasePath;
 }
 
 export function openMachineDb(machineDir = getGlobalDir()): Database.Database {
@@ -15,6 +12,6 @@ export function openMachineDb(machineDir = getGlobalDir()): Database.Database {
   const db = new Database(machineDbPath(machineDir));
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  migrateDatabase(db, "machine");
+  migrateDatabase(db);
   return db;
 }

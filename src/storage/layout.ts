@@ -34,8 +34,6 @@ export interface StorageLayout {
   databasePath: string;
   /** Alias useful at call sites that use the ADR's name. */
   marshalDbPath: string;
-  /** The pre-Slice-4 machine database path retained for the current schema. */
-  legacyMachineDatabasePath: string;
   registryDirectory: string;
   installationsDirectory: string;
   credentialsDirectory: string;
@@ -163,7 +161,6 @@ export function storageLayout(explicitRoot?: string): StorageLayout {
     root,
     databasePath: fixedChild(root, "marshal.db"),
     marshalDbPath: fixedChild(root, "marshal.db"),
-    legacyMachineDatabasePath: fixedChild(root, "machine.db"),
     registryDirectory,
     installationsDirectory,
     credentialsDirectory,
