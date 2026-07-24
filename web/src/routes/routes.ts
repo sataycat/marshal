@@ -4,18 +4,22 @@ export const ROUTES = {
   home: "/",
   chat: "/chat",
   agents: "/agents",
+  board: "/board",
+  workflows: "/workflows",
   settings: "/settings",
   chatThread: (threadId: string): `/chat/${string}` => `/chat/${threadId}`,
 } as const;
 
 export const CHAT_AGENT_QUERY_PARAM = "agent";
 
-export type StaticPath = (typeof ROUTES)["home" | "chat" | "agents" | "settings"];
+export type StaticPath = (typeof ROUTES)["home" | "chat" | "agents" | "board" | "workflows" | "settings"];
 export type ChatPath = `/chat/${string}`;
 export type RoutePath = StaticPath | ChatPath;
 
 export const NAV_ITEMS: readonly { path: StaticPath; label: string }[] = [
   { path: ROUTES.chat, label: "Chat" },
+  { path: ROUTES.board, label: "Board" },
+  { path: ROUTES.workflows, label: "Workflows" },
   { path: ROUTES.agents, label: "Agents" },
 ];
 
@@ -66,6 +70,8 @@ export function preloadStatic(path: StaticPath): void {
       return;
     case ROUTES.home:
     case ROUTES.agents:
+    case ROUTES.board:
+    case ROUTES.workflows:
     case ROUTES.settings:
       return;
   }

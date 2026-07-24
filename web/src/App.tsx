@@ -20,6 +20,8 @@ const NotFoundRoute = lazy(() =>
   import("./routes/NotFoundRoute").then((m) => ({ default: m.NotFoundRoute })),
 );
 const AgentsRoute = lazy(() => import("./routes/AgentsRoute").then((m) => ({ default: m.AgentsRoute })));
+const BoardRoute = lazy(() => import("./routes/BoardRoute").then((m) => ({ default: m.BoardRoute })));
+const WorkflowsRoute = lazy(() => import("./routes/WorkflowsRoute").then((m) => ({ default: m.WorkflowsRoute })));
 const SettingsRoute = lazy(() => import("./routes/SettingsRoute").then((m) => ({ default: m.SettingsRoute })));
 
 function RouteFallback(): JSX.Element {
@@ -53,6 +55,12 @@ export function App(): JSX.Element {
               </Route>
               <Route path={ROUTES.agents}>
                 <AgentsRoute />
+              </Route>
+              <Route path={ROUTES.board}>
+                {hasReadyAgent ? <BoardRoute /> : <Redirect to={ROUTES.agents} />}
+              </Route>
+              <Route path={ROUTES.workflows}>
+                {hasReadyAgent ? <WorkflowsRoute /> : <Redirect to={ROUTES.agents} />}
               </Route>
               <Route path={ROUTES.settings}>
                 <SettingsRoute />

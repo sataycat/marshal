@@ -13,6 +13,8 @@ describe("ROUTES", () => {
   it("exposes static paths as literals", () => {
     expect(ROUTES.home).toBe("/");
     expect(ROUTES.chat).toBe("/chat");
+    expect(ROUTES.board).toBe("/board");
+    expect(ROUTES.workflows).toBe("/workflows");
   });
 
   it("builds a chat session path with the given id", () => {
@@ -27,7 +29,7 @@ describe("ROUTES", () => {
 describe("NAV_ITEMS", () => {
   it("only exposes ready primary product areas", () => {
     const paths = NAV_ITEMS.map((i) => i.path);
-    expect(paths).toEqual([ROUTES.chat, ROUTES.agents]);
+    expect(paths).toEqual([ROUTES.chat, ROUTES.board, ROUTES.workflows, ROUTES.agents]);
   });
 
   it("gives every entry a non-empty label", () => {
