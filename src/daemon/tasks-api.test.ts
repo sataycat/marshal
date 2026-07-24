@@ -7,6 +7,10 @@ import { buildApp, type BuildAppOptions } from "./http.js";
 import { openDb } from "../db/index.js";
 import { WorktreeManager } from "../worktree/manager.js";
 
+function repositoryId(root: string): string {
+  return (openDb(root).prepare("SELECT id FROM repositories WHERE path = ?").get(root) as { id: string }).id;
+}
+
 function initGitRepo(root: string): void {
   execSync("git init -b main", { cwd: root, stdio: "ignore" });
   execSync("git config user.email test@example.com", { cwd: root, stdio: "ignore" });
@@ -198,7 +202,7 @@ describe("task CRUD API", () => {
     expect(row.status).toBe("ready");
 
     // A worktree index entry was recorded for this slug.
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager(repositoryId(repoRoot), repoRoot);
     expect(manager.list().map((w) => w.slug)).toContain(slug);
   });
 
@@ -255,7 +259,7 @@ describe("task CRUD API", () => {
     expect(froze.status).toBe(200);
     expect((froze.body as { task: { status: string } }).task.status).toBe("ready");
 
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager(repositoryId(repoRoot), repoRoot);
     const worktree = manager.list().find((w) => w.slug === slug);
     expect(worktree, "worktree must be created on /ready").toBeDefined();
     expect(existsSync(worktree!.path)).toBe(true);

@@ -184,7 +184,7 @@ export async function buildTask(
   const repositoryId = options.repositoryId ?? "";
   const task = repositoryId ? getTask(repositoryId, slug, options.machineDir) : getTask(slug, root);
 
-  const manager = options.manager ?? new WorktreeManager(root ?? cwd());
+  const manager = options.manager ?? new WorktreeManager(task.repository_id ?? repositoryId, root ?? cwd(), { machineDir: options.machineDir });
    const resolved = workflowAssignment(task, "builder", options.machineDir);
    const builderAgentId = options.builderAgentId ?? resolved.assignment?.agent_id ?? (options.agent ? resolveAgentId("builder") : "test-builder");
    const builderVersion = resolved.assignment?.agent_version ?? "legacy";
@@ -362,7 +362,7 @@ export async function validateTask(
   const repositoryId = options.repositoryId ?? "";
   const task = repositoryId ? getTask(repositoryId, slug, options.machineDir) : getTask(slug, root);
 
-  const manager = options.manager ?? new WorktreeManager(root ?? cwd());
+  const manager = options.manager ?? new WorktreeManager(task.repository_id ?? repositoryId, root ?? cwd(), { machineDir: options.machineDir });
    const resolved = workflowAssignment(task, "validator", options.machineDir);
    const validatorAgentId = options.validatorAgentId ?? resolved.assignment?.agent_id ?? (options.agent ? resolveAgentId("validator") : "test-validator");
    const validatorVersion = resolved.assignment?.agent_version ?? "legacy";
@@ -516,7 +516,7 @@ export async function runOnce(options: RunOnceOptions = {}): Promise<RunOnceResu
   const taskStatus = row.status;
    const task = options.repositoryId ? getTask(options.repositoryId, slug, options.machineDir) : getTask(slug, root);
 
-  const manager = options.manager ?? new WorktreeManager(root ?? cwd());
+  const manager = options.manager ?? new WorktreeManager(task.repository_id!, root ?? cwd(), { machineDir: options.machineDir });
 
   let worktree;
   try {

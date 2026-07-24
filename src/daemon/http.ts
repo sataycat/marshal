@@ -1821,7 +1821,7 @@ function listSessionEventsForThread(repositoryId: string, threadId: string, mach
 function registerTaskRoutes(
   app: Hono,
   root: string | undefined,
-  worktreeRoot: string | undefined,
+  _worktreeRoot: string | undefined,
   bus: EventBus | undefined,
   machineDir?: string,
   configuredRepositoryId?: string,
@@ -1833,7 +1833,7 @@ function registerTaskRoutes(
     return { id, checkoutPath: context.checkoutPath };
   };
   const configuredRoot = root ?? (configuredRepositoryId ? resolveRepositoryContext(configuredRepositoryId, machineDir).checkoutPath : undefined);
-  const makeManager = (): WorktreeManager =>
+  const makeManager = (repositoryId?: string): WorktreeManager =>
     (() => {
       const selectedRoot = root ?? repositoryRoot(machineDir);
       if (!selectedRoot)
@@ -1842,9 +1842,9 @@ function registerTaskRoutes(
           "Select a repository before using tasks",
           "repository_not_selected",
         );
-      return worktreeRoot !== undefined
-        ? new WorktreeManager(selectedRoot, { worktreeRoot })
-        : new WorktreeManager(selectedRoot);
+      const resolvedRepositoryId = repositoryId ?? configuredRepositoryId;
+      if (!resolvedRepositoryId) throw new ApiError(409, "repository_id is required", "repository_required");
+      return new WorktreeManager(resolvedRepositoryId, selectedRoot, { machineDir });
     })();
   app.get("/api/tasks", (c) => {
     const repository = resolveFactoryRepository(c);
@@ -1945,7 +1945,7 @@ function registerTaskRoutes(
       }
       const task = transitionTask(repository.id, slug, "ready", machineDir);
       if (bus) publishTaskTransitioned(bus, taskPayload(task), from, "ready");
-      freezeTask(slug, repository.checkoutPath, makeManager());
+      freezeTask(slug, repository.checkoutPath, makeManager(repository.id));
       return c.json({ task: taskDetail(task) });
     } catch (err) {
       throw mapDomainError(err);
@@ -1960,7 +1960,7 @@ function registerTaskRoutes(
       if (task.status !== "review") {
         throw new ApiError(409, "task is not in review state", "not_review");
       }
-      const result = makeManager().diffForSlug(slug);
+      const result = makeManager(repository.id).diffForSlug(slug);
       return c.json({ diff: result.diff, stats: result.stats });
     } catch (err) {
       throw mapDomainError(err);
@@ -1977,7 +1977,7 @@ function registerTaskRoutes(
       if (task.status !== "review") {
         throw new ApiError(409, "task is not in review state", "not_review");
       }
-      const manager = makeManager();
+      const manager = makeManager(repository.id);
       if (manager.resolveTaskBranch(slug) === undefined) {
         throw new ApiError(409, "no worktree for task", "no_worktree");
       }

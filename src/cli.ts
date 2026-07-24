@@ -10,6 +10,7 @@ import { registerTaskCommands } from "./tasks/commands.js";
 import { WorktreeManager } from "./worktree/manager.js";
 import { getGlobalDir } from "./daemon/config.js";
 import { storageLayout } from "./storage/layout.js";
+import { getSelectedRepository } from "./repositories/store.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const pkgPath = resolve(__dirname, "../package.json");
@@ -54,7 +55,9 @@ worktree
   .description("Create a worktree for a task")
   .requiredOption("--task <slug>", "Task slug")
   .action(async (options: { task: string }) => {
-    const manager = new WorktreeManager(process.cwd());
+    const repository = getSelectedRepository();
+    if (!repository) throw new Error("Select a repository before creating a worktree");
+    const manager = new WorktreeManager(repository.id, repository.path);
     const info = manager.create(options.task);
     console.log(info.path);
   });
@@ -64,7 +67,9 @@ worktree
   .description("Destroy a task worktree and its branch")
   .requiredOption("--task <slug>", "Task slug")
   .action((options: { task: string }) => {
-    const manager = new WorktreeManager(process.cwd());
+    const repository = getSelectedRepository();
+    if (!repository) throw new Error("Select a repository before destroying a worktree");
+    const manager = new WorktreeManager(repository.id, repository.path);
     manager.destroy(options.task);
   });
 

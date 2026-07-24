@@ -30,15 +30,13 @@ function gitLogBody(path: string, file: string): string {
 
 describe("freezeTask", () => {
   let repoRoot: string;
-  let worktreeRoot: string;
   let manager: WorktreeManager;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
-    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
-    manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    manager = new WorktreeManager("test-repository", repoRoot);
   });
 
   afterEach(() => {

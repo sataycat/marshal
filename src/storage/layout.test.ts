@@ -64,7 +64,6 @@ describe("daemon storage layout", () => {
       layout.repositoriesDirectory,
       layout.logsDirectory,
       layout.temporaryDirectory,
-      layout.legacyWorktreesDirectory,
     ]) {
       expect(existsSync(directory)).toBe(true);
       expect(statSync(directory).isDirectory()).toBe(true);

@@ -157,11 +157,11 @@ Implement the ADR as the following dependency-ordered vertical slices. Each slic
 
 ### 6. Move task worktrees into stable repository namespaces
 
-- [ ] Make `WorktreeManager` require both repository ID and checkout path, and place worktrees beneath `$MARSHAL_HOME/repositories/<repository-id>/worktrees/<worktree-id>`.
-- [ ] Use a daemon-generated worktree ID for the directory name; keep task slug, branch, descriptor, source checkout, and timestamps as metadata rather than path components.
-- [ ] Replace repository-local `worktrees.json` and checkout-path hashes with durable worktree records in `marshal.db` that support create, reuse, inspect, destroy, and restart recovery.
-- [ ] Continue reading `marshal.json` and `.worktreeinclude` from the source checkout while ensuring setup, build, validation, diff, merge, and cleanup use the centralized worktree record.
-- [ ] Add tests for restart reuse, explicit cleanup, failed setup recovery, duplicate repository names, malicious task slugs, checkout relocation, and no writes to the source checkout.
+ - [x] Make `WorktreeManager` require both repository ID and checkout path, and place worktrees beneath `$MARSHAL_HOME/repositories/<repository-id>/worktrees/<worktree-id>`.
+ - [x] Use a daemon-generated worktree ID for the directory name; keep task slug, branch, descriptor, source checkout, and timestamps as metadata rather than path components.
+ - [x] Replace repository-local `worktrees.json` and checkout-path hashes with durable worktree records in `marshal.db` that support create, reuse, inspect, destroy, and restart recovery.
+ - [x] Continue reading `marshal.json` and `.worktreeinclude` from the source checkout while ensuring setup, build, validation, diff, merge, and cleanup use the centralized worktree record.
+ - [x] Add tests for restart reuse, explicit cleanup, failed setup recovery, duplicate repository names, malicious task slugs, checkout relocation, and no writes to the source checkout.
 
 ### 7. Define repository removal and retained-history behavior
 

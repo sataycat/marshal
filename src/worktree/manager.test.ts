@@ -1,9 +1,11 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WorktreeManager } from "./manager.js";
+import { openDb } from "../db/index.js";
+import { ensureRepositoryNamespace } from "../storage/layout.js";
 
 function initGitRepo(root: string): void {
   execSync("git init -b main", { cwd: root, stdio: "ignore" });
@@ -20,11 +22,9 @@ function initMarshalState(root: string): void {
 
 describe("WorktreeManager", () => {
   let repoRoot: string;
-  let worktreeRoot: string;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
-    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
   });
@@ -34,7 +34,7 @@ describe("WorktreeManager", () => {
   });
 
   it("creates a worktree and branch for a task", async () => {
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const info = manager.create("hello-world");
 
     expect(info.slug).toBe("hello-world");
@@ -44,7 +44,7 @@ describe("WorktreeManager", () => {
   });
 
   it("destroys a worktree and branch", async () => {
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const info = manager.create("hello-world");
 
     manager.destroy("hello-world");
@@ -56,16 +56,16 @@ describe("WorktreeManager", () => {
 
   it("throws when creating a worktree outside a git repo", () => {
     const notARepo = mkdtempSync(join(tmpdir(), "not-a-repo-"));
-    expect(() => new WorktreeManager(notARepo, { worktreeRoot })).toThrow("not a git repository");
+    expect(() => new WorktreeManager("test-repository", notARepo)).toThrow("not a git repository");
   });
 
   it("throws when destroying a non-existent worktree", () => {
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     expect(() => manager.destroy("does-not-exist")).toThrow("No worktree found");
   });
 
   it("reuses an existing worktree for the same slug", async () => {
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const first = manager.create("hello-world");
     const second = manager.create("hello-world");
 
@@ -80,7 +80,7 @@ describe("WorktreeManager", () => {
     execSync("git add .gitignore", { cwd: repoRoot, stdio: "ignore" });
     execSync("git commit -m 'ignore env'", { cwd: repoRoot, stdio: "ignore" });
 
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const info = manager.create("with-env");
 
     const copiedPath = join(info.path, ".env.local");
@@ -96,7 +96,7 @@ describe("WorktreeManager", () => {
     execSync("git add .gitignore", { cwd: repoRoot, stdio: "ignore" });
     execSync("git commit -m 'ignore node_modules'", { cwd: repoRoot, stdio: "ignore" });
 
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const info = manager.create("with-deps");
 
     expect(existsSync(join(info.path, "node_modules"))).toBe(false);
@@ -110,7 +110,7 @@ describe("WorktreeManager", () => {
       }),
     );
 
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const info = manager.create("with-setup");
 
     expect(existsSync(join(info.path, "setup-ran"))).toBe(true);
@@ -120,7 +120,7 @@ describe("WorktreeManager", () => {
     const setup = `node -e "require('fs').writeFileSync('env.txt', process.env.MARSHAL_TASK_SLUG + '\\n' + process.env.MARSHAL_BRANCH_NAME + '\\n' + process.env.MARSHAL_SOURCE_CHECKOUT_PATH + '\\n' + process.env.MARSHAL_WORKTREE_PATH)"`;
     writeFileSync(join(repoRoot, "marshal.json"), JSON.stringify({ worktree: { setup } }));
 
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const info = manager.create("with-env-vars");
 
     const envContent = readFileSync(join(info.path, "env.txt"), "utf8");
@@ -136,9 +136,44 @@ describe("WorktreeManager", () => {
       JSON.stringify({ worktree: { setup: "exit 1" } }),
     );
 
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     expect(() => manager.create("fails-setup")).toThrow("Setup script failed");
 
     expect(manager.list().find((w) => w.slug === "fails-setup")).toBeUndefined();
+  });
+
+  it("reuses the durable record after a manager restart", () => {
+    const first = new WorktreeManager("repo-restart", repoRoot);
+    const created = first.create("restart-task");
+    const second = new WorktreeManager("repo-restart", repoRoot);
+    expect(second.create("restart-task").path).toBe(created.path);
+    expect(second.inspect("restart-task")?.id).toBe(created.id);
+  });
+
+  it("stores only a daemon-generated ID in the repository namespace", () => {
+    const manager = new WorktreeManager("repo-path-shape", repoRoot);
+    const info = manager.create("../../malicious/task slug");
+    const namespace = ensureRepositoryNamespace("repo-path-shape");
+    expect(info.path.startsWith(`${namespace.worktreesDirectory}/`)).toBe(true);
+    expect(info.path.slice(namespace.worktreesDirectory.length + 1)).not.toContain("/");
+    expect(info.path).not.toContain("malicious");
+  });
+
+  it("recovers an interrupted setup record on restart", () => {
+    const manager = new WorktreeManager("repo-recovery", repoRoot);
+    const info = manager.create("recover-me");
+    const db = openDb(repoRoot);
+    db.prepare("UPDATE worktrees SET status = 'creating' WHERE id = ?").run(info.id);
+    rmSync(info.path, { recursive: true, force: true });
+    const restarted = new WorktreeManager("repo-recovery", repoRoot);
+    expect(restarted.inspect("recover-me")?.status).toBe("failed");
+    expect(restarted.create("recover-me").path).not.toBe(info.path);
+  });
+
+  it("does not write daemon files into the source checkout", () => {
+    const manager = new WorktreeManager("repo-no-source-write", repoRoot);
+    manager.create("source-clean");
+    expect(existsSync(join(repoRoot, ".marshal", "worktrees.json"))).toBe(false);
+    expect(existsSync(join(repoRoot, "marshal.db"))).toBe(false);
   });
 });

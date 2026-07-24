@@ -11,7 +11,7 @@ describe("consolidated database migrations", () => {
     const home = mkdtempSync(join(tmpdir(), "marshal-empty-"));
     const db = openDatabase(home);
     expect(existsSync(join(home, "marshal.db"))).toBe(true);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations").get()).toEqual({ count: 2 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations").get()).toEqual({ count: 3 });
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'repositories'").get()).toBeTruthy();
     expect(db.pragma("integrity_check")).toEqual([{ integrity_check: "ok" }]);
     expect(db.pragma("foreign_key_check")).toEqual([]);

@@ -50,11 +50,9 @@ describe("parseDiffStats", () => {
 
 describe("WorktreeManager diff & merge", () => {
   let repoRoot: string;
-  let worktreeRoot: string;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-diff-repo-"));
-    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-diff-wt-"));
     initGitRepo(repoRoot);
     mkdirSync(join(repoRoot, ".marshal"), { recursive: true });
   });
@@ -70,7 +68,7 @@ describe("WorktreeManager diff & merge", () => {
   }
 
   it("returns the branch diff and stats for a task with a worktree", () => {
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const info = manager.create("diff-task");
     commitIn(info.path, "feature.txt", "new feature\n", "feature");
 
@@ -83,12 +81,12 @@ describe("WorktreeManager diff & merge", () => {
   });
 
   it("throws DiffError when there is no worktree for the slug", () => {
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     expect(() => manager.diffForSlug("missing")).toThrow(/Cannot diff task missing/);
   });
 
   it("merges the task branch into the source base branch and returns the new HEAD", () => {
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const info = manager.create("merge-task");
     commitIn(info.path, "feature.txt", "merged feature\n", "feature");
 
@@ -101,7 +99,7 @@ describe("WorktreeManager diff & merge", () => {
   });
 
   it("refuses to merge when the source checkout has tracked modifications", () => {
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const info = manager.create("dirty-merge");
     commitIn(info.path, "x.txt", "x\n", "x");
     writeFileSync(join(repoRoot, "README.md"), "# Modified\n");
@@ -109,7 +107,7 @@ describe("WorktreeManager diff & merge", () => {
   });
 
   it("throws MergeError when there is no worktree for the slug", () => {
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     expect(() => manager.mergeTaskBranch("missing")).toThrow(/Cannot merge task missing/);
   });
 });

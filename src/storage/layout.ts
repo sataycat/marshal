@@ -40,8 +40,6 @@ export interface StorageLayout {
   repositoriesDirectory: string;
   logsDirectory: string;
   temporaryDirectory: string;
-  /** Existing daemon-wide worktree location; repository worktree migration is a later slice. */
-  legacyWorktreesDirectory: string;
   configPath: string;
   daemonPidPath: string;
   daemonPortPath: string;
@@ -167,7 +165,6 @@ export function storageLayout(explicitRoot?: string): StorageLayout {
     repositoriesDirectory,
     logsDirectory,
     temporaryDirectory,
-    legacyWorktreesDirectory: fixedChild(root, "worktrees"),
     configPath: fixedChild(root, "config.json"),
     daemonPidPath: fixedChild(root, "daemon.pid"),
     daemonPortPath: fixedChild(root, "daemon.port"),
@@ -221,7 +218,6 @@ export function ensureStorageLayout(explicitRoot?: string): StorageLayout {
   ensureDirectory(layout.repositoriesDirectory);
   ensureDirectory(layout.logsDirectory);
   ensureDirectory(layout.temporaryDirectory);
-  ensureDirectory(layout.legacyWorktreesDirectory);
   return layout;
 }
 

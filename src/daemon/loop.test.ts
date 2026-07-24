@@ -147,16 +147,14 @@ describe("formatRunOnceResult", () => {
 
 describe("startDaemon", () => {
   let repoRoot: string;
-  let worktreeRoot: string;
   let manager: WorktreeManager;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-daemon-"));
-    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-daemon-wt-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
-    manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    manager = new WorktreeManager("test-repository", repoRoot);
   });
 
   afterEach(() => {

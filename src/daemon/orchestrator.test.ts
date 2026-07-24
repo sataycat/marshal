@@ -166,16 +166,14 @@ describe("renderBuilderPrompt", () => {
 
 describe("runOnce", () => {
   let repoRoot: string;
-  let worktreeRoot: string;
   let manager: WorktreeManager;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
-    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
-    manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    manager = new WorktreeManager("test-repository", repoRoot);
   });
 
   afterEach(() => {
@@ -412,16 +410,14 @@ describe("runOnce", () => {
 
 describe("buildTask", () => {
   let repoRoot: string;
-  let worktreeRoot: string;
   let manager: WorktreeManager;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
-    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
-    manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    manager = new WorktreeManager("test-repository", repoRoot);
   });
 
   afterEach(() => {
@@ -546,7 +542,7 @@ describe("detectTrunkRef", () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "marshal-trunk-"));
     initGitRepo(repoRoot);
     const worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-trunk-wt-"));
-    const manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    const manager = new WorktreeManager("test-repository", repoRoot);
     const task = createTask({ slug: "trunk-task", title: "T", specMarkdown: "x" }, repoRoot);
     transitionTask("trunk-task", "ready", repoRoot);
     freezeTask("trunk-task", repoRoot, manager);
@@ -579,16 +575,14 @@ function createValidatedReadyTask(
 
 describe("validateTask", () => {
   let repoRoot: string;
-  let worktreeRoot: string;
   let manager: WorktreeManager;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
-    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
-    manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    manager = new WorktreeManager("test-repository", repoRoot);
   });
 
   afterEach(() => {
@@ -885,16 +879,14 @@ describe("validateTask", () => {
 
 describe("runOnce (validator dispatch)", () => {
   let repoRoot: string;
-  let worktreeRoot: string;
   let manager: WorktreeManager;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-repo-"));
-    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-worktrees-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
-    manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    manager = new WorktreeManager("test-repository", repoRoot);
   });
 
   afterEach(() => {
@@ -1129,16 +1121,14 @@ describe("runOnce (validator dispatch)", () => {
 
 describe("runOnce event bus", () => {
   let repoRoot: string;
-  let worktreeRoot: string;
   let manager: WorktreeManager;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), "marshal-bus-"));
-    worktreeRoot = mkdtempSync(join(tmpdir(), "marshal-bus-wt-"));
     initGitRepo(repoRoot);
     initMarshalState(repoRoot);
     initAgentConfig(repoRoot);
-    manager = new WorktreeManager(repoRoot, { worktreeRoot });
+    manager = new WorktreeManager("test-repository", repoRoot);
   });
 
   afterEach(() => {

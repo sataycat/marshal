@@ -48,7 +48,11 @@ function gitInWorktree(worktreePath: string, args: string[]): string {
 }
 
 export function specRelPathFor(slug: string, taskId: number): string {
-  return `specs/${padTaskId(taskId)}-${slug}.md`;
+  const safeSlug = slug
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/\.\.+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "") || "task";
+  return `specs/${padTaskId(taskId)}-${safeSlug}.md`;
 }
 
 export function freezeTask(
@@ -75,7 +79,7 @@ export function freezeTask(
     throw new FreezeError(slug, "spec is empty (provide --spec or --spec-file at create time)");
   }
 
-  const mgr = manager ?? new WorktreeManager(root ?? process.cwd());
+  const mgr = manager ?? new WorktreeManager(task.repository_id ?? "", root ?? process.cwd());
   const worktree = mgr.create(slug);
 
   const specRel = specRelPathFor(slug, task.id);

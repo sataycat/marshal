@@ -86,5 +86,11 @@ export function descriptorForSlug(slug: string, attempt = 0): string {
 }
 
 export function branchNameForSlug(slug: string, descriptor: string): string {
-  return `marshal/task/${slug}-${descriptor}`;
+  // Slugs are durable metadata and may originate from imported tasks. Keep
+  // branch refs conservative without ever using the raw slug as a path.
+  const branchSlug = slug
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/\.\.+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "") || "task";
+  return `marshal/task/${branchSlug}-${descriptor}`;
 }

@@ -1,9 +1,10 @@
 import { execSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp, type BuildAppOptions } from "./http.js";
+import { openDb } from "../db/index.js";
 
 function initGitRepo(root: string): void {
   execSync("git init -b main", { cwd: root, stdio: "ignore" });
@@ -76,10 +77,11 @@ describe("diff review & merge HTTP contract", () => {
   }
 
   function worktreePath(slug: string): string {
-    const index = JSON.parse(
-      readFileSync(join(repoRoot, ".marshal", "worktrees.json"), "utf8"),
-    ) as { worktrees: { slug: string; path: string }[] };
-    return index.worktrees.find((w) => w.slug === slug)!.path;
+    const row = openDb(repoRoot).prepare("SELECT worktree_path FROM worktrees WHERE task_slug = ?").get(slug) as
+      | { worktree_path: string }
+      | undefined;
+    if (!row) throw new Error(`No worktree for ${slug}`);
+    return row.worktree_path;
   }
 
   it("returns the diff and stats for a task in review", async () => {
