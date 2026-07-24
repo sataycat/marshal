@@ -17,7 +17,7 @@ import { homedir, tmpdir } from "node:os";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { logger } from "../logger.js";
-import { getRepoStateDir, initRepoState, GLOBAL_DIR, ensureDir } from "./config.js";
+import { ensureDir, getGlobalDir } from "./config.js";
 import {
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_PORT,
@@ -210,8 +210,8 @@ function readVersion(): string {
   return pkg.version as string;
 }
 
-export function portFilePath(root?: string): string {
-  return resolve(getRepoStateDir(root), "daemon.port");
+export function portFilePath(machineDir = getGlobalDir()): string {
+  return resolve(machineDir, "daemon.port");
 }
 
 export interface BuildAppOptions {
@@ -238,7 +238,6 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   const bus = options.bus;
   const webDir = options.webDir ?? defaultWebDistDir();
   const app = new Hono();
-  interruptActiveAgentAuthentications(options.machineDir);
   const auth = options.auth;
   if (auth) {
     app.use("/api/*", auth.middleware);
@@ -283,7 +282,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   }
   app.get("/api/health", (c) => c.json({ status: "ok", version }));
   registerDiagnosticsRoute(app, options.machineDir, root, version);
-  registerRepositoryRoutes(app);
+  registerRepositoryRoutes(app, options.machineDir);
   registerRegistryRoutes(app, options.machineDir);
   registerAgentRoutes(app, options.machineDir, bus, options.terminalAuth);
   registerWorkflowProfileRoutes(app, options.machineDir);
@@ -667,15 +666,15 @@ function registerWorkflowProfileRoutes(app: Hono, machineDir?: string): void {
   });
 }
 
-function registerRepositoryRoutes(app: Hono): void {
+function registerRepositoryRoutes(app: Hono, machineDir?: string): void {
   app.get("/api/repositories", (c) =>
     c.json({
-      repositories: listRepositories(),
-      selected_repository_id: getSelectedRepository()?.id ?? null,
+      repositories: listRepositories(machineDir),
+      selected_repository_id: getSelectedRepository(machineDir)?.id ?? null,
     }),
   );
   app.get("/api/repositories/selected", (c) =>
-    c.json({ repository: getSelectedRepository() ?? null }),
+    c.json({ repository: getSelectedRepository(machineDir) ?? null }),
   );
   app.get("/api/repositories/directories", (c) => {
     const requested = c.req.query("path")?.trim() || homedir();
@@ -706,7 +705,7 @@ function registerRepositoryRoutes(app: Hono): void {
     });
   });
   app.get("/api/repositories/:id", (c) => {
-    const repository = getRepository(c.req.param("id"));
+    const repository = getRepository(c.req.param("id"), machineDir);
     if (!repository) throw new ApiError(404, "Repository not found", "repository_not_found");
     return c.json({ repository });
   });
@@ -714,14 +713,17 @@ function registerRepositoryRoutes(app: Hono): void {
     const body = await readJsonObject(c, new Set(["path"]));
     if (body.path === undefined) throw new ApiError(422, "path is required", "missing_field");
     try {
-      return c.json({ repository: registerRepository(assertString(body.path, "path")) }, 201);
+      return c.json(
+        { repository: registerRepository(assertString(body.path, "path"), machineDir) },
+        201,
+      );
     } catch (err) {
       throw mapDomainError(err);
     }
   });
   app.post("/api/repositories/:id/select", (c) => {
     try {
-      return c.json({ repository: selectRepository(c.req.param("id")) });
+      return c.json({ repository: selectRepository(c.req.param("id"), machineDir) });
     } catch (err) {
       if (err instanceof Error && /not found/.test(err.message))
         throw new ApiError(404, err.message, "repository_not_found");
@@ -729,7 +731,7 @@ function registerRepositoryRoutes(app: Hono): void {
     }
   });
   app.delete("/api/repositories/:id", (c) => {
-    if (!removeRepository(c.req.param("id")))
+    if (!removeRepository(c.req.param("id"), machineDir))
       throw new ApiError(404, "Repository not found", "repository_not_found");
     return c.json({ deleted: true });
   });
@@ -742,8 +744,8 @@ function registerDiagnosticsRoute(
   version: string,
 ): void {
   app.get("/api/diagnostics", (c) => {
-    const repositories = listRepositories();
-    const selected = getSelectedRepository();
+    const repositories = listRepositories(machineDir);
+    const selected = getSelectedRepository(machineDir);
     const catalog = getRegistryCatalog(machineDir);
     const agents = listInstalledAgents(machineDir);
     const issues: Array<{
@@ -1750,7 +1752,7 @@ function registerTaskRoutes(
 ): void {
   const makeManager = (): WorktreeManager =>
     (() => {
-      const selectedRoot = root ?? repositoryRoot();
+      const selectedRoot = root ?? repositoryRoot(machineDir);
       if (!selectedRoot)
         throw new ApiError(
           409,
@@ -2222,6 +2224,7 @@ async function waitForListening(server: ServerType): Promise<{ host: string; por
 
 export async function startHttpServer(options: HttpServerOptions = {}): Promise<HttpServerHandle> {
   const root = options.root;
+  const machineDir = options.machineDir ?? getGlobalDir();
 
   const { host, port } = resolveDaemonBind(
     { host: options.host, port: options.port },
@@ -2238,7 +2241,8 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const version = options.version ?? readVersion();
   const bus = options.bus ?? new EventBus();
   const attachWs = options.attachWebSockets ?? true;
-  const terminalAuth = new TerminalAuthManager({ machineDir: options.machineDir, bus });
+  interruptActiveAgentAuthentications(machineDir);
+  const terminalAuth = new TerminalAuthManager({ machineDir, bus });
 
   const trustedProxy = options.trustedProxy ?? options.config?.daemon?.trustedProxy ?? false;
   const trustedOrigins =
@@ -2252,7 +2256,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     webUrl: options.webUrl,
     auth,
     trustedProxy,
-    machineDir: options.machineDir,
+    machineDir,
     terminalAuth,
   });
   const server = serve({ fetch: app.fetch, hostname: host, port });
@@ -2275,8 +2279,12 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
       server as HttpServer,
       bus,
       () => ({
-        tasks: (root ?? repositoryRoot()) ? listTasks(root ?? repositoryRoot()).map(taskCard) : [],
-        threads: (root ?? repositoryRoot()) ? listChatThreads(root ?? repositoryRoot()) : [],
+        tasks: (root ?? repositoryRoot(machineDir))
+          ? listTasks(root ?? repositoryRoot(machineDir)).map(taskCard)
+          : [],
+        threads: (root ?? repositoryRoot(machineDir))
+          ? listChatThreads(root ?? repositoryRoot(machineDir))
+          : [],
       }),
       {
         path: "/ws",
@@ -2290,11 +2298,10 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     );
   }
 
-  const portFile = portFilePath();
-  ensureDir(GLOBAL_DIR);
-  const pidFile = resolve(GLOBAL_DIR, "daemon.pid");
+  const portFile = portFilePath(machineDir);
+  ensureDir(machineDir);
+  const pidFile = resolve(machineDir, "daemon.pid");
   writeFileSync(portFile, String(bound.port));
-  writeFileSync(resolve(GLOBAL_DIR, "daemon.port"), String(bound.port));
   writeFileSync(pidFile, String(process.pid));
 
   logger.info({ host: bound.host, port: bound.port, portFile }, "HTTP server listening");
@@ -2310,7 +2317,6 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
         portFile,
         wsHandle,
         pidFile,
-        resolve(GLOBAL_DIR, "daemon.port"),
         terminalAuth,
       );
     },
@@ -2322,7 +2328,6 @@ async function closeServer(
   portFile: string,
   wsHandle?: WebSocketBridgeHandle,
   pidFile?: string,
-  globalPortFile?: string,
   terminalAuth?: TerminalAuthManager,
 ): Promise<void> {
   if (terminalAuth) await terminalAuth.close();
@@ -2364,13 +2369,6 @@ async function closeServer(
       if (existsSync(pidFile)) unlinkSync(pidFile);
     } catch (err) {
       logger.warn({ err, pidFile }, "Failed to remove daemon pid file");
-    }
-  }
-  if (globalPortFile) {
-    try {
-      if (existsSync(globalPortFile)) unlinkSync(globalPortFile);
-    } catch (err) {
-      logger.warn({ err, globalPortFile }, "Failed to remove global daemon port file");
     }
   }
 }

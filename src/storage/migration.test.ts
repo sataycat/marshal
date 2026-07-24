@@ -23,6 +23,22 @@ describe("database migrations", () => {
     expect(() => migrateDatabase(db, "machine")).toThrow("newer Marshal version");
   });
 
+  it("completes a recognized partial machine schema", () => {
+    const db = new Database(":memory:");
+    db.exec(
+      "CREATE TABLE repositories (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL, preferences TEXT NOT NULL DEFAULT '{}', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    );
+
+    migrateDatabase(db, "machine");
+
+    expect(
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_assignments'")
+        .get(),
+    ).toBeTruthy();
+    expect(db.pragma("integrity_check")).toEqual([{ integrity_check: "ok" }]);
+  });
+
   it("adopts a recognized legacy repository schema and preserves data", () => {
     const db = new Database(":memory:");
     db.exec(

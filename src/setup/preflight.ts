@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { homedir } from "node:os";
 import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
 import type { AgentCommand } from "../agent/types.js";
+import { getGlobalDir } from "../daemon/config.js";
 import {
   DEFAULT_MAX_RETRIES,
   isAgentCommand,
@@ -155,7 +155,7 @@ export async function checkDirectAgent(
 // -----------------------------------------------------------------------------
 
 export function getGlobalConfigPath(): string {
-  return process.env.MARSHAL_GLOBAL_CONFIG ?? resolve(homedir(), ".marshal", "config.json");
+  return process.env.MARSHAL_GLOBAL_CONFIG ?? resolve(getGlobalDir(), "config.json");
 }
 
 export function machineAlreadyConfigured(configPath: string = getGlobalConfigPath()): boolean {

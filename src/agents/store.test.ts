@@ -1,3 +1,4 @@
+import Database from "better-sqlite3";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,12 +24,12 @@ import { createSession, updateSession } from "../acp/supervisor-store.js";
 import { beginAgentAuthentication } from "./store.js";
 import { registerRepository } from "../repositories/store.js";
 import { listWorkflowProfiles, saveWorkflowProfile } from "../workflows/store.js";
-import { openMachineDb } from "../storage/machine.js";
+import { machineDbPath } from "../storage/machine.js";
 
 describe("installed agent storage", () => {
   it("migrates legacy installation tables for identity upserts", () => {
     const machineDir = mkdtempSync(`${tmpdir()}/marshal-agents-legacy-`);
-    const db = openMachineDb(machineDir);
+    const db = new Database(machineDbPath(machineDir));
     db.exec(`
       CREATE TABLE installed_agents (
         id TEXT NOT NULL,

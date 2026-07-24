@@ -8,7 +8,7 @@ import { startDaemon } from "./daemon/loop.js";
 import { runDoctor, runInit } from "./setup/init.js";
 import { registerTaskCommands } from "./tasks/commands.js";
 import { WorktreeManager } from "./worktree/manager.js";
-import { GLOBAL_DIR } from "./daemon/config.js";
+import { getGlobalDir } from "./daemon/config.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const pkgPath = resolve(__dirname, "../package.json");
@@ -122,7 +122,7 @@ program
   .command("stop")
   .description("Stop the Marshal daemon")
   .action(() => {
-    const pidPath = resolve(GLOBAL_DIR, "daemon.pid");
+    const pidPath = resolve(getGlobalDir(), "daemon.pid");
     if (!existsSync(pidPath)) {
       console.log("Marshal daemon is not running.");
       return;
@@ -145,7 +145,7 @@ program
   .command("status")
   .description("Inspect Marshal daemon status")
   .action(async () => {
-    const portPath = resolve(GLOBAL_DIR, "daemon.port");
+    const portPath = resolve(getGlobalDir(), "daemon.port");
     if (!existsSync(portPath)) {
       console.log("Marshal daemon: stopped");
       return;

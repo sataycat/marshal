@@ -1,5 +1,5 @@
 import { openMachineDb } from "../storage/machine.js";
-import { GLOBAL_DIR } from "../daemon/config.js";
+import { getGlobalDir } from "../daemon/config.js";
 import {
   validateAgentLaunchSpec,
   type AgentActivationStatus,
@@ -870,7 +870,7 @@ export function executeAgentRemoval(
   }
   try {
     const root = String(row.installation_root ?? "");
-    const base = resolve(machineDir ?? GLOBAL_DIR, "agents");
+    const base = resolve(machineDir ?? getGlobalDir(), "agents");
     if (root && (resolve(root) === base || relative(base, root).startsWith("..")))
       throw new Error("Installation payload is outside Marshal's owned agents directory");
     if (root) rmSync(root, { recursive: true, force: true });

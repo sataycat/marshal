@@ -1,9 +1,10 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { getRepoStateDir, initRepoState } from "../src/daemon/config.js";
+import { getGlobalDir, getRepoStateDir, initRepoState } from "../src/daemon/config.js";
 import { getDbPath, openDb } from "../src/db/index.js";
+import { openMachineDb } from "../src/storage/machine.js";
 import { listTasks } from "../src/tasks/store.js";
 
 describe("config and db bootstrap", () => {
@@ -19,5 +20,29 @@ describe("config and db bootstrap", () => {
     expect(getDbPath(root)).toEqual(join(root, ".marshal", "state.db"));
     expect(listTasks(root)).toEqual([]);
     db.close();
+  });
+
+  it("isolates machine databases by MARSHAL_HOME", () => {
+    const firstHome = getGlobalDir();
+    const first = openMachineDb();
+    first.prepare("INSERT INTO machine_preferences (key, value) VALUES (?, ?)").run(
+      "test-isolation",
+      "written",
+    );
+    first.close();
+
+    const secondHome = mkdtempSync(join(tmpdir(), "marshal-machine-isolation-"));
+    try {
+      process.env.MARSHAL_HOME = secondHome;
+      const second = openMachineDb();
+      expect(
+        second.prepare("SELECT value FROM machine_preferences WHERE key = ?").get("test-isolation"),
+      ).toBeUndefined();
+      second.close();
+      expect(getGlobalDir()).toBe(secondHome);
+    } finally {
+      process.env.MARSHAL_HOME = firstHome;
+      rmSync(secondHome, { recursive: true, force: true });
+    }
   });
 });

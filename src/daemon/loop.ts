@@ -4,7 +4,7 @@ import { publishDaemonCycleComplete, publishDaemonIdle, type EventBus } from "./
 import { repositoryRoot } from "../repositories/store.js";
 import { reconcileInstallationOperations } from "../agents/store.js";
 import { reconcileAgentActivations } from "../agents/activation.js";
-import { GLOBAL_DIR } from "./config.js";
+import { getGlobalDir } from "./config.js";
 
 export const DEFAULT_DAEMON_INTERVAL_MS = 5000;
 
@@ -53,7 +53,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 export async function startDaemon(options: StartDaemonOptions = {}): Promise<void> {
   const intervalMs = options.intervalMs ?? DEFAULT_DAEMON_INTERVAL_MS;
   const signal = options.signal;
-  const machineDir = options.machineDir ?? GLOBAL_DIR;
+  const machineDir = options.machineDir ?? getGlobalDir();
   reconcileInstallationOperations(machineDir);
   reconcileAgentActivations(machineDir, options.bus);
 
@@ -62,7 +62,7 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<voi
     let result: RunOnceResult | null = null;
     let published = false;
     try {
-      const root = options.root ?? repositoryRoot();
+      const root = options.root ?? repositoryRoot(machineDir);
       if (!root) {
         if (options.bus) publishDaemonIdle(options.bus);
         await sleep(intervalMs, signal);

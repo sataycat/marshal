@@ -13,7 +13,7 @@ import { spawn } from "node:child_process";
 import { resolve, dirname, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { extractArchive } from "./archive.js";
-import { GLOBAL_DIR } from "../daemon/config.js";
+import { getGlobalDir } from "../daemon/config.js";
 import { getRegistryCatalog } from "../registry/store.js";
 import type { RegistryAgent } from "../registry/types.js";
 import type { RegistryDistribution } from "../registry/types.js";
@@ -424,7 +424,7 @@ export function runUvx(packageSpecifier: string, cwd: string): Promise<void> {
 
 export async function startInstallation(
   agent: RegistryAgent,
-  machineDir = GLOBAL_DIR,
+  machineDir = getGlobalDir(),
   runner?: NpxRunner | UvxRunner,
   preferred?: RegistryDistribution["kind"],
   options: BinaryInstallOptions = {},
@@ -648,7 +648,7 @@ export async function startInstallation(
 
 export function cancelInstallationOperation(
   operationId: string,
-  machineDir = GLOBAL_DIR,
+  machineDir = getGlobalDir(),
   bus?: EventBus,
 ): InstallationOperation {
   const operation = getInstallationOperation(operationId, machineDir);
@@ -661,7 +661,7 @@ export function cancelInstallationOperation(
   return cancelled;
 }
 
-export function installationOperation(id: string, machineDir = GLOBAL_DIR): InstallationOperation {
+export function installationOperation(id: string, machineDir = getGlobalDir()): InstallationOperation {
   const operation = getInstallationOperation(id, machineDir);
   if (!operation) throw new Error("installation operation not found");
   return operation;

@@ -552,7 +552,7 @@ describe("startHttpServer", () => {
 
   it("overwrites a stale port file on a fresh start", async () => {
     mkdirSync(join(root, ".marshal"), { recursive: true });
-    writeFileSync(portFilePath(root), "99999");
+    writeFileSync(portFilePath(), "99999");
     const handle = await startHttpServer({ root, port: 0, version: "0.0.1" });
     try {
       expect(existsSync(handle.portFile)).toBe(true);
@@ -595,7 +595,7 @@ describe("startHttpServer", () => {
     await expect(
       startHttpServer({ root, host: "127.0.0.1", port: 1, version: "0.0.1" }),
     ).rejects.toThrow();
-    expect(existsSync(portFilePath(root))).toBe(false);
+    expect(existsSync(portFilePath())).toBe(false);
   });
 });
 
@@ -612,8 +612,8 @@ describe("marshal start end-to-end", () => {
     execFileSync("git", ["add", "README.md"], { cwd: root, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "init"], { cwd: root, stdio: "ignore" });
 
-    const binPath = resolve(process.cwd(), "bin/marshal");
-    execFileSync("node", [binPath, "init"], { cwd: root, stdio: "ignore" });
+    const cliPath = resolve(process.cwd(), "bin/marshal");
+    execFileSync(process.execPath, [cliPath, "init"], { cwd: root, stdio: "ignore" });
 
     // Reserve a free port by binding an ephemeral server then closing it.
     const probe = await startHttpServer({ root, host: "127.0.0.1", port: 0, version: "0.0.1" });
@@ -621,9 +621,9 @@ describe("marshal start end-to-end", () => {
     await probe.close();
 
     const daemon = spawn(
-      "node",
+      process.execPath,
       [
-        binPath,
+        cliPath,
         "start",
         "--lan",
         "--password",
@@ -643,8 +643,8 @@ describe("marshal start end-to-end", () => {
 
     let firstError: unknown;
     try {
-      await waitForPortFile(root, 5000);
-      const port = readFileSync(portFilePath(root), "utf8").trim();
+      await waitForPortFile(5000);
+      const port = readFileSync(portFilePath(), "utf8").trim();
       expect(Number(port)).toBe(requestedPort);
 
       const { status, body } = await fetchJson(`http://127.0.0.1:${port}/api/health`);
@@ -661,21 +661,21 @@ describe("marshal start end-to-end", () => {
       await new Promise((r) => setTimeout(r, 100));
     }
 
-    if (existsSync(portFilePath(root))) {
+    if (existsSync(portFilePath())) {
       throw new Error(`daemon.port not removed on shutdown. stderr:\n${stderrBuf}`);
     }
     if (firstError !== undefined) {
       throw firstError as Error;
     }
-    expect(existsSync(portFilePath(root))).toBe(false);
+    expect(existsSync(portFilePath())).toBe(false);
   }, 15000);
 });
 
-async function waitForPortFile(root: string, timeoutMs: number): Promise<void> {
+async function waitForPortFile(timeoutMs: number): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (existsSync(portFilePath(root))) return;
+    if (existsSync(portFilePath())) return;
     await new Promise((r) => setTimeout(r, 50));
   }
-  throw new Error(`daemon.port not written under ${root} within ${timeoutMs}ms`);
+  throw new Error(`daemon.port not written within ${timeoutMs}ms`);
 }

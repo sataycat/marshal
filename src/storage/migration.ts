@@ -81,6 +81,28 @@ function columns(db: Database.Database, table: string): Set<string> {
   );
 }
 
+function applyBaseline(db: Database.Database, sql: string, includeIndexes = false): void {
+  const existing = new Set(
+    (
+      db
+        .prepare("SELECT type, name FROM sqlite_master WHERE type IN ('table', 'index')")
+        .all() as Array<{ type: string; name: string }>
+    ).map((row) => `${row.type}:${row.name}`),
+  );
+  for (const statement of sql.split(";")) {
+    const trimmed = statement.trim();
+    if (!trimmed) continue;
+    const table = /^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?([^\s(]+)/i.exec(trimmed);
+    const index = /^CREATE (?:UNIQUE )?INDEX\s+(?:IF NOT EXISTS\s+)?([^\s(]+)/i.exec(trimmed);
+    if (table && existing.has(`table:${table[1]}`)) continue;
+    if (index) {
+      if (includeIndexes && !existing.has(`index:${index[1]}`)) db.exec(trimmed);
+      continue;
+    }
+    db.exec(trimmed);
+  }
+}
+
 function adoptLegacy(db: Database.Database, scope: "machine" | "repository"): void {
   const additions =
     scope === "repository"
@@ -193,7 +215,9 @@ function adoptLegacy(db: Database.Database, scope: "machine" | "repository"): vo
           ],
           ["agent_assignments", "agent_provenance TEXT NOT NULL DEFAULT '{}'"],
         ];
+  const existingTables = new Set(tableNames(db));
   for (const [table, ...definitions] of additions) {
+    if (!existingTables.has(table)) continue;
     const known = columns(db, table);
     for (const definition of definitions) {
       const name = definition.split(" ", 1)[0];
@@ -218,7 +242,13 @@ export function migrateDatabase(db: Database.Database, scope: "machine" | "repos
   if (!existing.includes(JOURNAL)) {
     if (existing.some((name) => !LEGACY_TABLES[scope].has(name)))
       throw new DatabaseMigrationError(`${scope} database has an unsupported pre-migration schema`);
-    if (existing.length > 0) adoptLegacy(db, scope);
+    if (existing.length > 0) {
+      // Complete partial legacy databases before adding columns to tables that
+      // were introduced after the original schema.
+      applyBaseline(db, available[0].sql);
+      adoptLegacy(db, scope);
+      applyBaseline(db, available[0].sql, true);
+    }
     db.exec(
       `CREATE TABLE ${JOURNAL} (id INTEGER PRIMARY KEY NOT NULL, hash TEXT NOT NULL, created_at INTEGER NOT NULL)`,
     );

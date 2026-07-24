@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { GLOBAL_DIR } from "../daemon/config.js";
+import { getGlobalDir } from "../daemon/config.js";
 import { openMachineDb } from "../storage/machine.js";
 
 export interface CredentialBinding {
@@ -22,7 +22,7 @@ export interface CredentialStore {
 export class ExternalFileCredentialStore implements CredentialStore {
   private readonly directory: string;
 
-  constructor(machineDir = GLOBAL_DIR) {
+  constructor(machineDir = getGlobalDir()) {
     this.directory = resolve(machineDir, "credentials");
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
   }

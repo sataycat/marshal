@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
-import { GLOBAL_DIR } from "../daemon/config.js";
+import { getGlobalDir } from "../daemon/config.js";
 import { openMachineDb } from "../storage/machine.js";
 
 export interface Repository {
@@ -45,18 +45,18 @@ function canonicalGitRoot(input: string): string {
   }
 }
 
-export function listRepositories(machineDir = GLOBAL_DIR): Repository[] {
+export function listRepositories(machineDir = getGlobalDir()): Repository[] {
   const db = openMachineDb(machineDir);
   return (db.prepare("SELECT * FROM repositories ORDER BY name COLLATE NOCASE, path").all() as Record<string, unknown>[]).map(rowToRepository);
 }
 
-export function getRepository(id: string, machineDir = GLOBAL_DIR): Repository | undefined {
+export function getRepository(id: string, machineDir = getGlobalDir()): Repository | undefined {
   const db = openMachineDb(machineDir);
   const row = db.prepare("SELECT * FROM repositories WHERE id = ?").get(id) as Record<string, unknown> | undefined;
   return row ? rowToRepository(row) : undefined;
 }
 
-export function registerRepository(inputPath: string, machineDir = GLOBAL_DIR): Repository {
+export function registerRepository(inputPath: string, machineDir = getGlobalDir()): Repository {
   const path = canonicalGitRoot(inputPath);
   const db = openMachineDb(machineDir);
   const existing = db.prepare("SELECT * FROM repositories WHERE path = ?").get(path) as Record<string, unknown> | undefined;
@@ -66,7 +66,7 @@ export function registerRepository(inputPath: string, machineDir = GLOBAL_DIR): 
   return getRepository(id, machineDir)!;
 }
 
-export function removeRepository(id: string, machineDir = GLOBAL_DIR): boolean {
+export function removeRepository(id: string, machineDir = getGlobalDir()): boolean {
   const db = openMachineDb(machineDir);
   const result = db.prepare("DELETE FROM repositories WHERE id = ?").run(id);
   const selected = db.prepare("SELECT value FROM machine_preferences WHERE key = 'selected_repository_id'").get() as { value: string } | undefined;
@@ -74,13 +74,13 @@ export function removeRepository(id: string, machineDir = GLOBAL_DIR): boolean {
   return result.changes > 0;
 }
 
-export function getSelectedRepository(machineDir = GLOBAL_DIR): Repository | undefined {
+export function getSelectedRepository(machineDir = getGlobalDir()): Repository | undefined {
   const db = openMachineDb(machineDir);
   const row = db.prepare("SELECT value FROM machine_preferences WHERE key = 'selected_repository_id'").get() as { value: string } | undefined;
   return row ? getRepository(row.value, machineDir) : undefined;
 }
 
-export function selectRepository(id: string, machineDir = GLOBAL_DIR): Repository {
+export function selectRepository(id: string, machineDir = getGlobalDir()): Repository {
   const repository = getRepository(id, machineDir);
   if (!repository) throw new Error(`Repository not found: ${id}`);
   const db = openMachineDb(machineDir);
@@ -88,4 +88,4 @@ export function selectRepository(id: string, machineDir = GLOBAL_DIR): Repositor
   return repository;
 }
 
-export function repositoryRoot(machineDir = GLOBAL_DIR): string | undefined { return getSelectedRepository(machineDir)?.path; }
+export function repositoryRoot(machineDir = getGlobalDir()): string | undefined { return getSelectedRepository(machineDir)?.path; }

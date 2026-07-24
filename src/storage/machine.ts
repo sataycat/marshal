@@ -1,13 +1,13 @@
 import Database from "better-sqlite3";
 import { resolve } from "node:path";
-import { GLOBAL_DIR, ensureDir } from "../daemon/config.js";
+import { ensureDir, getGlobalDir } from "../daemon/config.js";
 import { migrateDatabase } from "./migration.js";
 
-export function machineDbPath(machineDir = GLOBAL_DIR): string {
+export function machineDbPath(machineDir = getGlobalDir()): string {
   return resolve(machineDir, "machine.db");
 }
 
-export function openMachineDb(machineDir = GLOBAL_DIR): Database.Database {
+export function openMachineDb(machineDir = getGlobalDir()): Database.Database {
   ensureDir(machineDir);
   const db = new Database(machineDbPath(machineDir));
   db.pragma("journal_mode = WAL");
