@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "./client";
 import { queryKeys } from "./queryKeys";
 import type { TaskStatus } from "../types";
@@ -68,7 +68,7 @@ export const useUpdateWorkflowProfileMutation = () =>
     mutationFn: ({
       repositoryId,
       id,
-      input,
+       input,
     }: {
       repositoryId: string;
       id: string;
@@ -231,7 +231,13 @@ export const useCancelAgentAuthenticationMutation = () =>
   useMutation({ mutationFn: api.cancelAgentAuthentication });
 export const useRegisterRepositoryMutation = () =>
   useMutation({ mutationFn: api.registerRepository });
-export const useSelectRepositoryMutation = () => useMutation({ mutationFn: api.selectRepository });
+export const useSelectRepositoryMutation = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.selectRepository,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.repositories }),
+  });
+};
 export const useRemoveRepositoryMutation = () => useMutation({ mutationFn: api.removeRepository });
 export function useTaskDiffQuery(slug: string, enabled: boolean) {
   return useQuery({
@@ -258,50 +264,51 @@ export function useSpecAuthorSessionsQuery(slug: string) {
 export function useChatAgentsQuery() {
   return useInstalledAgentsQuery();
 }
-export function useChatThreadsQuery(archived: boolean) {
+export function useChatThreadsQuery(repositoryId: string | null, archived: boolean) {
   return useQuery({
-    queryKey: queryKeys.threads(archived),
-    queryFn: ({ signal }) => api.fetchChatThreads(archived, signal),
+    queryKey: queryKeys.threads(archived, repositoryId),
+    queryFn: ({ signal }) => api.fetchChatThreads(repositoryId!, archived, signal),
+    enabled: Boolean(repositoryId),
     ...queryOptions,
   });
 }
-export function useChatThreadQuery(id: string | undefined) {
+export function useChatThreadQuery(id: string | undefined, repositoryId: string | null) {
   return useQuery({
-    queryKey: queryKeys.thread(id ?? ""),
-    queryFn: ({ signal }) => api.fetchChatThread(id ?? "", signal),
-    enabled: Boolean(id),
+    queryKey: queryKeys.thread(id ?? "", repositoryId),
+    queryFn: ({ signal }) => api.fetchChatThread(id ?? "", repositoryId!, signal),
+    enabled: Boolean(id && repositoryId),
     ...queryOptions,
   });
 }
-export function useChatFilesQuery(id: string | undefined) {
+export function useChatFilesQuery(id: string | undefined, repositoryId: string | null) {
   return useQuery({
-    queryKey: queryKeys.files(id ?? ""),
-    queryFn: ({ signal }) => api.fetchChatFiles(id ?? "", signal),
-    enabled: Boolean(id),
+    queryKey: queryKeys.files(id ?? "", repositoryId),
+    queryFn: ({ signal }) => api.fetchChatFiles(id ?? "", repositoryId!, signal),
+    enabled: Boolean(id && repositoryId),
     ...queryOptions,
   });
 }
-export function useChatFileQuery(id: string | undefined, path: string | undefined) {
+export function useChatFileQuery(id: string | undefined, repositoryId: string | null, path: string | undefined) {
   return useQuery({
-    queryKey: queryKeys.file(id ?? "", path ?? ""),
-    queryFn: ({ signal }) => api.fetchChatFile(id ?? "", path ?? "", signal),
-    enabled: Boolean(id && path),
+    queryKey: queryKeys.file(id ?? "", path ?? "", repositoryId),
+    queryFn: ({ signal }) => api.fetchChatFile(id ?? "", repositoryId!, path ?? "", signal),
+    enabled: Boolean(id && repositoryId && path),
     ...queryOptions,
   });
 }
-export function useChatPermissionsQuery(id: string | undefined) {
+export function useChatPermissionsQuery(id: string | undefined, repositoryId: string | null) {
   return useQuery({
-    queryKey: queryKeys.permissions(id ?? ""),
-    queryFn: ({ signal }) => api.fetchChatPermissions(id ?? "", signal),
-    enabled: Boolean(id),
+    queryKey: queryKeys.permissions(id ?? "", repositoryId),
+    queryFn: ({ signal }) => api.fetchChatPermissions(id ?? "", repositoryId!, signal),
+    enabled: Boolean(id && repositoryId),
     ...queryOptions,
   });
 }
-export function useChatAttachmentsQuery(id: string | undefined) {
+export function useChatAttachmentsQuery(id: string | undefined, repositoryId: string | null) {
   return useQuery({
-    queryKey: queryKeys.attachments(id ?? ""),
-    queryFn: ({ signal }) => api.fetchChatAttachments(id ?? "", signal),
-    enabled: Boolean(id),
+    queryKey: queryKeys.attachments(id ?? "", repositoryId),
+    queryFn: ({ signal }) => api.fetchChatAttachments(id ?? "", repositoryId!, signal),
+    enabled: Boolean(id && repositoryId),
     ...queryOptions,
   });
 }
@@ -310,65 +317,73 @@ export const useUpdateThreadMutation = () =>
   useMutation({
     mutationFn: ({
       id,
+      repositoryId,
       input,
     }: {
       id: string;
-      input: Parameters<typeof api.updateChatThread>[1];
-    }) => api.updateChatThread(id, input),
+       repositoryId: string;
+       input: Parameters<typeof api.updateChatThread>[2];
+    }) => api.updateChatThread(id, repositoryId, input),
   });
-export const useDeleteThreadMutation = () => useMutation({ mutationFn: api.deleteChatThread });
+export const useDeleteThreadMutation = () => useMutation({ mutationFn: ({ id, repositoryId }: { id: string; repositoryId: string }) => api.deleteChatThread(id, repositoryId) });
 export const useInitializeChatSessionMutation = () =>
-  useMutation({ mutationFn: api.initializeChatSession });
+  useMutation({ mutationFn: ({ id, repositoryId }: { id: string; repositoryId: string }) => api.initializeChatSession(id, repositoryId) });
 export const useSetChatSessionConfigOptionMutation = () =>
   useMutation({
     mutationFn: ({
       id,
-      configId,
-      value,
+       configId,
+       value,
+       repositoryId,
     }: {
       id: string;
       configId: string;
-      value: string | boolean;
-    }) => api.setChatSessionConfigOption(id, configId, value),
+       value: string | boolean;
+       repositoryId: string;
+    }) => api.setChatSessionConfigOption(id, repositoryId, configId, value),
   });
 export const useSetChatSessionModeMutation = () =>
   useMutation({
-    mutationFn: ({ id, modeId }: { id: string; modeId: string }) =>
-      api.setChatSessionMode(id, modeId),
+    mutationFn: ({ id, modeId, repositoryId }: { id: string; modeId: string; repositoryId: string }) =>
+      api.setChatSessionMode(id, repositoryId, modeId),
   });
 export const useSendChatMutation = () =>
   useMutation({
     mutationFn: ({
-      id,
-      content,
-      attachmentIds,
+       id,
+       content,
+       attachmentIds,
+       repositoryId,
     }: {
       id: string;
       content: string;
-      attachmentIds?: string[];
-    }) => api.sendChatMessage(id, content, attachmentIds),
+       attachmentIds?: string[];
+       repositoryId: string;
+    }) => api.sendChatMessage(id, repositoryId, content, attachmentIds),
   });
 export const useResubmitChatMutation = () =>
   useMutation({
-    mutationFn: ({ id, messageId }: { id: string; messageId: number }) =>
-      api.resubmitChatMessage(id, messageId),
+    mutationFn: ({ id, messageId, repositoryId }: { id: string; messageId: number; repositoryId: string }) =>
+      api.resubmitChatMessage(id, repositoryId, messageId),
   });
-export const useCancelChatMutation = () => useMutation({ mutationFn: api.cancelChatTurn });
+export const useCancelChatMutation = () => useMutation({ mutationFn: ({ id, repositoryId }: { id: string; repositoryId: string }) => api.cancelChatTurn(id, repositoryId) });
 export const usePermissionMutation = () =>
   useMutation({
     mutationFn: ({
-      id,
-      requestId,
-      action,
+       id,
+       requestId,
+       action,
+       repositoryId,
     }: {
       id: string;
       requestId: string;
-      action: "approve" | "deny";
-    }) => api.decideChatPermission(id, requestId, action),
+       action: "approve" | "deny";
+       repositoryId: string;
+    }) => api.decideChatPermission(id, repositoryId, requestId, action),
   });
 export const useUploadAttachmentMutation = () =>
   useMutation({
-    mutationFn: ({ id, file }: { id: string; file: File }) => api.uploadChatAttachment(id, file),
+    mutationFn: ({ id, repositoryId, file }: { id: string; repositoryId: string; file: File }) => api.uploadChatAttachment(id, repositoryId, file),
   });
 export const useSendSpecMessageMutation = () =>
   useMutation({

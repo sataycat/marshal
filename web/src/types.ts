@@ -34,7 +34,7 @@ export interface AgentAssignment {
 }
 export interface WorkflowProfile {
   id: string;
-  repository_id: string;
+  repository_id?: string;
   name: string;
   permission_policy: PermissionPolicy;
   unattended_authorized: boolean;
@@ -348,7 +348,7 @@ export interface SessionModeState {
 
 export interface ChatThread {
   id: string;
-  repository_id?: string | null;
+  repository_id?: string;
   repo_root: string;
   cwd: string;
   agent_id: string;
@@ -371,6 +371,7 @@ export interface ChatThread {
 
 export interface ChatMessage {
   id: number;
+  repository_id?: string;
   thread_id: string;
   role: ChatMessageRole;
   content: string;
@@ -399,6 +400,7 @@ export type PermissionRequestStatus =
 
 export interface ChatAttachment {
   id: string;
+  repository_id: string;
   thread_id: string;
   filename: string;
   mime_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
@@ -440,6 +442,7 @@ export interface PermissionOption {
   kind: PermissionOptionKind;
 }
 export interface PendingPermission {
+  repository_id?: string;
   requestId: string;
   sessionId: string;
   threadId: string;

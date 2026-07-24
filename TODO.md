@@ -123,11 +123,11 @@ Implement the ADR as the following dependency-ordered vertical slices. Each slic
 
 ### 2. Make the interactive workbench repository-ID scoped
 
-- [ ] Introduce an explicit repository context resolved from a registered repository ID; the selected repository remains a browser convenience, not an implicit persistence selector.
-- [ ] Change thread, message, attachment-metadata, ACP session, prompt, event, and permission stores to require repository identity on every repository-scoped read and mutation.
-- [ ] Make repository ownership immutable at record creation and stop using `repo_root` as the authorization or query boundary; retain checkout and working-directory paths only as execution metadata.
-- [ ] Update HTTP, WebSocket hydration, chat runners, and browser queries to carry or resolve the repository ID explicitly and reject cross-repository resource access.
-- [ ] Add two-repository tests for isolated thread lists, messages, sessions, permissions, attachment metadata, repository switching, and cross-scope 404 or conflict behavior.
+ - [x] Introduce an explicit repository context resolved from a registered repository ID; the selected repository remains a browser convenience, not an implicit persistence selector.
+ - [x] Change thread, message, attachment-metadata, ACP session, prompt, event, and permission stores to require repository identity on every repository-scoped read and mutation.
+ - [x] Make repository ownership immutable at record creation and stop using `repo_root` as the authorization or query boundary; retain checkout and working-directory paths only as execution metadata.
+ - [x] Update HTTP, WebSocket hydration, chat runners, and browser queries to carry or resolve the repository ID explicitly and reject cross-repository resource access.
+ - [x] Add two-repository tests for isolated thread lists, messages, sessions, permissions, attachment metadata, repository switching, and cross-scope 404 or conflict behavior.
 
 ### 3. Make factory workflows repository-ID scoped
 

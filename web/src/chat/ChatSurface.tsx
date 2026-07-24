@@ -53,6 +53,7 @@ import {
   useUpdateThreadMutation,
   useUploadAttachmentMutation,
 } from "../api/queries";
+import { queryKeys } from "../api/queryKeys";
 import { MarkdownWithCode } from "../codemirror/MarkdownWithCode";
 import { CodeBlock } from "../codemirror/CodeBlock";
 import { useChatStore, selectMessages, selectPermissions, selectThreads } from "../state/chatStore";
@@ -74,6 +75,8 @@ import { FilesSidebar } from "./FilesSidebar";
 import { groupThreadsByProject } from "./sidebar";
 
 export function ChatSurface({ selectedId, selectedAgent }: { selectedId?: string; selectedAgent?: string | null }): JSX.Element {
+  const repositoriesQuery = useRepositoriesQuery();
+  const repositoryId = repositoriesQuery.data?.selected_repository_id ?? null;
   const threads = useChatStore(useShallow(selectThreads));
   const liveMessages = useChatStore(useShallow(selectMessages(selectedId ?? "")));
   const status = useTaskStore((state) => state.socketStatus);
@@ -82,9 +85,9 @@ export function ChatSurface({ selectedId, selectedAgent }: { selectedId?: string
   const { confirm } = useConfirmContext();
   const [, navigate] = useLocation();
   const [selected, setSelected] = useState<ChatThread | null>(null);
-  const threadQuery = useChatThreadQuery(selectedId);
+  const threadQuery = useChatThreadQuery(selectedId, repositoryId);
   const agentsQuery = useChatAgentsQuery();
-  const archivedQuery = useChatThreadsQuery(true);
+  const archivedQuery = useChatThreadsQuery(repositoryId, true);
   const [showArchived, setShowArchived] = useState(false);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const agents = (agentsQuery.data ?? []).filter((agent) => agent.status === "installed" && agent.readiness_status === "ready");
@@ -120,7 +123,7 @@ export function ChatSurface({ selectedId, selectedAgent }: { selectedId?: string
   const projectGroups = groupThreadsByProject(visibleThreads);
   const mutateThread = async (thread: ChatThread, input: Parameters<typeof updateThreadMutation.mutateAsync>[0]["input"]): Promise<void> => {
     try {
-      const updated = await updateThreadMutation.mutateAsync({ id: thread.id, input });
+      const updated = await updateThreadMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "", input });
       applyChatEvent({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to update the session.");
@@ -134,8 +137,8 @@ export function ChatSurface({ selectedId, selectedAgent }: { selectedId?: string
     });
     if (!ok) return;
     try {
-      await deleteThreadMutation.mutateAsync(thread.id);
-      applyChatEvent({ type: "thread.deleted", payload: { id: thread.id }, timestamp: new Date().toISOString() });
+      await deleteThreadMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "" });
+       applyChatEvent({ type: "thread.deleted", payload: { id: thread.id, repositoryId: thread.repository_id }, timestamp: new Date().toISOString() });
       if (selectedId === thread.id) void navigate("/chat");
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Unable to discard the session.");
@@ -247,14 +250,14 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
   const pushError = useToastStore((state) => state.pushError);
   const busPermissions = useChatStore(useShallow(selectPermissions(thread?.id ?? "")));
   const [draft, setDraft] = useState("");
-  const filesQuery = useChatFilesQuery(thread?.id);
-  const permissionsQuery = useChatPermissionsQuery(thread?.id);
-  const attachmentsQuery = useChatAttachmentsQuery(thread?.id);
+  const filesQuery = useChatFilesQuery(thread?.id, thread?.repository_id ?? null);
+  const permissionsQuery = useChatPermissionsQuery(thread?.id, thread?.repository_id ?? null);
+  const attachmentsQuery = useChatAttachmentsQuery(thread?.id, thread?.repository_id ?? null);
   const agentsQuery = useChatAgentsQuery();
   const permissionMutation = usePermissionMutation();
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<{ path: string; content: string } | null>(null);
-  const fileQuery = useChatFileQuery(thread?.id, selectedFile?.path);
+  const fileQuery = useChatFileQuery(thread?.id, thread?.repository_id ?? null, selectedFile?.path);
   const files = filesQuery.data ?? [];
   const permissions = permissionsQuery.data ?? [];
   const attachments = attachmentsQuery.data ?? [];
@@ -267,7 +270,7 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
   const decide = async (requestId: string, action: "approve" | "deny"): Promise<void> => {
     if (!thread) return;
     try {
-      await permissionMutation.mutateAsync({ id: thread.id, requestId, action });
+       await permissionMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "", requestId, action });
     } catch (error) {
       pushError(error instanceof Error ? error.message : "Permission request is no longer active.");
     }
@@ -298,7 +301,7 @@ function ThreadWorkspace({ thread, seeded, live, loading, loadError, onRetryLoad
         attachments={attachments}
         supportsImages={supportsImages}
         authMethods={installedAgent?.auth_methods ?? []}
-        onAttachments={(items) => queryClient.setQueryData(["thread", thread?.id, "attachments"], items)}
+         onAttachments={(items) => queryClient.setQueryData(queryKeys.attachments(thread?.id ?? "", thread?.repository_id ?? null), items)}
         onPermission={decide}
         loading={loading}
         loadError={loadError}
@@ -450,8 +453,8 @@ function NewChatComposer({ agents, selectedAgent, onStarted }: { agents: Install
     if (!content || !agent || !project || sending || createMutation.isPending) return;
     setSending(true);
     try {
-      const created = await createMutation.mutateAsync({ agent_id: agent.split("@")[0], agent_version: agent.split("@")[1], cwd: project });
-      await sendMutation.mutateAsync({ id: created.id, content });
+       const created = await createMutation.mutateAsync({ repository_id: selectedRepository!.id, agent_id: agent.split("@")[0], agent_version: agent.split("@")[1], cwd: project });
+       await sendMutation.mutateAsync({ id: created.id, repositoryId: created.repository_id ?? selectedRepository!.id, content });
       clearComposerDraft(project);
       onStarted(created);
     } catch (error) {
@@ -721,7 +724,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
   useEffect(() => {
     if (!thread || thread.status === "closed" || thread.session_initialized || initializedThreadRef.current === thread.id) return;
     initializedThreadRef.current = thread.id;
-    void initializeSessionMutation.mutateAsync(thread.id).then((updated) => {
+     void initializeSessionMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "" }).then((updated) => {
       applyChatEvent({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
     }).catch(() => undefined);
   }, [applyChatEvent, initializeSessionMutation, thread]);
@@ -730,7 +733,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
     if (!thread) return;
     setSendError(null);
     try {
-      const updated = await setConfigOptionMutation.mutateAsync({ id: thread.id, configId: option.id, value });
+       const updated = await setConfigOptionMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "", configId: option.id, value });
       applyChatEvent({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
     } catch (error) {
       setSendError(error instanceof Error ? error.message : `Unable to change ${option.name}.`);
@@ -741,7 +744,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
     if (!thread) return;
     setSendError(null);
     try {
-      const updated = await setModeMutation.mutateAsync({ id: thread.id, modeId });
+       const updated = await setModeMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "", modeId });
       applyChatEvent({ type: "thread.updated", payload: { thread: updated }, timestamp: new Date().toISOString() });
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "Unable to change the session mode.");
@@ -755,7 +758,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
     setSendError(null);
     onDraftChange("");
     try {
-      const result = await sendMutation.mutateAsync({ id: thread.id, content, attachmentIds: attachments.map((attachment) => attachment.id) });
+       const result = await sendMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "", content, attachmentIds: attachments.map((attachment) => attachment.id) });
       applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.userMessage }, timestamp: new Date().toISOString() });
       if (result.assistantMessage) applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.assistantMessage }, timestamp: new Date().toISOString() });
     } catch (error) {
@@ -769,7 +772,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
   const resubmit = async (message: ChatMessage): Promise<void> => {
     if (!thread || draftSending || externalSending) return;
     setDraftSending(true); setSendError(null);
-    try { const result = await resubmitMutation.mutateAsync({ id: thread.id, messageId: message.id }); applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.userMessage }, timestamp: new Date().toISOString() }); if (result.assistantMessage) applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.assistantMessage }, timestamp: new Date().toISOString() }); }
+    try { const result = await resubmitMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "", messageId: message.id }); applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.userMessage }, timestamp: new Date().toISOString() }); if (result.assistantMessage) applyChatEvent({ type: "thread.message", payload: { threadId: thread.id, message: result.assistantMessage }, timestamp: new Date().toISOString() }); }
     catch (error) { setSendError(error instanceof Error ? error.message : "The prompt could not be resubmitted."); }
     finally { setDraftSending(false); }
   };
@@ -779,7 +782,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
     setUploading(true);
     try {
       const uploaded = [...attachments];
-      for (const file of [...files]) uploaded.push(await uploadMutation.mutateAsync({ id: thread.id, file }));
+       for (const file of [...files]) uploaded.push(await uploadMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "", file }));
       onAttachments(uploaded);
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "Image upload failed. Check the type and 10 MiB limit.");
@@ -789,7 +792,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
   const cancel = async (): Promise<void> => {
     if (!thread) return;
     try {
-      await cancelMutation.mutateAsync(thread.id);
+       await cancelMutation.mutateAsync({ id: thread.id, repositoryId: thread.repository_id ?? "" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to cancel the turn.";
       setSendError(message);
@@ -838,7 +841,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
                 )}
               </div>
               <div className={cn(message.role === "user" && "rounded-2xl rounded-tr-md border border-primary/15 bg-accent px-4 py-2.5 text-accent-foreground")}>
-                {message.attachment_ids.map((id) => <img key={id} src={chatAttachmentUrl(message.thread_id, id)} alt="Attached image" className="mb-2 max-h-64 rounded-lg border object-contain" />)}
+                 {message.attachment_ids.map((id) => <img key={id} src={chatAttachmentUrl(message.thread_id, message.repository_id ?? "", id)} alt="Attached image" className="mb-2 max-h-64 rounded-lg border object-contain" />)}
                 <MarkdownWithCode className="text-sm" src={message.content} />
                 {message.prompt_status === "authentication_required" && <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-warn-border bg-warn-bg px-3 py-2 text-xs text-warn"><span>Sign in is required. This prompt was preserved and has not been replayed.</span><Button type="button" size="xs" variant="outline" onClick={() => void resubmit(message)} disabled={busy}>Resubmit</Button></div>}
               </div>
@@ -866,7 +869,7 @@ function ChatPane({ thread, seeded, live, permissions, attachments, supportsImag
             <div className="mb-2 flex flex-wrap gap-2">
               {attachments.map((attachment) => (
                 <div key={attachment.id} className="relative">
-                  <img src={chatAttachmentUrl(attachment.thread_id, attachment.id)} alt={attachment.filename} className="size-14 rounded-lg border object-cover" />
+                   <img src={chatAttachmentUrl(attachment.thread_id, attachment.repository_id ?? "", attachment.id)} alt={attachment.filename} className="size-14 rounded-lg border object-cover" />
                   <button type="button" className="absolute -right-1.5 -top-1.5 rounded-full border border-border bg-panel p-0.5 text-error shadow-sm" onClick={() => onAttachments(attachments.filter((item) => item.id !== attachment.id))} aria-label={`Remove ${attachment.filename}`}><X className="size-3" /></button>
                 </div>
               ))}

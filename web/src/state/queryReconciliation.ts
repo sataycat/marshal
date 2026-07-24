@@ -20,13 +20,14 @@ export function reconcileBusEvent(queryClient: QueryClient, event: BusEvent): vo
   }
   if (event.type === "thread.created" || event.type === "thread.updated") {
     const { thread } = event.payload as ThreadPayload;
+    const repositoryId = thread.repository_id;
     for (const archived of [false, true]) {
-      queryClient.setQueryData(queryKeys.threads(archived), (threads: unknown) => {
+      queryClient.setQueryData(queryKeys.threads(archived, repositoryId), (threads: unknown) => {
         if (!Array.isArray(threads)) return threads;
         return mergeById(threads, thread);
       });
     }
-    queryClient.setQueryData(queryKeys.thread(thread.id), (current: unknown) => {
+    queryClient.setQueryData(queryKeys.thread(thread.id, repositoryId), (current: unknown) => {
       if (!current || typeof current !== "object") return current;
       return { ...(current as object), thread };
     });
@@ -34,15 +35,16 @@ export function reconcileBusEvent(queryClient: QueryClient, event: BusEvent): vo
   }
   if (event.type === "thread.deleted") {
     const { id } = event.payload as { id: string };
+    const repositoryId = (event.payload as { repositoryId?: string }).repositoryId ?? null;
     for (const archived of [false, true]) {
-      queryClient.setQueryData(queryKeys.threads(archived), (threads: unknown) => Array.isArray(threads) ? threads.filter((thread: { id: string }) => thread.id !== id) : threads);
+      queryClient.setQueryData(queryKeys.threads(archived, repositoryId), (threads: unknown) => Array.isArray(threads) ? threads.filter((thread: { id: string }) => thread.id !== id) : threads);
     }
-    queryClient.removeQueries({ queryKey: queryKeys.thread(id) });
+    queryClient.removeQueries({ queryKey: queryKeys.thread(id, repositoryId) });
     return;
   }
   if (event.type === "thread.message") {
     const { threadId, message } = event.payload as ThreadMessagePayload;
-    queryClient.setQueryData<{ thread: unknown; messages: ChatMessage[] }>(queryKeys.thread(threadId), (current) => current ? { ...current, messages: mergeById(current.messages, message) } : current);
+    queryClient.setQueryData<{ thread: unknown; messages: ChatMessage[] }>(queryKeys.thread(threadId, message.repository_id), (current) => current ? { ...current, messages: mergeById(current.messages, message) } : current);
     return;
   }
   if (event.type === "thread.event") {

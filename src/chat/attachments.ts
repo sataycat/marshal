@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { extname, resolve } from "node:path";
-import { openDb } from "../db/index.js";
+import { openRepositoryDb } from "../db/index.js";
 import { getChatThread, type ChatThread } from "./store.js";
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -12,6 +12,7 @@ export type ChatAttachmentMime = typeof ALLOWED_IMAGE_TYPES[number];
 
 export interface ChatAttachment {
   id: string;
+  repository_id: string;
   thread_id: string;
   filename: string;
   mime_type: ChatAttachmentMime;
@@ -20,11 +21,21 @@ export interface ChatAttachment {
 }
 
 export class ChatAttachmentError extends Error {
-  constructor(message: string, readonly code = "attachment_invalid") { super(message); this.name = "ChatAttachmentError"; }
+  constructor(message: string, readonly code = "attachment_invalid") {
+    super(message);
+    this.name = "ChatAttachmentError";
+  }
 }
 
-function attachmentDir(thread: ChatThread): string { return resolve(thread.repo_root, ".marshal", "attachments", thread.id); }
-function rowToAttachment(row: Record<string, unknown>): ChatAttachment { return row as unknown as ChatAttachment; }
+function attachmentDir(thread: ChatThread): string {
+  // Slice 5 moves these bytes into the repository-ID namespace. Until then
+  // this path is execution metadata only; ownership checks use repository_id.
+  return resolve(thread.repo_root, ".marshal", "attachments", thread.id);
+}
+
+function rowToAttachment(row: Record<string, unknown>): ChatAttachment {
+  return { ...(row as unknown as ChatAttachment), repository_id: String(row.repository_id) };
+}
 
 function validSignature(mime: string, bytes: Uint8Array): boolean {
   if (mime === "image/png") return bytes.length >= 8 && bytes.slice(0, 8).every((v, i) => v === [137, 80, 78, 71, 13, 10, 26, 10][i]);
@@ -45,10 +56,15 @@ function extensionFor(mime: ChatAttachmentMime): string {
   return mime === "image/jpeg" ? ".jpg" : `.${mime.slice("image/".length)}`;
 }
 
-export function createChatAttachment(threadId: string, file: { type: string; name: string; size: number; bytes: Uint8Array }, root?: string): ChatAttachment {
-  const thread = getChatThread(threadId, root);
-  const db = openDb(root);
-  const total = db.prepare("SELECT COALESCE(SUM(byte_size), 0) AS total FROM chat_attachments WHERE thread_id = ?").get(threadId) as { total: number };
+export function createChatAttachment(
+  repositoryId: string,
+  threadId: string,
+  file: { type: string; name: string; size: number; bytes: Uint8Array },
+  machineDir?: string,
+): ChatAttachment {
+  const thread = getChatThread(repositoryId, threadId, machineDir);
+  const db = openRepositoryDb(repositoryId, machineDir);
+  const total = db.prepare("SELECT COALESCE(SUM(byte_size), 0) AS total FROM chat_attachments WHERE repository_id = ? AND thread_id = ?").get(repositoryId, threadId) as { total: number };
   if (total.total + file.size > MAX_ATTACHMENTS_PER_THREAD) throw new ChatAttachmentError("This thread has reached its 40 MiB image quota.", "attachment_quota");
   const mime = validateAttachment(file);
   const extension = extname(file.name).toLowerCase();
@@ -58,30 +74,32 @@ export function createChatAttachment(threadId: string, file: { type: string; nam
   mkdirSync(attachmentDir(thread), { recursive: true, mode: 0o700 });
   writeFileSync(resolve(attachmentDir(thread), storageName), file.bytes, { mode: 0o600, flag: "wx" });
   try {
-    db.prepare("INSERT INTO chat_attachments (id, thread_id, filename, mime_type, byte_size, storage_name) VALUES (?, ?, ?, ?, ?, ?)").run(id, threadId, file.name.slice(0, 200) || "image", mime, file.size, storageName);
+    db.prepare("INSERT INTO chat_attachments (id, repository_id, thread_id, filename, mime_type, byte_size, storage_name) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, repositoryId, threadId, file.name.slice(0, 200) || "image", mime, file.size, storageName);
   } catch (error) {
     unlinkSync(resolve(attachmentDir(thread), storageName));
     throw error;
   }
-  return getChatAttachment(threadId, id, root);
+  return getChatAttachment(repositoryId, threadId, id, machineDir);
 }
 
-export function listChatAttachments(threadId: string, root?: string): ChatAttachment[] {
-  getChatThread(threadId, root);
-  return (openDb(root).prepare("SELECT id, thread_id, filename, mime_type, byte_size, created_at FROM chat_attachments WHERE thread_id = ? ORDER BY created_at, id").all(threadId) as Record<string, unknown>[]).map(rowToAttachment);
+export function listChatAttachments(repositoryId: string, threadId: string, machineDir?: string): ChatAttachment[] {
+  // Attachment metadata is owned by the thread's repository. Keep a
+  // cross-repository lookup indistinguishable from a missing thread.
+  getChatThread(repositoryId, threadId, machineDir);
+  return (openRepositoryDb(repositoryId, machineDir).prepare("SELECT id, repository_id, thread_id, filename, mime_type, byte_size, created_at FROM chat_attachments WHERE repository_id = ? AND thread_id = ? ORDER BY created_at, id").all(repositoryId, threadId) as Record<string, unknown>[]).map(rowToAttachment);
 }
 
-export function getChatAttachment(threadId: string, id: string, root?: string): ChatAttachment {
-  getChatThread(threadId, root);
-  const row = openDb(root).prepare("SELECT id, thread_id, filename, mime_type, byte_size, created_at FROM chat_attachments WHERE id = ? AND thread_id = ?").get(id, threadId) as Record<string, unknown> | undefined;
+export function getChatAttachment(repositoryId: string, threadId: string, id: string, machineDir?: string): ChatAttachment {
+  getChatThread(repositoryId, threadId, machineDir);
+  const row = openRepositoryDb(repositoryId, machineDir).prepare("SELECT id, repository_id, thread_id, filename, mime_type, byte_size, created_at FROM chat_attachments WHERE id = ? AND repository_id = ? AND thread_id = ?").get(id, repositoryId, threadId) as Record<string, unknown> | undefined;
   if (!row) throw new ChatAttachmentError("Attachment not found.", "attachment_not_found");
   return rowToAttachment(row);
 }
 
-export function readChatAttachment(threadId: string, id: string, root?: string): { attachment: ChatAttachment; bytes: Buffer } {
-  const attachment = getChatAttachment(threadId, id, root);
-  const thread = getChatThread(threadId, root);
-  const row = openDb(root).prepare("SELECT storage_name FROM chat_attachments WHERE id = ? AND thread_id = ?").get(id, threadId) as { storage_name: string };
+export function readChatAttachment(repositoryId: string, threadId: string, id: string, machineDir?: string): { attachment: ChatAttachment; bytes: Buffer } {
+  const attachment = getChatAttachment(repositoryId, threadId, id, machineDir);
+  const thread = getChatThread(repositoryId, threadId, machineDir);
+  const row = openRepositoryDb(repositoryId, machineDir).prepare("SELECT storage_name FROM chat_attachments WHERE id = ? AND repository_id = ? AND thread_id = ?").get(id, repositoryId, threadId) as { storage_name: string };
   if (!/^[0-9a-f-]+\.bin$/i.test(row.storage_name)) throw new ChatAttachmentError("Attachment storage is invalid.", "attachment_invalid");
   return { attachment, bytes: readFileSync(resolve(attachmentDir(thread), row.storage_name)) };
 }

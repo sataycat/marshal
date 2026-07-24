@@ -109,6 +109,7 @@ import {
   repositoryRoot,
   RepositoryError,
 } from "../repositories/store.js";
+import { resolveRepositoryContext, RepositoryContextError } from "../repositories/context.js";
 import { fetchRegistrySnapshot } from "../registry/fetch.js";
 import {
   beginRegistryRefresh,
@@ -187,6 +188,7 @@ export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT };
 
 export interface HttpServerOptions {
   root?: string;
+  repositoryId?: string;
   host?: string;
   port?: number;
   version?: string;
@@ -222,6 +224,7 @@ export function portFilePath(machineDir = getGlobalDir()): string {
 
 export interface BuildAppOptions {
   root?: string;
+  repositoryId?: string;
   worktreeRoot?: string;
   bus?: EventBus;
   webDir?: string;
@@ -234,6 +237,25 @@ export interface BuildAppOptions {
   terminalAuth?: TerminalAuthManager;
 }
 
+function resolveConfiguredRepositoryId(
+  root: string | undefined,
+  repositoryId: string | undefined,
+  machineDir?: string,
+): string | undefined {
+  if (repositoryId) {
+    resolveRepositoryContext(repositoryId, machineDir);
+    return repositoryId;
+  }
+  if (!root) return undefined;
+  const checkoutPath = resolve(root);
+  const existing = listRepositories(machineDir).find((repository) => resolve(repository.path) === checkoutPath);
+  if (existing) return existing.id;
+  // Directly embedded app instances are an existing development/test seam.
+  // Materialize that checkout as a registered resource before any scoped
+  // store can open it; the store itself still receives only the ID.
+  return registerRepository(checkoutPath, machineDir).id;
+}
+
 export function defaultWebDistDir(): string {
   const __dirname = fileURLToPath(new URL(".", import.meta.url));
   return resolve(__dirname, "../../web/dist");
@@ -241,6 +263,7 @@ export function defaultWebDistDir(): string {
 
 export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   const root = options.root;
+  const configuredRepositoryId = resolveConfiguredRepositoryId(root, options.repositoryId, options.machineDir);
   const bus = options.bus;
   const webDir = options.webDir ?? defaultWebDistDir();
   const app = new Hono();
@@ -295,7 +318,7 @@ export function buildApp(version: string, options: BuildAppOptions = {}): Hono {
   registerTaskRoutes(app, root, options.worktreeRoot, bus, options.machineDir);
   registerRunRoutes(app, root);
   registerSpecRoutes(app, root, bus, options.specAgent, options.machineDir);
-  registerChatRoutes(app, root, bus, options.chatAgent, options.machineDir);
+  registerChatRoutes(app, root, bus, options.chatAgent, options.machineDir, configuredRepositoryId);
   registerStaticRoutes(app, webDir, options.webUrl);
   app.notFound((c) => spaNotFound(c, webDir, options.webUrl));
   app.onError((err, c) => {
@@ -570,6 +593,8 @@ function mapDomainError(err: unknown): ApiError {
   if (err instanceof ChatAttachmentError) return new ApiError(422, err.message, err.code);
   if (err instanceof RepositoryError)
     return new ApiError(err.code === "duplicate_path" ? 409 : 422, err.message, err.code);
+  if (err instanceof RepositoryContextError)
+    return new ApiError(404, err.message, err.code);
   if (err instanceof WorkflowValidationError)
     return new ApiError(422, err.message, "workflow_profile_invalid");
   logger.error({ err }, "Unexpected error in task HTTP handler");
@@ -1418,21 +1443,36 @@ function registerChatRoutes(
   bus: EventBus | undefined,
   chatAgent?: Agent,
   machineDir?: string,
+  configuredRepositoryId?: string,
 ): void {
-  const turns = new ChatTurnRunner({ root, bus, agent: chatAgent, machineDir });
+  const resolveRequestRepository = (c: Context, explicit?: unknown): string => {
+    const requested = typeof explicit === "string" ? explicit : c.req.query("repository_id") ?? c.req.header("x-marshal-repository-id") ?? configuredRepositoryId;
+    if (!requested) throw new ApiError(409, "repository_id is required", "repository_required");
+    if (explicit !== undefined && typeof explicit !== "string") throw new ApiError(422, "repository_id must be a string", "invalid_field");
+    resolveRepositoryContext(requested, machineDir);
+    return requested;
+  };
+  const turnsByRepository = new Map<string, ChatTurnRunner>();
+  const turnsFor = (repositoryId: string): ChatTurnRunner => {
+    const current = turnsByRepository.get(repositoryId);
+    if (current) return current;
+    const repository = resolveRepositoryContext(repositoryId, machineDir);
+    const created = new ChatTurnRunner({ repositoryId, root: repository.checkoutPath, bus, agent: chatAgent, machineDir });
+    turnsByRepository.set(repositoryId, created);
+    return created;
+  };
   app.get("/api/threads", (c) => {
-    const selectedRoot = root ?? repositoryRoot(machineDir);
+    const repositoryId = resolveRequestRepository(c);
     return c.json({
-      threads: selectedRoot
-        ? listChatThreads(selectedRoot, c.req.query("archived") === "true")
-        : [],
+      threads: listChatThreads(repositoryId, c.req.query("archived") === "true", machineDir),
     });
   });
   app.post("/api/threads", async (c) => {
     const body = await readJsonObject(
       c,
-      new Set(["agent_id", "agent_version", "cwd", "title", "task_slug"]),
+      new Set(["repository_id", "agent_id", "agent_version", "cwd", "title", "task_slug"]),
     );
+    const repositoryId = resolveRequestRepository(c, body.repository_id);
     if (body.agent_id === undefined)
       throw new ApiError(422, "agent_id is required", "missing_field");
     const agentId = assertString(body.agent_id, "agent_id");
@@ -1457,6 +1497,7 @@ function registerChatRoutes(
     if (!chatAgent && installed?.readiness_status !== "ready")
       throw new ApiError(409, `Agent ${agentId}@${agentVersion} is not ready`, "agent_not_ready");
     const thread = createChatThread(
+      repositoryId,
       {
         agentId,
         agentVersion,
@@ -1471,19 +1512,20 @@ function registerChatRoutes(
           installed?.installation_id,
         ),
       },
-      root,
+      machineDir,
     );
     if (bus) publishThreadCreated(bus, thread);
     return c.json({ thread }, 201);
   });
   app.get("/api/threads/:id", (c) => {
     try {
-      const thread = getChatThread(c.req.param("id"), root);
+      const repositoryId = resolveRequestRepository(c);
+      const thread = getChatThread(repositoryId, c.req.param("id"), machineDir);
       return c.json({
         thread,
-        messages: listChatMessages(thread.id, root),
-        attachments: listChatAttachments(thread.id, root),
-        events: listSessionEventsForThread(thread.id, root),
+        messages: listChatMessages(repositoryId, thread.id, machineDir),
+        attachments: listChatAttachments(repositoryId, thread.id, machineDir),
+        events: listSessionEventsForThread(repositoryId, thread.id, machineDir),
       });
     } catch (err) {
       throw mapDomainError(err);
@@ -1491,8 +1533,9 @@ function registerChatRoutes(
   });
   app.get("/api/threads/:id/events", (c) => {
     try {
-      getChatThread(c.req.param("id"), root);
-      const sessions = listSessionEventsForThread(c.req.param("id"), root);
+      const repositoryId = resolveRequestRepository(c);
+      getChatThread(repositoryId, c.req.param("id"), machineDir);
+      const sessions = listSessionEventsForThread(repositoryId, c.req.param("id"), machineDir);
       return c.json({ events: sessions });
     } catch (err) {
       throw mapDomainError(err);
@@ -1500,8 +1543,9 @@ function registerChatRoutes(
   });
   app.post("/api/threads/:id/session", async (c) => {
     try {
-      await turns.initializeThread(c.req.param("id"));
-      return c.json({ thread: getChatThread(c.req.param("id"), root) });
+      const repositoryId = resolveRequestRepository(c);
+      await turnsFor(repositoryId).initializeThread(c.req.param("id"));
+      return c.json({ thread: getChatThread(repositoryId, c.req.param("id"), machineDir) });
     } catch (err) {
       throw mapDomainError(err);
     }
@@ -1511,8 +1555,9 @@ function registerChatRoutes(
     if (typeof body.value !== "string" && typeof body.value !== "boolean")
       throw new ApiError(422, "value must be a string or boolean", "invalid_field");
     try {
-      await turns.setConfigOption(c.req.param("id"), c.req.param("configId"), body.value);
-      return c.json({ thread: getChatThread(c.req.param("id"), root) });
+      const repositoryId = resolveRequestRepository(c);
+      await turnsFor(repositoryId).setConfigOption(c.req.param("id"), c.req.param("configId"), body.value);
+      return c.json({ thread: getChatThread(repositoryId, c.req.param("id"), machineDir) });
     } catch (err) {
       throw mapDomainError(err);
     }
@@ -1521,8 +1566,9 @@ function registerChatRoutes(
     const body = await readJsonObject(c, new Set(["mode_id"]));
     if (body.mode_id === undefined) throw new ApiError(422, "mode_id is required", "missing_field");
     try {
-      await turns.setMode(c.req.param("id"), assertString(body.mode_id, "mode_id"));
-      return c.json({ thread: getChatThread(c.req.param("id"), root) });
+      const repositoryId = resolveRequestRepository(c);
+      await turnsFor(repositoryId).setMode(c.req.param("id"), assertString(body.mode_id, "mode_id"));
+      return c.json({ thread: getChatThread(repositoryId, c.req.param("id"), machineDir) });
     } catch (err) {
       throw mapDomainError(err);
     }
@@ -1546,8 +1592,11 @@ function registerChatRoutes(
     if (body.scratch_markdown !== undefined && typeof body.scratch_markdown !== "string")
       throw new ApiError(422, "scratch_markdown must be a string", "invalid_field");
     try {
+      const repositoryId = resolveRequestRepository(c);
+      const turns = turnsFor(repositoryId);
       if (body.status === "closed") await turns.closeThread(c.req.param("id"));
       const thread = updateChatThread(
+        repositoryId,
         c.req.param("id"),
         {
           title: body.title as string | undefined,
@@ -1561,7 +1610,7 @@ function registerChatRoutes(
           pinned: body.pinned as boolean | undefined,
           scratchMarkdown: body.scratch_markdown as string | undefined,
         },
-        root,
+        machineDir,
       );
       if (bus) publishThreadUpdated(bus, thread);
       return c.json({ thread });
@@ -1571,10 +1620,11 @@ function registerChatRoutes(
   });
   app.delete("/api/threads/:id", async (c) => {
     try {
-      await turns.closeThread(c.req.param("id"));
-      reconcileThreadPermissions(c.req.param("id"), root);
-      deleteChatThread(c.req.param("id"), root);
-      if (bus) publishThreadDeleted(bus, c.req.param("id"));
+      const repositoryId = resolveRequestRepository(c);
+      await turnsFor(repositoryId).closeThread(c.req.param("id"));
+      reconcileThreadPermissions(repositoryId, c.req.param("id"), machineDir);
+      deleteChatThread(repositoryId, c.req.param("id"), machineDir);
+      if (bus) publishThreadDeleted(bus, c.req.param("id"), repositoryId);
       return c.json({ deleted: true });
     } catch (err) {
       throw mapDomainError(err);
@@ -1582,16 +1632,18 @@ function registerChatRoutes(
   });
   app.get("/api/threads/:id/messages", (c) => {
     try {
-      return c.json({ messages: listChatMessages(c.req.param("id"), root) });
+      const repositoryId = resolveRequestRepository(c);
+      return c.json({ messages: listChatMessages(repositoryId, c.req.param("id"), machineDir) });
     } catch (err) {
       throw mapDomainError(err);
     }
   });
   app.get("/api/threads/:id/files", (c) => {
     try {
-      const thread = getChatThread(c.req.param("id"), root);
+      const repositoryId = resolveRequestRepository(c);
+      const thread = getChatThread(repositoryId, c.req.param("id"), machineDir);
       return c.json({
-        files: listChatFiles(thread.repo_root, thread.cwd, turns.touchedFiles(thread.id)),
+        files: listChatFiles(thread.repo_root, thread.cwd, turnsFor(repositoryId).touchedFiles(thread.id)),
       });
     } catch (err) {
       throw mapDomainError(err);
@@ -1599,8 +1651,9 @@ function registerChatRoutes(
   });
   app.get("/api/threads/:id/permissions", (c) => {
     try {
-      getChatThread(c.req.param("id"), root);
-      return c.json({ permissions: turns.pendingPermissions(c.req.param("id")) });
+      const repositoryId = resolveRequestRepository(c);
+      getChatThread(repositoryId, c.req.param("id"), machineDir);
+      return c.json({ permissions: turnsFor(repositoryId).pendingPermissions(c.req.param("id")) });
     } catch (err) {
       throw mapDomainError(err);
     }
@@ -1610,7 +1663,8 @@ function registerChatRoutes(
     if (body.action !== "approve" && body.action !== "deny")
       throw new ApiError(422, "action must be approve or deny", "invalid_field");
     try {
-      const request = turns.decidePermission(
+      const repositoryId = resolveRequestRepository(c);
+      const request = turnsFor(repositoryId).decidePermission(
         c.req.param("id"),
         c.req.param("requestId"),
         body.action,
@@ -1627,7 +1681,8 @@ function registerChatRoutes(
   });
   app.get("/api/threads/:id/files/content", (c) => {
     try {
-      const thread = getChatThread(c.req.param("id"), root);
+      const repositoryId = resolveRequestRepository(c);
+      const thread = getChatThread(repositoryId, c.req.param("id"), machineDir);
       const path = c.req.query("path");
       if (!path) throw new ApiError(422, "path is required", "missing_query");
       return c.json({ file: readChatFile(thread.cwd, path) });
@@ -1637,17 +1692,20 @@ function registerChatRoutes(
   });
   app.get("/api/threads/:id/attachments", (c) => {
     try {
-      return c.json({ attachments: listChatAttachments(c.req.param("id"), root) });
+      const repositoryId = resolveRequestRepository(c);
+      return c.json({ attachments: listChatAttachments(repositoryId, c.req.param("id"), machineDir) });
     } catch (err) {
       throw mapDomainError(err);
     }
   });
   app.get("/api/threads/:id/attachments/:attachmentId", (c) => {
     try {
+      const repositoryId = resolveRequestRepository(c);
       const { attachment, bytes } = readChatAttachment(
+        repositoryId,
         c.req.param("id"),
         c.req.param("attachmentId"),
-        root,
+        machineDir,
       );
       return new Response(bytes, {
         headers: {
@@ -1675,10 +1733,12 @@ function registerChatRoutes(
           "attachment_too_large",
         );
       const bytes = new Uint8Array(await file.arrayBuffer());
+      const repositoryId = resolveRequestRepository(c);
       const attachment = createChatAttachment(
+        repositoryId,
         c.req.param("id"),
         { type: file.type, name: file.name, size: file.size, bytes },
-        root,
+        machineDir,
       );
       return c.json({ attachment }, 201);
     } catch (err) {
@@ -1694,10 +1754,11 @@ function registerChatRoutes(
     if (!content.trim()) throw new ApiError(422, "content must not be empty", "invalid_field");
     try {
       const threadId = c.req.param("id");
-      const message = appendChatMessage(threadId, body.role, content, root);
+      const repositoryId = resolveRequestRepository(c);
+      const message = appendChatMessage(repositoryId, threadId, body.role, content, [], machineDir);
       if (bus) {
         publishThreadMessage(bus, threadId, message);
-        publishThreadUpdated(bus, getChatThread(threadId, root));
+        publishThreadUpdated(bus, getChatThread(repositoryId, threadId, machineDir));
       }
       return c.json({ message }, 201);
     } catch (err) {
@@ -1716,7 +1777,8 @@ function registerChatRoutes(
     )
       throw new ApiError(422, "attachment_ids must be an array of strings", "invalid_field");
     try {
-      const result = await turns.send(
+      const repositoryId = resolveRequestRepository(c);
+      const result = await turnsFor(repositoryId).send(
         c.req.param("id"),
         content,
         body.attachment_ids as string[] | undefined,
@@ -1728,14 +1790,16 @@ function registerChatRoutes(
   });
   app.post("/api/threads/:id/messages/:messageId/resubmit", async (c) => {
     try {
-      return c.json(await turns.resubmit(c.req.param("id"), Number(c.req.param("messageId"))), 201);
+      const repositoryId = resolveRequestRepository(c);
+      return c.json(await turnsFor(repositoryId).resubmit(c.req.param("id"), Number(c.req.param("messageId"))), 201);
     } catch (err) {
       throw mapDomainError(err);
     }
   });
   app.post("/api/threads/:id/cancel", async (c) => {
     try {
-      await turns.cancel(c.req.param("id"));
+      const repositoryId = resolveRequestRepository(c);
+      await turnsFor(repositoryId).cancel(c.req.param("id"));
       return c.json({ cancelled: true });
     } catch (err) {
       throw mapDomainError(err);
@@ -1743,9 +1807,9 @@ function registerChatRoutes(
   });
 }
 
-function listSessionEventsForThread(threadId: string, root?: string) {
-  return listSessionsForOwner("thread", threadId, root).flatMap((session) =>
-    listSessionEvents(session.id, root),
+function listSessionEventsForThread(repositoryId: string, threadId: string, machineDir?: string) {
+  return listSessionsForOwner(repositoryId, "thread", threadId, machineDir).flatMap((session) =>
+    listSessionEvents(repositoryId, session.id, machineDir),
   );
 }
 
@@ -2257,6 +2321,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     (options.webUrl ? [new URL(options.webUrl).origin] : undefined);
   const app = buildApp(version, {
     root,
+    repositoryId: options.repositoryId,
     bus,
     webDir: options.webDir,
     webUrl: options.webUrl,
@@ -2281,19 +2346,21 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
 
   let wsHandle: WebSocketBridgeHandle | undefined;
   if (attachWs) {
+    const wsRepositoryId = options.repositoryId ?? (root ? resolveConfiguredRepositoryId(root, undefined, machineDir) : undefined);
     wsHandle = attachWebSocket(
       server as HttpServer,
       bus,
-      () => ({
+      (requestedRepositoryId) => ({
         tasks: (root ?? repositoryRoot(machineDir))
           ? listTasks(root ?? repositoryRoot(machineDir)).map(taskCard)
           : [],
-        threads: (root ?? repositoryRoot(machineDir))
-          ? listChatThreads(root ?? repositoryRoot(machineDir))
+        threads: requestedRepositoryId
+          ? listChatThreads(requestedRepositoryId, false, machineDir)
           : [],
       }),
       {
         path: "/ws",
+        repositoryId: wsRepositoryId,
         authenticate: (req) => auth.isAuthenticated(req.headers.cookie),
         allowedOrigins: trustedOrigins,
         terminal: {

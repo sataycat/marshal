@@ -125,11 +125,13 @@ describe("chat turns", () => {
     const app = buildApp("0.0.1", { root, bus: new EventBus(), chatAgent: agent });
     const created = await req(app, "POST", "/api/threads", { agent_id: "fake", agent_version: "test" });
     const id = created.body.thread.id;
+    const repositoryId = created.body.thread.repository_id;
     const upload = new FormData();
     upload.append("file", new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "shot.png", { type: "image/png" }));
-    const uploadRes = await app.request(`/api/threads/${id}/attachments`, { method: "POST", body: upload });
+    const uploadRes = await app.request(`/api/threads/${id}/attachments?repository_id=${repositoryId}`, { method: "POST", body: upload });
+    if (!uploadRes.ok) throw new Error(`upload failed ${uploadRes.status}: ${await uploadRes.text()}`);
     const attachment = (await uploadRes.json() as any).attachment;
-    const result = await req(app, "POST", `/api/threads/${id}/send`, { content: "Inspect screenshot", attachment_ids: [attachment.id] });
+    const result = await req(app, "POST", `/api/threads/${id}/send?repository_id=${repositoryId}`, { content: "Inspect screenshot", attachment_ids: [attachment.id] });
     expect(result.status).toBe(201);
     expect(agent.prompts[0]).toEqual([{ type: "text", text: "Inspect screenshot" }, { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }]);
     expect(result.body.userMessage.attachment_ids).toEqual([attachment.id]);

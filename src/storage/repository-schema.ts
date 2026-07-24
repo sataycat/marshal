@@ -35,6 +35,7 @@ export const chatThreads = sqliteTable("chat_threads", {
 });
 export const chatMessages = sqliteTable("chat_messages", {
   id: integer().primaryKey({ autoIncrement: true }),
+  repositoryId: text("repository_id"),
   threadId: text("thread_id").notNull(),
   role: text().notNull(),
   content: text().notNull(),

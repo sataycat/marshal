@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { relative, resolve } from "node:path";
-import { openDb } from "../db/index.js";
-import { getSelectedRepository, repositoryRoot } from "../repositories/store.js";
+import { openRepositoryDb } from "../db/index.js";
+import { resolveRepositoryContext } from "../repositories/context.js";
 import type { HistoricalAgentProvenance } from "../agents/provenance.js";
 import type { StructuredAcpError } from "../acp/errors.js";
 import type { AgentSessionConfigOption, AgentSessionModeState } from "../agent/types.js";
@@ -11,7 +11,7 @@ export type ChatMessageRole = "user" | "assistant";
 
 export interface ChatThread {
   id: string;
-  repository_id: string | null;
+  repository_id: string;
   repo_root: string;
   cwd: string;
   agent_id: string;
@@ -34,6 +34,7 @@ export interface ChatThread {
 
 export interface ChatMessage {
   id: number;
+  repository_id: string;
   thread_id: string;
   role: ChatMessageRole;
   content: string;
@@ -82,10 +83,28 @@ export function isChatThreadStatus(value: string): value is ChatThreadStatus {
   return STATUSES.has(value as ChatThreadStatus);
 }
 
-function repoRoot(root?: string): string {
-  const selected = root ?? repositoryRoot();
-  if (!selected) throw new Error("No repository selected");
-  return resolve(selected);
+function parseJson<T>(value: unknown, fallback: T): T {
+  try {
+    return JSON.parse(String(value)) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function legacyProvenance(row: Record<string, unknown>): HistoricalAgentProvenance {
+  return {
+    installation_id: null,
+    agent_id: String(row.agent_id),
+    agent_version: String(row.agent_version),
+    distribution: null,
+    package_specifier: null,
+    archive_identity: null,
+    source: "legacy",
+    registry_snapshot_fetched_at: null,
+    integrity_status: "legacy",
+    expected_digest: null,
+    observed_digest: null,
+  };
 }
 
 function rowToThread(row: Record<string, unknown>): ChatThread {
@@ -93,22 +112,11 @@ function rowToThread(row: Record<string, unknown>): ChatThread {
   try {
     provenance = JSON.parse(String(row.agent_provenance ?? "{}")) as HistoricalAgentProvenance;
   } catch {
-    provenance = {
-      installation_id: null,
-      agent_id: String(row.agent_id),
-      agent_version: String(row.agent_version),
-      distribution: null,
-      package_specifier: null,
-      archive_identity: null,
-      source: "legacy",
-      registry_snapshot_fetched_at: null,
-      integrity_status: "legacy",
-      expected_digest: null,
-      observed_digest: null,
-    };
+    provenance = legacyProvenance(row);
   }
   return {
     ...(row as Omit<ChatThread, "archived" | "pinned" | "status">),
+    repository_id: String(row.repository_id),
     status: row.status as ChatThreadStatus,
     archived: row.archived === 1,
     pinned: row.pinned === 1,
@@ -121,49 +129,54 @@ function rowToThread(row: Record<string, unknown>): ChatThread {
 }
 
 function rowToMessage(row: Record<string, unknown>): ChatMessage {
-  let attachmentIds: string[] = [];
-  try {
-    attachmentIds = JSON.parse(String(row.attachment_ids ?? "[]")) as string[];
-  } catch {
-    attachmentIds = [];
-  }
   return {
     ...(row as unknown as ChatMessage),
+    repository_id: String(row.repository_id),
     role: row.role as ChatMessageRole,
-    attachment_ids: attachmentIds,
+    attachment_ids: parseJson(row.attachment_ids, []),
     prompt_status:
       row.prompt_status === "authentication_required" ? "authentication_required" : null,
     failure: row.failure ? (JSON.parse(String(row.failure)) as StructuredAcpError) : null,
   };
 }
 
-export function listChatThreads(root?: string, includeArchived = false): ChatThread[] {
-  const db = openDb(root);
-  const repositoryId = getSelectedRepository()?.id ?? null;
-  const query = includeArchived
-    ? "SELECT * FROM chat_threads WHERE repo_root = ? ORDER BY pinned DESC, COALESCE(last_message_at, updated_at) DESC, created_at DESC"
-    : "SELECT * FROM chat_threads WHERE repo_root = ? AND archived = 0 ORDER BY pinned DESC, COALESCE(last_message_at, updated_at) DESC, created_at DESC";
-  return (db.prepare(query).all(repoRoot(root)) as Record<string, unknown>[]).map((row) =>
-    rowToThread({ ...row, repository_id: row.repository_id ?? repositoryId }),
-  );
+export function listChatThreads(
+  repositoryId: string,
+  includeArchived = false,
+  machineDir?: string,
+): ChatThread[] {
+  const db = openRepositoryDb(repositoryId, machineDir);
+  const archived = includeArchived ? "" : " AND archived = 0";
+  return (
+    db
+      .prepare(
+        `SELECT * FROM chat_threads WHERE repository_id = ?${archived} ORDER BY pinned DESC, COALESCE(last_message_at, updated_at) DESC, created_at DESC`,
+      )
+      .all(repositoryId) as Record<string, unknown>[]
+  ).map(rowToThread);
 }
 
-export function getChatThread(id: string, root?: string): ChatThread {
-  const db = openDb(root);
-  const row = db
-    .prepare("SELECT * FROM chat_threads WHERE id = ? AND repo_root = ?")
-    .get(id, repoRoot(root)) as Record<string, unknown> | undefined;
+export function getChatThread(
+  repositoryId: string,
+  id: string,
+  machineDir?: string,
+): ChatThread {
+  const row = openRepositoryDb(repositoryId, machineDir)
+    .prepare("SELECT * FROM chat_threads WHERE id = ? AND repository_id = ?")
+    .get(id, repositoryId) as Record<string, unknown> | undefined;
   if (!row) throw new ChatThreadNotFoundError(id);
-  return rowToThread({
-    ...row,
-    repository_id: row.repository_id ?? getSelectedRepository()?.id ?? null,
-  });
+  return rowToThread(row);
 }
 
-export function createChatThread(input: CreateChatThreadInput, root?: string): ChatThread {
-  const db = openDb(root);
+export function createChatThread(
+  repositoryId: string,
+  input: CreateChatThreadInput,
+  machineDir?: string,
+): ChatThread {
+  const context = resolveRepositoryContext(repositoryId, machineDir);
+  const db = openRepositoryDb(repositoryId, machineDir);
   const id = randomUUID();
-  const repository = repoRoot(root);
+  const repository = context.checkoutPath;
   const cwd = resolve(input.cwd ?? repository);
   const cwdRelative = relative(repository, cwd).replaceAll("\\", "/");
   if (cwdRelative === ".." || cwdRelative.startsWith("../") || cwdRelative.startsWith("/")) {
@@ -173,42 +186,41 @@ export function createChatThread(input: CreateChatThreadInput, root?: string): C
     "INSERT INTO chat_threads (id, repository_id, repo_root, cwd, agent_id, agent_version, title, status, task_slug, agent_provenance) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
   ).run(
     id,
-    getSelectedRepository()?.id ?? null,
+    repositoryId,
     repository,
     cwd,
     input.agentId,
     input.agentVersion,
     input.title?.trim() || "New session",
     input.taskSlug ?? null,
-    JSON.stringify(
-      input.agentProvenance ?? {
-        installation_id: null,
-        agent_id: input.agentId,
-        agent_version: input.agentVersion,
-        distribution: null,
-        package_specifier: null,
-        archive_identity: null,
-        source: "legacy",
-        registry_snapshot_fetched_at: null,
-        integrity_status: "legacy",
-        expected_digest: null,
-        observed_digest: null,
-      },
-    ),
+    JSON.stringify(input.agentProvenance ?? {
+      installation_id: null,
+      agent_id: input.agentId,
+      agent_version: input.agentVersion,
+      distribution: null,
+      package_specifier: null,
+      archive_identity: null,
+      source: "legacy",
+      registry_snapshot_fetched_at: null,
+      integrity_status: "legacy",
+      expected_digest: null,
+      observed_digest: null,
+    }),
   );
-  return getChatThread(id, root);
+  return getChatThread(repositoryId, id, machineDir);
 }
 
 export function updateChatThread(
+  repositoryId: string,
   id: string,
   input: UpdateChatThreadInput,
-  root?: string,
+  machineDir?: string,
 ): ChatThread {
-  const db = openDb(root);
-  const current = getChatThread(id, root);
+  const db = openRepositoryDb(repositoryId, machineDir);
+  const current = getChatThread(repositoryId, id, machineDir);
   const updated = db
     .prepare(
-      "UPDATE chat_threads SET title = ?, status = ?, archived = ?, pinned = ?, scratch_markdown = ?, failure = ?, session_config_options = ?, session_modes = ?, session_initialized = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND repo_root = ?",
+      "UPDATE chat_threads SET title = ?, status = ?, archived = ?, pinned = ?, scratch_markdown = ?, failure = ?, session_config_options = ?, session_modes = ?, session_initialized = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND repository_id = ?",
     )
     .run(
       input.title?.trim() || current.title,
@@ -235,104 +247,123 @@ export function updateChatThread(
         ? Number(current.session_initialized)
         : Number(input.sessionInitialized),
       id,
-      repoRoot(root),
+      repositoryId,
     );
   if (updated.changes === 0) throw new ChatThreadNotFoundError(id);
-  return getChatThread(id, root);
+  return getChatThread(repositoryId, id, machineDir);
 }
 
-function parseJson<T>(value: unknown, fallback: T): T {
-  try {
-    return JSON.parse(String(value)) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-export function deleteChatThread(id: string, root?: string): void {
-  const db = openDb(root);
-  getChatThread(id, root);
+export function deleteChatThread(repositoryId: string, id: string, machineDir?: string): void {
+  const db = openRepositoryDb(repositoryId, machineDir);
+  getChatThread(repositoryId, id, machineDir);
   const result = db
-    .prepare("DELETE FROM chat_threads WHERE id = ? AND repo_root = ?")
-    .run(id, repoRoot(root));
+    .prepare("DELETE FROM chat_threads WHERE id = ? AND repository_id = ?")
+    .run(id, repositoryId);
   if (result.changes === 0) throw new ChatThreadNotFoundError(id);
 }
 
-export function listChatMessages(id: string, root?: string): ChatMessage[] {
-  getChatThread(id, root);
-  const db = openDb(root);
+export function listChatMessages(
+  repositoryId: string,
+  threadId: string,
+  machineDir?: string,
+): ChatMessage[] {
+  // Resolve the owning thread first so a request made with another
+  // repository ID is a missing resource, not an empty successful query.
+  getChatThread(repositoryId, threadId, machineDir);
   return (
-    db.prepare("SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY id ASC").all(id) as Record<
-      string,
-      unknown
-    >[]
+    openRepositoryDb(repositoryId, machineDir)
+      .prepare(
+        "SELECT * FROM chat_messages WHERE repository_id = ? AND thread_id = ? ORDER BY id ASC",
+      )
+      .all(repositoryId, threadId) as Record<string, unknown>[]
   ).map(rowToMessage);
 }
 
 export function appendChatMessage(
-  id: string,
+  repositoryId: string,
+  threadId: string,
   role: ChatMessageRole,
   content: string,
-  root?: string,
   attachmentIds: string[] = [],
+  machineDir?: string,
 ): ChatMessage {
-  getChatThread(id, root);
-  const db = openDb(root);
+  getChatThread(repositoryId, threadId, machineDir);
+  const db = openRepositoryDb(repositoryId, machineDir);
   const tx = db.transaction(() => {
     const info = db
       .prepare(
-        "INSERT INTO chat_messages (thread_id, role, content, attachment_ids) VALUES (?, ?, ?, ?)",
+        "INSERT INTO chat_messages (repository_id, thread_id, role, content, attachment_ids) VALUES (?, ?, ?, ?, ?)",
       )
-      .run(id, role, content, JSON.stringify(attachmentIds));
+      .run(repositoryId, threadId, role, content, JSON.stringify(attachmentIds));
     db.prepare(
-      "UPDATE chat_threads SET status = 'active', last_message_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    ).run(id);
+      "UPDATE chat_threads SET status = 'active', last_message_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND repository_id = ?",
+    ).run(threadId, repositoryId);
     return db
-      .prepare("SELECT * FROM chat_messages WHERE id = ?")
-      .get(Number(info.lastInsertRowid)) as Record<string, unknown>;
+      .prepare("SELECT * FROM chat_messages WHERE id = ? AND repository_id = ?")
+      .get(Number(info.lastInsertRowid), repositoryId) as Record<string, unknown>;
   });
   return rowToMessage(tx());
 }
 
-export function updateChatMessage(id: number, content: string, root?: string): ChatMessage {
-  const db = openDb(root);
-  db.prepare("UPDATE chat_messages SET content = ? WHERE id = ?").run(content, id);
-  const row = db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(id) as
-    | Record<string, unknown>
-    | undefined;
+export function updateChatMessage(
+  repositoryId: string,
+  id: number,
+  content: string,
+  machineDir?: string,
+): ChatMessage {
+  const db = openRepositoryDb(repositoryId, machineDir);
+  db.prepare("UPDATE chat_messages SET content = ? WHERE id = ? AND repository_id = ?").run(
+    content,
+    id,
+    repositoryId,
+  );
+  const row = db
+    .prepare("SELECT * FROM chat_messages WHERE id = ? AND repository_id = ?")
+    .get(id, repositoryId) as Record<string, unknown> | undefined;
   if (!row) throw new Error(`Chat message not found: ${id}`);
   return rowToMessage(row);
 }
 
 export function markChatMessageAuthenticationRequired(
+  repositoryId: string,
   id: number,
   failure: StructuredAcpError,
-  root?: string,
+  machineDir?: string,
 ): ChatMessage {
-  const db = openDb(root);
+  const db = openRepositoryDb(repositoryId, machineDir);
   db.prepare(
-    "UPDATE chat_messages SET prompt_status = 'authentication_required', failure = ? WHERE id = ? AND role = 'user'",
-  ).run(JSON.stringify(failure), id);
-  const row = db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(id) as
-    | Record<string, unknown>
-    | undefined;
+    "UPDATE chat_messages SET prompt_status = 'authentication_required', failure = ? WHERE id = ? AND repository_id = ? AND role = 'user'",
+  ).run(JSON.stringify(failure), id, repositoryId);
+  const row = db
+    .prepare("SELECT * FROM chat_messages WHERE id = ? AND repository_id = ?")
+    .get(id, repositoryId) as Record<string, unknown> | undefined;
   if (!row) throw new Error(`Chat message not found: ${id}`);
   return rowToMessage(row);
 }
-export function clearChatMessagePromptFailure(id: number, root?: string): ChatMessage {
-  const db = openDb(root);
+
+export function clearChatMessagePromptFailure(
+  repositoryId: string,
+  id: number,
+  machineDir?: string,
+): ChatMessage {
+  const db = openRepositoryDb(repositoryId, machineDir);
   db.prepare(
-    "UPDATE chat_messages SET prompt_status = NULL, failure = NULL WHERE id = ? AND role = 'user'",
-  ).run(id);
-  const row = db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(id) as
-    | Record<string, unknown>
-    | undefined;
+    "UPDATE chat_messages SET prompt_status = NULL, failure = NULL WHERE id = ? AND repository_id = ? AND role = 'user'",
+  ).run(id, repositoryId);
+  const row = db
+    .prepare("SELECT * FROM chat_messages WHERE id = ? AND repository_id = ?")
+    .get(id, repositoryId) as Record<string, unknown> | undefined;
   if (!row) throw new Error(`Chat message not found: ${id}`);
   return rowToMessage(row);
 }
-export function getChatMessage(id: number, root?: string): ChatMessage | undefined {
-  const row = openDb(root).prepare("SELECT * FROM chat_messages WHERE id = ?").get(id) as
-    | Record<string, unknown>
-    | undefined;
+
+export function getChatMessage(
+  repositoryId: string,
+  id: number,
+  machineDir?: string,
+): ChatMessage | undefined {
+  const row = openRepositoryDb(repositoryId, machineDir)
+    .prepare("SELECT * FROM chat_messages WHERE id = ? AND repository_id = ?")
+    .get(id, repositoryId) as Record<string, unknown> | undefined;
   return row ? rowToMessage(row) : undefined;
 }

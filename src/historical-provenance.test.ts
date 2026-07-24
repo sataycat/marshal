@@ -32,15 +32,15 @@ describe("historical agent provenance", () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-history-machine-"));
     install(machineDir);
     execFileSync("git", ["init", "-q", root]);
+    const repository = registerRepository(root, machineDir);
 
-    const thread = createChatThread({ agentId: "demo", agentVersion: "1.2.3", agentProvenance: provenance }, root);
-    const attachment = createChatAttachment(thread.id, { type: "image/png", name: "evidence.png", size: 8, bytes: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]) }, root);
-    const session = createSession({ ownerType: "thread", ownerId: thread.id, agentId: "demo", agentVersion: "1.2.3", agentProvenance: provenance }, root);
-    updateSession(session.id, { status: "closed", ended_at: new Date().toISOString() }, root);
+    const thread = createChatThread(repository.id, { agentId: "demo", agentVersion: "1.2.3", agentProvenance: provenance }, machineDir);
+    const attachment = createChatAttachment(repository.id, thread.id, { type: "image/png", name: "evidence.png", size: 8, bytes: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]) }, machineDir);
+    const session = createSession(repository.id, { ownerType: "thread", ownerId: thread.id, agentId: "demo", agentVersion: "1.2.3", agentProvenance: provenance }, machineDir);
+    updateSession(repository.id, session.id, { status: "closed", ended_at: new Date().toISOString() }, machineDir);
     const task = createTask({ slug: "history-task", title: "History", specMarkdown: "spec" }, root);
     const runLog = new RunLog(root);
     const runId = runLog.startRun(task.id, "builder", "demo", "build", { agentVersion: "1.2.3", agentProvenance: provenance });
-    const repository = registerRepository(root, machineDir);
     const profile = saveWorkflowProfile(repository.id, { name: "History", permission_policy: "allow_reads_ask_writes", unattended_authorized: false, timeout_ms: 1000, max_retries: 0, verification_commands: [], require_decorrelated_builder_validator: false, assignments: [{ role: "builder", agent_id: "demo", agent_version: "1.2.3" }] }, undefined, machineDir);
     const author = createSpecAuthorSession({ taskId: task.id, repositoryId: repository.id, workflowProfileId: profile.id, assignmentId: profile.assignments[0].id, agentId: "demo", agentVersion: "1.2.3", agentProvenance: provenance, assignmentConfig: {} }, root);
     deleteWorkflowProfile(repository.id, profile.id, machineDir);
@@ -48,11 +48,11 @@ describe("historical agent provenance", () => {
 
     expect(removeInstalledAgent("demo", "1.2.3", machineDir).status).toBe("completed");
 
-    expect(getChatThread(thread.id, root).agent_provenance).toMatchObject({ installation_id: "install-1", package_specifier: "demo@1.2.3", registry_snapshot_fetched_at: "snapshot-1" });
-    expect(getSession(session.id, root)?.agent_provenance).toMatchObject({ installation_id: "install-1", distribution: "npx" });
+    expect(getChatThread(repository.id, thread.id, machineDir).agent_provenance).toMatchObject({ installation_id: "install-1", package_specifier: "demo@1.2.3", registry_snapshot_fetched_at: "snapshot-1" });
+    expect(getSession(repository.id, session.id, machineDir)?.agent_provenance).toMatchObject({ installation_id: "install-1", distribution: "npx" });
     expect(runLog.getRun(runId)?.agentProvenance).toMatchObject({ installation_id: "install-1", integrity_status: "not_applicable" });
     expect(profile.assignments[0].agent_provenance).toMatchObject({ installation_id: "install-1", package_specifier: "demo@1.2.3" });
     expect(getSpecAuthorSession(author.id, root)?.agent_provenance).toMatchObject({ installation_id: "install-1", agent_version: "1.2.3" });
-    expect(getChatAttachment(thread.id, attachment.id, root)).toMatchObject({ id: attachment.id, filename: "evidence.png" });
+    expect(getChatAttachment(repository.id, thread.id, attachment.id, machineDir)).toMatchObject({ id: attachment.id, filename: "evidence.png" });
   });
 });

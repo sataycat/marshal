@@ -14,7 +14,6 @@ import { AcpSessionSupervisor } from "../acp/supervisor.js";
 import { createSpecAuthorSession, updateSpecAuthorSession, appendSpecAuthorOperation } from "../tasks/author-store.js";
 import { getWorkflowProfile } from "../workflows/store.js";
 import { historicalProvenance } from "../agents/provenance.js";
-import { getSelectedRepository } from "../repositories/store.js";
 import { StructuredAcpFailureError, structuredAcpError } from "../acp/errors.js";
 
 const SPEC_AUTHOR_TIMEOUT_SECONDS = 600;
@@ -177,12 +176,12 @@ export async function runSpecAuthorTurn(
   if (recoveryMessageId !== undefined && (!existingMessage || existingMessage.task_id !== task.id || existingMessage.role !== "user" || existingMessage.prompt_status !== "authentication_required" || existingMessage.content !== userContent)) throw new Error("Only the preserved authentication-required spec message can be resubmitted");
   const userMessage = existingMessage ?? appendSpecMessage(slug, "user", userContent, root);
 
-  const selectedRepository = getSelectedRepository(options.machineDir);
-  const profile = task.workflow_profile_id && selectedRepository
-    ? getWorkflowProfile(selectedRepository.id, task.workflow_profile_id, options.machineDir)
+  const repositoryId = task.repository_id ?? undefined;
+  const profile = task.workflow_profile_id && repositoryId
+    ? getWorkflowProfile(repositoryId, task.workflow_profile_id, options.machineDir)
     : undefined;
   const assignment = profile?.assignments.find((item) => item.role === "specAuthor");
-  if (!options.agent && (!profile || !assignment || task.repository_id !== selectedRepository?.id)) {
+  if (!options.agent && (!repositoryId || !profile || !assignment)) {
     throw new Error("Task has no valid workflow profile spec-author assignment");
   }
   const agentId: AgentId = options.agentId ?? assignment?.agent_id ?? "test-spec-author";
@@ -193,8 +192,8 @@ export async function runSpecAuthorTurn(
   });
 
   let assistantText = "";
-  const authorRecord = profile && assignment && selectedRepository
-      ? createSpecAuthorSession({ taskId: task.id, repositoryId: selectedRepository.id, workflowProfileId: profile.id, assignmentId: assignment.id, agentId: assignment.agent_id, agentVersion: assignment.agent_version, agentProvenance: assignment.agent_provenance ?? historicalProvenance(assignment.agent_id, assignment.agent_version), assignmentConfig: { model: assignment.model, mode: assignment.mode, permission_policy: profile.permission_policy }, messageId: userMessage.id }, root)
+  const authorRecord = profile && assignment && repositoryId
+      ? createSpecAuthorSession({ taskId: task.id, repositoryId, workflowProfileId: profile.id, assignmentId: assignment.id, agentId: assignment.agent_id, agentVersion: assignment.agent_version, agentProvenance: assignment.agent_provenance ?? historicalProvenance(assignment.agent_id, assignment.agent_version), assignmentConfig: { model: assignment.model, mode: assignment.mode, permission_policy: profile.permission_policy }, messageId: userMessage.id }, root)
     : undefined;
   try {
     if (!authorRecord) {
@@ -206,7 +205,7 @@ export async function runSpecAuthorTurn(
       await options.agent!.close(session);
     } else {
       appendSpecAuthorOperation(authorRecord.id, "author", "running", null, root);
-      const supervisor = new AcpSessionSupervisor({ root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: profile!.permission_policy });
+      const supervisor = new AcpSessionSupervisor({ repositoryId: repositoryId!, root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: profile!.permission_policy });
       const started = await supervisor.start("spec-author", authorRecord.id, root ?? process.cwd(), assignment!.agent_id, assignment!.agent_version, { agentProvenance: authorRecord.agent_provenance });
       updateSpecAuthorSession(authorRecord.id, { supervisorSessionId: started.record.id, acpSessionId: started.record.acp_session_id, capabilities: started.record.capabilities }, root);
       const events: AgentEvent[] = [];

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Agent } from "../agent/types.js";
 import { createInstallation, finishInstallation, setAgentReadiness } from "../agents/store.js";
+import { registerRepository } from "../repositories/store.js";
 import { buildApp } from "./http.js";
 
 const testAgent: Agent = {
@@ -87,14 +88,13 @@ describe("chat session API", () => {
     const machineDir = mkdtempSync(join(tmpdir(), "marshal-chat-machine-"));
     const app = buildApp("0.0.1", { machineDir });
 
-    expect(await req(app, "GET", "/api/threads")).toEqual({ status: 200, body: { threads: [] } });
+    expect((await req(app, "GET", "/api/threads")).status).toBe(409);
   });
 
   it("creates, opens, updates, and appends to a thread without starting an agent", async () => {
     const root = mkdtempSync(join(tmpdir(), "marshal-chat-api-"));
     initGitRepo(root);
     const app = buildApp("0.0.1", { root, chatAgent: testAgent });
-
     const created = await req(app, "POST", "/api/threads", {
       agent_id: "agent-a",
       agent_version: "1.0.0",
@@ -102,6 +102,7 @@ describe("chat session API", () => {
     });
     expect(created.status).toBe(201);
     const id = created.body.thread.id;
+    const repositoryId = created.body.thread.repository_id;
     expect(created.body.thread).toMatchObject({
       agent_id: "agent-a",
       agent_version: "1.0.0",
@@ -109,12 +110,12 @@ describe("chat session API", () => {
       status: "active",
     });
 
-    const scratch = await req(app, "PATCH", `/api/threads/${id}`, {
+    const scratch = await req(app, "PATCH", `/api/threads/${id}?repository_id=${repositoryId}`, {
       scratch_markdown: "## Working draft",
     });
     expect(scratch.body.thread.scratch_markdown).toBe("## Working draft");
 
-    const message = await req(app, "POST", `/api/threads/${id}/messages`, {
+    const message = await req(app, "POST", `/api/threads/${id}/messages?repository_id=${repositoryId}`, {
       role: "user",
       content: "Please inspect this.",
     });
@@ -125,15 +126,43 @@ describe("chat session API", () => {
       content: "Please inspect this.",
     });
 
-    const updated = await req(app, "PATCH", `/api/threads/${id}`, {
+    const updated = await req(app, "PATCH", `/api/threads/${id}?repository_id=${repositoryId}`, {
       pinned: true,
       status: "closed",
     });
     expect(updated.status).toBe(200);
     expect(updated.body.thread).toMatchObject({ id, pinned: true, status: "closed" });
 
-    const detail = await req(app, "GET", `/api/threads/${id}`);
+    const detail = await req(app, "GET", `/api/threads/${id}?repository_id=${repositoryId}`);
     expect(detail.body.messages).toHaveLength(1);
+  });
+
+  it("requires the requested repository scope and rejects cross-repository thread access", async () => {
+    const firstRoot = mkdtempSync(join(tmpdir(), "marshal-chat-api-first-"));
+    const secondRoot = mkdtempSync(join(tmpdir(), "marshal-chat-api-second-"));
+    initGitRepo(firstRoot);
+    initGitRepo(secondRoot);
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-chat-api-machine-"));
+    const first = registerRepository(firstRoot, machineDir);
+    const second = registerRepository(secondRoot, machineDir);
+    const app = buildApp("0.0.1", { root: firstRoot, machineDir, chatAgent: testAgent });
+
+    const created = await req(app, "POST", "/api/threads", {
+      repository_id: first.id,
+      agent_id: "agent-a",
+      agent_version: "1.0.0",
+    });
+    expect(created.status).toBe(201);
+    const threadId = created.body.thread.id;
+
+    expect((await req(app, "GET", `/api/threads?repository_id=${second.id}`)).body.threads).toEqual([]);
+    expect((await req(app, "GET", `/api/threads/${threadId}?repository_id=${second.id}`)).status).toBe(404);
+    expect((await req(app, "POST", `/api/threads/${threadId}/messages?repository_id=${second.id}`, {
+      role: "user",
+      content: "must not cross scope",
+    })).status).toBe(404);
+    expect((await req(app, "GET", `/api/threads/${threadId}`)).body.thread.repository_id).toBe(first.id);
+    expect((await req(app, "GET", `/api/threads/${threadId}?repository_id=${first.id}`)).body.thread.repository_id).toBe(first.id);
   });
 
   it("rejects unknown session fields and missing agent IDs", async () => {
@@ -228,8 +257,9 @@ describe("chat session API", () => {
         })
       ).body.thread,
     ).toMatchObject({ archived: true, pinned: true, status: "closed" });
-    expect((await req(app, "GET", "/api/threads")).body.threads).toHaveLength(0);
-    expect((await req(app, "GET", "/api/threads?archived=true")).body.threads[0]).toMatchObject({
+    const repositoryId = (await req(app, "GET", "/api/repositories")).body.repositories[0].id;
+    expect((await req(app, "GET", `/api/threads?repository_id=${repositoryId}`)).body.threads).toHaveLength(0);
+    expect((await req(app, "GET", `/api/threads?repository_id=${repositoryId}&archived=true`)).body.threads[0]).toMatchObject({
       id,
       archived: true,
     });

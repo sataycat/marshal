@@ -14,6 +14,7 @@ import type { ChatThread } from "../chat/store.js";
 
 export interface WebSocketBridgeOptions {
   path: string;
+  repositoryId?: string;
   pingIntervalMs?: number;
   dropAfterMs?: number;
   authenticate?: (req: import("node:http").IncomingMessage) => boolean;
@@ -33,6 +34,7 @@ const DEFAULT_PING_INTERVAL_MS = 30_000;
 const DEFAULT_DROP_AFTER_MS = 90_000;
 
 interface ClientState {
+  repositoryId?: string;
   lastPongAt: number;
   pingTimer: NodeJS.Timeout;
 }
@@ -40,7 +42,7 @@ interface ClientState {
 export function attachWebSocket(
   server: Server,
   bus: EventBus,
-  snapshot: () => TaskPayload[] | { tasks: TaskPayload[]; threads: ChatThread[] },
+  snapshot: (repositoryId?: string) => TaskPayload[] | { tasks: TaskPayload[]; threads: ChatThread[] },
   options: WebSocketBridgeOptions,
 ): WebSocketBridgeHandle {
   const path = options.path;
@@ -55,6 +57,11 @@ export function attachWebSocket(
     const requestUrl = new URL(req.url ?? "", "http://127.0.0.1");
     const terminalPrefix = options.terminal?.pathPrefix;
     const terminalOperationId = terminalPrefix && requestUrl.pathname.startsWith(`${terminalPrefix}/`) ? decodeURIComponent(requestUrl.pathname.slice(terminalPrefix.length + 1)) : null;
+    const requestedRepositoryId = requestUrl.searchParams.get("repository_id");
+    if (options.repositoryId && requestedRepositoryId && requestedRepositoryId !== options.repositoryId) {
+      socket.destroy();
+      return;
+    }
     if (requestUrl.pathname !== path && !terminalOperationId) {
       socket.destroy();
       return;
@@ -94,9 +101,15 @@ export function attachWebSocket(
   };
   const unsubscribe = bus.subscribe(subscriber);
 
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, req) => {
+    const requestUrl = new URL(req.url ?? "", "http://127.0.0.1");
+    const requestedRepositoryId = requestUrl.searchParams.get("repository_id") ?? undefined;
     const pingTimer = setInterval(() => sendPing(ws), pingIntervalMs);
-    clients.set(ws, { lastPongAt: Date.now(), pingTimer });
+    clients.set(ws, {
+      repositoryId: requestedRepositoryId ?? options.repositoryId,
+      lastPongAt: Date.now(),
+      pingTimer,
+    });
 
     ws.on("pong", () => {
       const state = clients.get(ws);
@@ -109,13 +122,14 @@ export function attachWebSocket(
       removeClient(ws);
     });
 
-    const currentSnapshot = snapshot();
+    const state = clients.get(ws);
+    const currentSnapshot = snapshot(state?.repositoryId);
     const connectedPayload: ConnectedPayload = Array.isArray(currentSnapshot)
       ? { tasks: currentSnapshot, threads: [] }
       : currentSnapshot;
     const connectedEvent: BusEvent = {
       type: ConnectedType,
-      payload: connectedPayload,
+      payload: { ...connectedPayload, repository_id: state?.repositoryId ?? null },
       timestamp: new Date().toISOString(),
     };
     safeSend(ws, JSON.stringify(connectedEvent));
@@ -158,10 +172,24 @@ export function attachWebSocket(
   }
 
   function broadcast(event: BusEvent): void {
+    const eventRepositoryId = eventRepositoryIdOf(event);
+    if (eventRepositoryId && options.repositoryId && eventRepositoryId !== options.repositoryId) return;
     const data = JSON.stringify(event);
-    for (const ws of clients.keys()) {
+    for (const [ws, state] of clients) {
+      if (eventRepositoryId && state.repositoryId && eventRepositoryId !== state.repositoryId) continue;
+      // Repository-scoped events must never reach an unscoped browser. This
+      // also makes a missing repository selection fail closed during startup.
+      if (eventRepositoryId && !state.repositoryId) continue;
       safeSend(ws, data);
     }
+  }
+
+  function eventRepositoryIdOf(event: BusEvent): string | null {
+    const payload = event.payload;
+    if (!payload || typeof payload !== "object") return null;
+    const value = (payload as { repositoryId?: unknown; repository_id?: unknown }).repositoryId ??
+      (payload as { repository_id?: unknown }).repository_id;
+    return typeof value === "string" ? value : null;
   }
 
   function safeSend(ws: WebSocket, data: string): void {

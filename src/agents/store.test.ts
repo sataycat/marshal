@@ -248,14 +248,16 @@ describe("installed agent storage", () => {
     const repository = registerRepository(root, machineDir);
     listWorkflowProfiles(repository.id, machineDir);
     const active = createSession(
+      repository.id,
       { ownerType: "thread", ownerId: "active", agentId: "demo", agentVersion: "1.0.0" },
-      root,
+      machineDir,
     );
     const recoverable = createSession(
+      repository.id,
       { ownerType: "thread", ownerId: "recoverable", agentId: "demo", agentVersion: "1.0.0" },
-      root,
+      machineDir,
     );
-    updateSession(recoverable.id, { status: "recoverable" }, root);
+    updateSession(repository.id, recoverable.id, { status: "recoverable" }, machineDir);
     const operation = removeInstalledAgent("demo", "1.0.0", machineDir);
     expect(operation).toMatchObject({ status: "blocked", error_code: "agent_removal_conflict" });
     expect(operation.references).toEqual(

@@ -102,7 +102,7 @@ describe("WebSocket event bus", () => {
     try {
       const connected = await collector.next(2000);
       expect(connected.type).toBe("connected");
-      expect(connected.payload).toEqual({ tasks: [], threads: [] });
+       expect(connected.payload).toMatchObject({ tasks: [], threads: [] });
       expect(connected.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/);
 
       const res = await fetch(`http://127.0.0.1:${handle.port}/api/tasks`, {

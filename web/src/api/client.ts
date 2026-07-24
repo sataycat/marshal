@@ -581,15 +581,19 @@ export async function updateTaskSpec(slug: string, specMarkdown: string): Promis
 }
 
 export async function fetchChatThreads(
+  repositoryId: string,
   includeArchived = false,
   signal?: AbortSignal,
 ): Promise<ChatThread[]> {
-  const res = await fetch(`/api/threads${includeArchived ? "?archived=true" : ""}`, { signal });
+  const params = new URLSearchParams({ repository_id: repositoryId });
+  if (includeArchived) params.set("archived", "true");
+  const res = await fetch(`/api/threads?${params}`, { signal });
   const body = await jsonOrThrow<{ threads: ChatThread[] }>(res);
   return body.threads;
 }
 
 export async function createChatThread(input: {
+  repository_id: string;
   agent_id: string;
   agent_version: string;
   cwd?: string;
@@ -605,6 +609,7 @@ export async function createChatThread(input: {
 
 export async function updateChatThread(
   id: string,
+  repositoryId: string,
   input: {
     title?: string;
     status?: ChatThread["status"];
@@ -613,7 +618,7 @@ export async function updateChatThread(
     scratch_markdown?: string;
   },
 ): Promise<ChatThread> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}?repository_id=${encodeURIComponent(repositoryId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -621,33 +626,35 @@ export async function updateChatThread(
   return (await jsonOrThrow<{ thread: ChatThread }>(res)).thread;
 }
 
-export async function deleteChatThread(id: string): Promise<void> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, { method: "DELETE" });
+export async function deleteChatThread(id: string, repositoryId: string): Promise<void> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}?repository_id=${encodeURIComponent(repositoryId)}`, { method: "DELETE" });
   await jsonOrThrow<{ deleted: boolean }>(res);
 }
 
 export async function fetchChatThread(
   id: string,
+  repositoryId: string,
   signal?: AbortSignal,
 ): Promise<{ thread: ChatThread; messages: ChatMessage[]; events?: AcpEvent[] }> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}`, { signal });
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}?repository_id=${encodeURIComponent(repositoryId)}`, { signal });
   return jsonOrThrow<{ thread: ChatThread; messages: ChatMessage[] }>(res);
 }
-export async function fetchChatEvents(id: string, signal?: AbortSignal): Promise<AcpEvent[]> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/events`, { signal });
+export async function fetchChatEvents(id: string, repositoryId: string, signal?: AbortSignal): Promise<AcpEvent[]> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/events?repository_id=${encodeURIComponent(repositoryId)}`, { signal });
   return (await jsonOrThrow<{ events: AcpEvent[] }>(res)).events;
 }
-export async function initializeChatSession(id: string): Promise<ChatThread> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/session`, { method: "POST" });
+export async function initializeChatSession(id: string, repositoryId: string): Promise<ChatThread> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/session?repository_id=${encodeURIComponent(repositoryId)}`, { method: "POST" });
   return (await jsonOrThrow<{ thread: ChatThread }>(res)).thread;
 }
 export async function setChatSessionConfigOption(
   id: string,
+  repositoryId: string,
   configId: string,
   value: string | boolean,
 ): Promise<ChatThread> {
   const res = await fetch(
-    `/api/threads/${encodeURIComponent(id)}/session/config-options/${encodeURIComponent(configId)}`,
+    `/api/threads/${encodeURIComponent(id)}/session/config-options/${encodeURIComponent(configId)}?repository_id=${encodeURIComponent(repositoryId)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -656,8 +663,8 @@ export async function setChatSessionConfigOption(
   );
   return (await jsonOrThrow<{ thread: ChatThread }>(res)).thread;
 }
-export async function setChatSessionMode(id: string, modeId: string): Promise<ChatThread> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/session/mode`, {
+export async function setChatSessionMode(id: string, repositoryId: string, modeId: string): Promise<ChatThread> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/session/mode?repository_id=${encodeURIComponent(repositoryId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode_id: modeId }),
@@ -665,10 +672,10 @@ export async function setChatSessionMode(id: string, modeId: string): Promise<Ch
   return (await jsonOrThrow<{ thread: ChatThread }>(res)).thread;
 }
 
-export async function uploadChatAttachment(id: string, file: File): Promise<ChatAttachment> {
+export async function uploadChatAttachment(id: string, repositoryId: string, file: File): Promise<ChatAttachment> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/attachments`, {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/attachments?repository_id=${encodeURIComponent(repositoryId)}`, {
     method: "POST",
     body: form,
   });
@@ -677,22 +684,24 @@ export async function uploadChatAttachment(id: string, file: File): Promise<Chat
 
 export async function fetchChatAttachments(
   id: string,
+  repositoryId: string,
   signal?: AbortSignal,
 ): Promise<ChatAttachment[]> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/attachments`, { signal });
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/attachments?repository_id=${encodeURIComponent(repositoryId)}`, { signal });
   return (await jsonOrThrow<{ attachments: ChatAttachment[] }>(res)).attachments;
 }
 
-export function chatAttachmentUrl(threadId: string, attachmentId: string): string {
-  return `/api/threads/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(attachmentId)}`;
+export function chatAttachmentUrl(threadId: string, repositoryId: string, attachmentId: string): string {
+  return `/api/threads/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(attachmentId)}?repository_id=${encodeURIComponent(repositoryId)}`;
 }
 
 export async function sendChatMessage(
   id: string,
+  repositoryId: string,
   content: string,
   attachmentIds: string[] = [],
 ): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage }> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/send`, {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/send?repository_id=${encodeURIComponent(repositoryId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content, attachment_ids: attachmentIds }),
@@ -702,34 +711,37 @@ export async function sendChatMessage(
 
 export async function resubmitChatMessage(
   id: string,
+  repositoryId: string,
   messageId: number,
 ): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage | null }> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/messages/${messageId}/resubmit`, {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/messages/${messageId}/resubmit?repository_id=${encodeURIComponent(repositoryId)}`, {
     method: "POST",
   });
   return jsonOrThrow<{ userMessage: ChatMessage; assistantMessage: ChatMessage | null }>(res);
 }
 
-export async function cancelChatTurn(id: string): Promise<void> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+export async function cancelChatTurn(id: string, repositoryId: string): Promise<void> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/cancel?repository_id=${encodeURIComponent(repositoryId)}`, { method: "POST" });
   await jsonOrThrow<{ cancelled: boolean }>(res);
 }
 
 export async function fetchChatPermissions(
   id: string,
+  repositoryId: string,
   signal?: AbortSignal,
 ): Promise<PendingPermission[]> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/permissions`, { signal });
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/permissions?repository_id=${encodeURIComponent(repositoryId)}`, { signal });
   return (await jsonOrThrow<{ permissions: PendingPermission[] }>(res)).permissions;
 }
 
 export async function decideChatPermission(
   id: string,
+  repositoryId: string,
   requestId: string,
   action: "approve" | "deny",
 ): Promise<void> {
   const res = await fetch(
-    `/api/threads/${encodeURIComponent(id)}/permissions/${encodeURIComponent(requestId)}`,
+    `/api/threads/${encodeURIComponent(id)}/permissions/${encodeURIComponent(requestId)}?repository_id=${encodeURIComponent(repositoryId)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -739,18 +751,19 @@ export async function decideChatPermission(
   await jsonOrThrow<{ requestId: string; action: string }>(res);
 }
 
-export async function fetchChatFiles(id: string, signal?: AbortSignal): Promise<ChatFileEntry[]> {
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/files`, { signal });
+export async function fetchChatFiles(id: string, repositoryId: string, signal?: AbortSignal): Promise<ChatFileEntry[]> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/files?repository_id=${encodeURIComponent(repositoryId)}`, { signal });
   return (await jsonOrThrow<{ files: ChatFileEntry[] }>(res)).files;
 }
 
 export async function fetchChatFile(
   id: string,
+  repositoryId: string,
   path: string,
   signal?: AbortSignal,
 ): Promise<ChatFileContent> {
   const res = await fetch(
-    `/api/threads/${encodeURIComponent(id)}/files/content?path=${encodeURIComponent(path)}`,
+    `/api/threads/${encodeURIComponent(id)}/files/content?repository_id=${encodeURIComponent(repositoryId)}&path=${encodeURIComponent(path)}`,
     { signal },
   );
   return (await jsonOrThrow<{ file: ChatFileContent }>(res)).file;
@@ -769,7 +782,7 @@ export interface WebSocketHandle {
 
 export function connectBus(
   onEvent: (event: BusEvent) => void,
-  options: { onStatus?: (status: SocketStatus) => void; reconnectMs?: number } = {},
+  options: { onStatus?: (status: SocketStatus) => void; reconnectMs?: number; repositoryId?: string | null } = {},
 ): WebSocketHandle {
   const reconnectMs = options.reconnectMs ?? 1000;
   let closed = false;
@@ -778,7 +791,11 @@ export function connectBus(
 
   const open = (): void => {
     options.onStatus?.("connecting");
-    ws = new WebSocket(wsUrl());
+    let url = wsUrl();
+    if (options.repositoryId) {
+      url += `?repository_id=${encodeURIComponent(options.repositoryId)}`;
+    }
+    ws = new WebSocket(url);
     ws.onopen = () => {
       if (closed) {
         ws?.close();

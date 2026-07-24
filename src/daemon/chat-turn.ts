@@ -50,6 +50,7 @@ interface ActiveTurn {
 }
 
 export interface ChatTurnRunnerOptions {
+  repositoryId: string;
   root?: string;
   machineDir?: string;
   bus?: EventBus;
@@ -57,6 +58,7 @@ export interface ChatTurnRunnerOptions {
 }
 
 export class ChatTurnRunner {
+  private readonly repositoryId: string;
   private readonly root?: string;
   private readonly machineDir?: string;
   private readonly bus?: EventBus;
@@ -66,12 +68,14 @@ export class ChatTurnRunner {
   private readonly starting = new Set<string>();
   private readonly touched = new Map<string, Set<string>>();
 
-  constructor(options: ChatTurnRunnerOptions = {}) {
+  constructor(options: ChatTurnRunnerOptions) {
+    this.repositoryId = options.repositoryId;
     this.root = options.root;
     this.machineDir = options.machineDir;
     this.bus = options.bus;
     this.configuredAgent = options.agent;
     this.supervisor = new AcpSessionSupervisor({
+      repositoryId: this.repositoryId,
       root: this.root,
       machineDir: this.machineDir,
       agent: this.configuredAgent,
@@ -103,7 +107,7 @@ export class ChatTurnRunner {
   }
 
   async closeThread(threadId: string): Promise<void> {
-    reconcileThreadPermissions(threadId, this.root);
+    reconcileThreadPermissions(this.repositoryId, threadId, this.machineDir);
     const active = this.active.get(threadId);
     if (active) await this.supervisor.close(active.supervisorSessionId);
   }
@@ -118,7 +122,7 @@ export class ChatTurnRunner {
     value: string | boolean,
   ): Promise<void> {
     const started = await this.ensureSession(threadId);
-    const option = getChatThread(threadId, this.root).session_config_options.find(
+    const option = getChatThread(this.repositoryId, threadId, this.machineDir).session_config_options.find(
       (candidate) => candidate.id === configId,
     );
     if (!option) throw new Error(`Unknown ACP session configuration option: ${configId}`);
@@ -129,7 +133,7 @@ export class ChatTurnRunner {
 
   async setMode(threadId: string, modeId: string): Promise<void> {
     const started = await this.ensureSession(threadId);
-    const modes = getChatThread(threadId, this.root).session_modes;
+    const modes = getChatThread(this.repositoryId, threadId, this.machineDir).session_modes;
     if (!modes?.availableModes.some((mode) => mode.id === modeId))
       throw new Error(`Unknown ACP session mode: ${modeId}`);
     await this.supervisor.setMode(started.record.id, modeId);
@@ -140,7 +144,7 @@ export class ChatTurnRunner {
     content: string,
     attachmentIds: string[] = [],
   ): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage | null }> {
-    const thread = getChatThread(threadId, this.root);
+    const thread = getChatThread(this.repositoryId, threadId, this.machineDir);
     if (this.active.has(threadId) || this.starting.has(threadId))
       throw new ChatTurnBusyError(threadId);
     if (thread.status === "closed") throw new Error(`Chat session is closed: ${threadId}`);
@@ -154,14 +158,15 @@ export class ChatTurnRunner {
       new Set(attachmentIds).size !== attachmentIds.length
     )
       throw new Error("A message may include at most 8 unique images");
-    const attachments = attachmentIds.map((id) => readChatAttachment(threadId, id, this.root));
+    const attachments = attachmentIds.map((id) => readChatAttachment(this.repositoryId, threadId, id, this.machineDir));
     const expandedContent = expandChatFileMentions(content, thread.cwd);
     const userMessage = appendChatMessage(
+      this.repositoryId,
       threadId,
       "user",
       expandedContent,
-      this.root,
       attachmentIds,
+      this.machineDir,
     );
     this.publishMessage(threadId, userMessage);
     this.publishThread(threadId);
@@ -178,15 +183,16 @@ export class ChatTurnRunner {
       } catch (err) {
         const failure = structuredAcpError(err);
         if (failure.kind === "authentication_required")
-          markChatMessageAuthenticationRequired(userMessage.id, failure, this.root);
+          markChatMessageAuthenticationRequired(this.repositoryId, userMessage.id, failure, this.machineDir);
         updateChatThread(
+          this.repositoryId,
           threadId,
           {
             status:
               failure.kind === "authentication_required" ? "authentication_required" : "error",
             failure,
           },
-          this.root,
+          this.machineDir,
         );
         this.publishThread(threadId);
         throw err;
@@ -214,7 +220,7 @@ export class ChatTurnRunner {
       this.starting.delete(threadId);
       this.active.delete(threadId);
     }
-    const messages = listChatMessages(threadId, this.root);
+    const messages = listChatMessages(this.repositoryId, threadId, this.machineDir);
     return {
       userMessage,
       assistantMessage:
@@ -228,7 +234,7 @@ export class ChatTurnRunner {
     threadId: string,
     messageId: number,
   ): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage | null }> {
-    const message = getChatMessage(messageId, this.root);
+    const message = getChatMessage(this.repositoryId, messageId, this.machineDir);
     if (
       !message ||
       message.thread_id !== threadId ||
@@ -236,11 +242,11 @@ export class ChatTurnRunner {
       message.prompt_status !== "authentication_required"
     )
       throw new Error("Only an authentication-required user message can be resubmitted");
-    const thread = getChatThread(threadId, this.root);
+    const thread = getChatThread(this.repositoryId, threadId, this.machineDir);
     if (this.active.has(threadId) || this.starting.has(threadId))
       throw new ChatTurnBusyError(threadId);
     const attachments = message.attachment_ids.map((id) =>
-      readChatAttachment(threadId, id, this.root),
+      readChatAttachment(this.repositoryId, threadId, id, this.machineDir),
     );
     this.getAgent(threadId);
     this.starting.add(threadId);
@@ -284,15 +290,15 @@ export class ChatTurnRunner {
         prompt,
       });
       await prompt;
-      clearChatMessagePromptFailure(message.id, this.root);
-      this.publishMessage(threadId, getChatMessage(message.id, this.root)!);
+      clearChatMessagePromptFailure(this.repositoryId, message.id, this.machineDir);
+      this.publishMessage(threadId, getChatMessage(this.repositoryId, message.id, this.machineDir)!);
     } finally {
       this.starting.delete(threadId);
       this.active.delete(threadId);
     }
-    const messages = listChatMessages(threadId, this.root);
+    const messages = listChatMessages(this.repositoryId, threadId, this.machineDir);
     return {
-      userMessage: getChatMessage(message.id, this.root)!,
+      userMessage: getChatMessage(this.repositoryId, message.id, this.machineDir)!,
       assistantMessage:
         [...messages].reverse().find((item) => item.role === "assistant" && item.id > message.id) ??
         null,
@@ -323,9 +329,9 @@ export class ChatTurnRunner {
           if (event.type === "text") {
             text += event.text;
             if (assistant) {
-              assistant = updateChatMessage(assistant.id, text, this.root);
+              assistant = updateChatMessage(this.repositoryId, assistant.id, text, this.machineDir);
             } else {
-              assistant = appendChatMessage(threadId, "assistant", text, this.root);
+              assistant = appendChatMessage(this.repositoryId, threadId, "assistant", text, [], this.machineDir);
             }
             this.publishMessage(threadId, assistant);
             this.publishThread(threadId);
@@ -334,24 +340,25 @@ export class ChatTurnRunner {
         { messageId, resubmissionOf },
       );
       if (!assistant) {
-        assistant = appendChatMessage(threadId, "assistant", "", this.root);
+        assistant = appendChatMessage(this.repositoryId, threadId, "assistant", "", [], this.machineDir);
         this.publishMessage(threadId, assistant);
       }
-      updateChatThread(threadId, { status: "active", failure: null }, this.root);
+      updateChatThread(this.repositoryId, threadId, { status: "active", failure: null }, this.machineDir);
       this.publishThread(threadId);
     } catch (err) {
       const failure = structuredAcpError(err);
       if (failure.kind === "authentication_required") {
-        const message = markChatMessageAuthenticationRequired(messageId, failure, this.root);
+        const message = markChatMessageAuthenticationRequired(this.repositoryId, messageId, failure, this.machineDir);
         this.publishMessage(threadId, message);
       }
       updateChatThread(
+        this.repositoryId,
         threadId,
         {
           status: failure.kind === "authentication_required" ? "authentication_required" : "error",
           failure,
         },
-        this.root,
+        this.machineDir,
       );
       this.publishThread(threadId);
       throw err;
@@ -360,7 +367,7 @@ export class ChatTurnRunner {
 
   private getAgent(threadId: string): Agent {
     if (this.configuredAgent) return this.configuredAgent;
-    const thread = getChatThread(threadId, this.root);
+    const thread = getChatThread(this.repositoryId, threadId, this.machineDir);
     const installed = getInstalledAgent(
       thread.agent_id,
       thread.agent_version,
@@ -390,7 +397,7 @@ export class ChatTurnRunner {
   }> {
     const existing = this.supervisor.sessionForOwner("thread", threadId);
     if (existing) return existing;
-    const thread = getChatThread(threadId, this.root);
+    const thread = getChatThread(this.repositoryId, threadId, this.machineDir);
     this.getAgent(threadId);
     return this.supervisor.start(
       "thread",
@@ -410,13 +417,14 @@ export class ChatTurnRunner {
     },
   ): void {
     updateChatThread(
+      this.repositoryId,
       threadId,
       {
         sessionConfigOptions: configuration.configOptions,
         sessionModes: configuration.modes,
         sessionInitialized: true,
       },
-      this.root,
+      this.machineDir,
     );
     this.publishThread(threadId);
   }
@@ -426,12 +434,12 @@ export class ChatTurnRunner {
   }
 
   private publishThread(threadId: string): void {
-    if (this.bus) publishThreadUpdated(this.bus, getChatThread(threadId, this.root));
+    if (this.bus) publishThreadUpdated(this.bus, getChatThread(this.repositoryId, threadId, this.machineDir));
   }
 
   private publishEvent(threadId: string, event: AgentEvent): void {
     if (event.type === "tool") {
-      const thread = getChatThread(threadId, this.root);
+      const thread = getChatThread(this.repositoryId, threadId, this.machineDir);
       const paths =
         `${event.title}\n${event.output ?? ""}`.match(
           /(?:^|\s)([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+|[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+)(?=$|\s)/g,
@@ -445,6 +453,6 @@ export class ChatTurnRunner {
       }
       this.touched.set(threadId, set);
     }
-    this.bus?.publish(ThreadEventType, { threadId, event });
+    this.bus?.publish(ThreadEventType, { repositoryId: this.repositoryId, threadId, event });
   }
 }

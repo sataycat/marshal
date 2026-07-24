@@ -123,14 +123,14 @@ function adoptLegacy(db: Database.Database, scope: "machine" | "repository"): vo
           ],
           [
             "chat_messages",
-            "attachment_ids TEXT NOT NULL DEFAULT '[]'",
+             "attachment_ids TEXT NOT NULL DEFAULT '[]'",
             "prompt_status TEXT",
             "failure TEXT",
           ],
           ["spec_messages", "prompt_status TEXT", "failure TEXT"],
           [
             "acp_sessions",
-            "owner_type TEXT",
+             "owner_type TEXT",
             "owner_id TEXT",
             "agent_provenance TEXT NOT NULL DEFAULT '{}'",
             "failure TEXT",

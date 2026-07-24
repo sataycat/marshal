@@ -150,17 +150,17 @@ export function publishSpecMessage(bus: EventBus, taskSlug: string, message: Spe
 }
 
 export function publishThreadCreated(bus: EventBus, thread: ChatThread): void {
-  bus.publish(ThreadCreatedType, { thread });
+  bus.publish(ThreadCreatedType, { repositoryId: thread.repository_id, thread });
 }
 
 export function publishThreadUpdated(bus: EventBus, thread: ChatThread): void {
-  bus.publish(ThreadUpdatedType, { thread });
+  bus.publish(ThreadUpdatedType, { repositoryId: thread.repository_id, thread });
 }
 
 export function publishThreadMessage(bus: EventBus, threadId: string, message: ChatMessage): void {
-  bus.publish(ThreadMessageType, { threadId, message });
+  bus.publish(ThreadMessageType, { repositoryId: message.repository_id, threadId, message });
 }
 
-export function publishThreadDeleted(bus: EventBus, id: string): void {
-  bus.publish(ThreadDeletedType, { id });
+export function publishThreadDeleted(bus: EventBus, id: string, repositoryId?: string): void {
+  bus.publish(ThreadDeletedType, { repositoryId: repositoryId ?? null, id });
 }

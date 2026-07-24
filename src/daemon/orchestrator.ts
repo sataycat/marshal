@@ -164,9 +164,8 @@ export interface BuildTaskOptions {
 }
 
 function workflowAssignment(task: Task, role: "builder" | "validator", machineDir?: string) {
-  const repository = getSelectedRepository(machineDir);
-  const profile = task.repository_id && task.workflow_profile_id && repository?.id === task.repository_id
-    ? getWorkflowProfile(repository.id, task.workflow_profile_id, machineDir)
+  const profile = task.repository_id && task.workflow_profile_id
+    ? getWorkflowProfile(task.repository_id, task.workflow_profile_id, machineDir)
     : undefined;
   const assignment = profile?.assignments.find((item) => item.role === role);
   if (!assignment && !task.workflow_profile_id) return { profile: undefined, assignment: undefined };
@@ -199,7 +198,7 @@ export async function buildTask(
 
    let session: AgentSession | undefined;
    let supervisorSessionId: string | undefined;
-   const supervisor = new AcpSessionSupervisor({ root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: resolved.profile?.permission_policy, workflow: true, permissionMode: options.agent && !resolved.profile ? "approve-all" : undefined, bus: options.bus });
+    const supervisor = new AcpSessionSupervisor({ repositoryId: task.repository_id!, root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: resolved.profile?.permission_policy, workflow: true, permissionMode: options.agent && !resolved.profile ? "approve-all" : undefined, bus: options.bus });
   try {
     try {
        const started = await supervisor.start("workflow-run", String(runId), worktree.path, builderAgentId, builderVersion, { ...(resolved.assignment ? { model: resolved.assignment.model, mode: resolved.assignment.mode } : {}), sessionName: `marshal-${slug}-builder` });
@@ -406,7 +405,7 @@ export async function validateTask(
    let session: AgentSession | undefined;
    let supervisorSessionId: string | undefined;
    const seenEvents: AgentEvent[] = [];
-   const supervisor = new AcpSessionSupervisor({ root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: resolved.profile?.permission_policy, workflow: true, permissionMode: options.agent && !resolved.profile ? "approve-all" : undefined, bus: options.bus });
+    const supervisor = new AcpSessionSupervisor({ repositoryId: task.repository_id!, root, machineDir: options.machineDir, agent: options.agent, permissionPolicy: resolved.profile?.permission_policy, workflow: true, permissionMode: options.agent && !resolved.profile ? "approve-all" : undefined, bus: options.bus });
    const verification = runDeterministicVerification(resolved.profile?.verification_commands ?? [], worktree.path);
    runLog.setVerification(runId, verification.pass ? "pass" : "fail", verification.output);
    if (!verification.pass) {
