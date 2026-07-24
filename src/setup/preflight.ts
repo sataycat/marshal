@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { SdkAcpAgentAdapter } from "../agent/sdk-adapter.js";
 import type { AgentCommand } from "../agent/types.js";
 import { getGlobalDir } from "../daemon/config.js";
+import { storageLayout, STORAGE_FILE_MODE } from "../storage/layout.js";
 import {
   DEFAULT_MAX_RETRIES,
   isAgentCommand,
@@ -155,7 +156,7 @@ export async function checkDirectAgent(
 // -----------------------------------------------------------------------------
 
 export function getGlobalConfigPath(): string {
-  return process.env.MARSHAL_GLOBAL_CONFIG ?? resolve(getGlobalDir(), "config.json");
+  return process.env.MARSHAL_GLOBAL_CONFIG ?? storageLayout(getGlobalDir()).configPath;
 }
 
 export function machineAlreadyConfigured(configPath: string = getGlobalConfigPath()): boolean {
@@ -211,7 +212,10 @@ export function writeGlobalConfig(
   configPath: string = getGlobalConfigPath(),
 ): void {
   mkdirSync(dirname(configPath), { recursive: true });
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", {
+    encoding: "utf8",
+    mode: STORAGE_FILE_MODE,
+  });
 }
 
 export function readGlobalConfig(configPath: string = getGlobalConfigPath()): GlobalConfig | null {

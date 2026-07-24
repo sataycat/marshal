@@ -3,7 +3,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import type { Server as HttpServer } from "node:http";
 import {
   existsSync,
-  mkdtempSync,
+  chmodSync,
   readFileSync,
   statSync,
   unlinkSync,
@@ -13,11 +13,17 @@ import {
 } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { basename, extname, resolve, sep } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { logger } from "../logger.js";
-import { ensureDir, getGlobalDir } from "./config.js";
+import { getGlobalDir } from "./config.js";
+import {
+  createStorageTemporaryDirectory,
+  ensureStorageLayout,
+  storageLayout,
+  STORAGE_FILE_MODE,
+} from "../storage/layout.js";
 import {
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_PORT,
@@ -211,7 +217,7 @@ function readVersion(): string {
 }
 
 export function portFilePath(machineDir = getGlobalDir()): string {
-  return resolve(machineDir, "daemon.port");
+  return storageLayout(machineDir).daemonPortPath;
 }
 
 export interface BuildAppOptions {
@@ -1132,7 +1138,7 @@ function registerAgentRoutes(
     const controller = new AbortController();
     authenticationControllers.set(operation.id, controller);
     void (async () => {
-      const workspace = mkdtempSync(resolve(tmpdir(), "marshal-auth-"));
+      const workspace = createStorageTemporaryDirectory(`auth-${operation.id}`, machineDir);
       try {
         await authenticateAgent(
           workspace,
@@ -2299,10 +2305,12 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   }
 
   const portFile = portFilePath(machineDir);
-  ensureDir(machineDir);
-  const pidFile = resolve(machineDir, "daemon.pid");
-  writeFileSync(portFile, String(bound.port));
-  writeFileSync(pidFile, String(process.pid));
+  const layout = ensureStorageLayout(machineDir);
+  const pidFile = layout.daemonPidPath;
+  writeFileSync(portFile, String(bound.port), { mode: STORAGE_FILE_MODE });
+  writeFileSync(pidFile, String(process.pid), { mode: STORAGE_FILE_MODE });
+  chmodSync(portFile, STORAGE_FILE_MODE);
+  chmodSync(pidFile, STORAGE_FILE_MODE);
 
   logger.info({ host: bound.host, port: bound.port, portFile }, "HTTP server listening");
 

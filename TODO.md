@@ -108,3 +108,82 @@ Break the proposed ADR into the following dependency-ordered vertical slices. Ea
 - [x] Cover side-by-side versions, default selection, update immutability, active-reference removal conflicts, payload cleanup, and historical provenance. (Existing focused coverage covers these areas.)
 - [x] Cover API and WebSocket recovery after browser refresh and daemon restart. (HTTP hydration after durable reconciliation and WebSocket reconnect hydration are covered against durable state.)
 - [x] Run `pnpm run check`, `pnpm run test`, and the relevant daemon/API integration tests before considering ADR-0008 implemented. (`pnpm run check`, full `pnpm run test`, and focused installer/API/WebSocket/frontend tests passed.)
+
+## ADR-0012: Consolidated Daemon Storage
+
+Implement the ADR as the following dependency-ordered vertical slices. Each slice should leave the daemon and browser usable, keep repository ownership explicit, and avoid dual-writing old and new layouts. This is a pre-1.0 reset-based cutover: do not add a split-database import unless a concrete deployed dataset is approved separately, and never scan arbitrary repository `.marshal` directories. Artifacts do not have a current file store, so this plan does not create an otherwise-unused artifact subsystem; any future artifact implementation must use the repository namespace defined here.
+
+### 1. Establish one daemon storage contract
+
+ - [x] Add one storage-layout module that resolves `MARSHAL_HOME`, defaults to `~/.marshal`, and owns paths for `marshal.db`, installations, credentials, repository namespaces, logs, temporary files, and daemon lifecycle metadata.
+ - [x] Route existing installation, credential, PID, port, and other daemon-owned file access through that module instead of constructing paths in feature modules.
+ - [x] Keep registered checkout paths available only for source files, git operations, and repository-owned inputs such as `marshal.json` and `.worktreeinclude`.
+ - [x] Require daemon-generated or closed-set validated identifiers for namespace components and prove all resolved paths remain inside `MARSHAL_HOME`.
+ - [x] Add focused tests for the default root, absolute and relative `MARSHAL_HOME` overrides, directory creation, sensitive-directory permissions, and path containment.
+
+### 2. Make the interactive workbench repository-ID scoped
+
+- [ ] Introduce an explicit repository context resolved from a registered repository ID; the selected repository remains a browser convenience, not an implicit persistence selector.
+- [ ] Change thread, message, attachment-metadata, ACP session, prompt, event, and permission stores to require repository identity on every repository-scoped read and mutation.
+- [ ] Make repository ownership immutable at record creation and stop using `repo_root` as the authorization or query boundary; retain checkout and working-directory paths only as execution metadata.
+- [ ] Update HTTP, WebSocket hydration, chat runners, and browser queries to carry or resolve the repository ID explicitly and reject cross-repository resource access.
+- [ ] Add two-repository tests for isolated thread lists, messages, sessions, permissions, attachment metadata, repository switching, and cross-scope 404 or conflict behavior.
+
+### 3. Make factory workflows repository-ID scoped
+
+- [ ] Change task, spec-message, spec-author session, run, run-operation, run-event, workflow-profile, and assignment stores to require repository identity explicitly.
+- [ ] Scope task slugs, task lookup, transitions, run history, scheduler selection, and WebSocket snapshots by repository so two repositories may use the same slug safely.
+- [ ] Resolve the checkout path from the immutable repository ID only when source, git, agent-session, or worktree execution needs it.
+- [ ] Update task, spec, run, workflow-profile, and board APIs plus browser query keys and mutations to preserve repository ownership end to end.
+- [ ] Add two-repository tests covering identical task slugs, independent workflow profiles, scheduler isolation, run/event ownership, and rejected cross-repository mutations.
+
+### 4. Cut fresh installations over to one `marshal.db`
+
+- [ ] Merge the machine and repository Drizzle schemas into one authoritative schema, one Drizzle configuration, one ordered migration directory, and one migration journal.
+- [ ] Define the repository-ownership matrix and add required non-null `repository_id` columns, foreign keys, composite ownership constraints where needed, and repository-leading indexes to every repository-scoped table.
+- [ ] Replace `openMachineDb` and repository-path-derived `openDb` behavior with one controlled daemon database open at `$MARSHAL_HOME/marshal.db`; run migrations before routes, stores, reconciliation, or background work start.
+- [ ] Preserve parameterized raw SQL where it remains clear, but move all schema mutation and backfill logic into checked-in migrations.
+- [ ] Implement the reset-only legacy contract: never open or import `machine.db` or `<repository>/.marshal/state.db`, never dual-read or dual-write them, and surface stable reset guidance for a recognized old machine layout.
+- [ ] Remove the split schemas, migration streams, Drizzle configs, and packaged migration paths only after every active store uses `marshal.db`.
+- [ ] Test empty initialization, packaged migration discovery, unknown-newer migration rejection, transactional migration failure, `PRAGMA integrity_check`, and `PRAGMA foreign_key_check`.
+
+### 5. Move attachment bytes into daemon-owned repository namespaces
+
+- [ ] Store attachment bytes beneath `$MARSHAL_HOME/repositories/<repository-id>/attachments/` using daemon-generated attachment and thread identifiers, with no repository name, checkout path, filename, or other client-provided path component.
+- [ ] Keep attachment ownership, quota, MIME validation, byte size, and opaque storage key in `marshal.db`; never persist an absolute checkout-derived path.
+- [ ] Define bounded file/database write ordering so a failed metadata insert removes the new file and a failed file deletion remains discoverable for retry.
+- [ ] Add startup or maintenance reconciliation for orphaned attachment files and missing-file metadata without weakening repository access checks.
+- [ ] Test upload, read, quota enforcement, thread deletion cleanup, interrupted cleanup recovery, a moved or read-only checkout, and path-containment attacks.
+
+### 6. Move task worktrees into stable repository namespaces
+
+- [ ] Make `WorktreeManager` require both repository ID and checkout path, and place worktrees beneath `$MARSHAL_HOME/repositories/<repository-id>/worktrees/<worktree-id>`.
+- [ ] Use a daemon-generated worktree ID for the directory name; keep task slug, branch, descriptor, source checkout, and timestamps as metadata rather than path components.
+- [ ] Replace repository-local `worktrees.json` and checkout-path hashes with durable worktree records in `marshal.db` that support create, reuse, inspect, destroy, and restart recovery.
+- [ ] Continue reading `marshal.json` and `.worktreeinclude` from the source checkout while ensuring setup, build, validation, diff, merge, and cleanup use the centralized worktree record.
+- [ ] Add tests for restart reuse, explicit cleanup, failed setup recovery, duplicate repository names, malicious task slugs, checkout relocation, and no writes to the source checkout.
+
+### 7. Define repository removal and retained-history behavior
+
+- [ ] Change ordinary repository removal to unregister the checkout, clear it as the selected repository, and retain its database history and daemon-owned file namespace by stable repository ID.
+- [ ] Make unavailable, moved, and unregistered checkouts inspectable in repository diagnostics while blocking source-dependent actions with stable, actionable errors.
+- [ ] Allow an existing retained repository identity to be reconnected to a valid checkout path without rewriting historical ownership.
+- [ ] Keep irreversible purge out of ordinary removal; if a purge flow is introduced, make it explicit, durable, idempotent, and recoverable across database and filesystem cleanup.
+- [ ] Test unregister, re-selection prevention, retained threads and runs, missing checkout behavior, reconnection, file retention, and foreign-key integrity.
+
+### 8. Remove repository-local daemon state and expose the operational boundary
+
+- [ ] Delete repository-state initialization, `getRepoStateDir`, `.marshal/state.db`, `.marshal/worktrees.json`, repository-local attachment paths, and legacy-state scanning once their replacements are active.
+- [ ] Retire recovery/setup behavior and tests that create a repository `.marshal` directory; keep source configuration files explicitly separate from daemon state.
+- [ ] Audit every daemon filesystem write and prove all durable output is beneath the resolved `MARSHAL_HOME` or an explicitly temporary OS directory used only before atomic publication.
+- [ ] Extend the diagnostics API and browser page with the resolved storage root, database path, repository namespace status, custom-home status, and actionable legacy-layout or integrity failures.
+- [ ] Document backup, restore, persistent-volume mounting, stopped-daemon reset, SQLite live-backup constraints, and the pre-1.0 split-layout reset in the README and operator/development guidance.
+- [ ] Add tests proving registered read-only and ephemeral checkouts work for non-mutating flows and no daemon operation creates `<repository>/.marshal`.
+
+### 9. Verify the complete consolidated-storage lifecycle
+
+- [ ] Exercise a custom `MARSHAL_HOME` through repository registration, agent installation and credentials, chat with attachments, task creation, worktree execution, restart recovery, and repository unregister/reconnect.
+- [ ] Assert a fresh installation creates one `marshal.db`, one migration journal, and no `machine.db`, `state.db`, or repository-local Marshal state.
+- [ ] Cover repository foreign-key and query isolation for every active workbench and factory resource, including duplicate slugs and selected-repository changes.
+- [ ] Cover attachment and worktree write-order failures, orphan reconciliation, retained-history semantics, source-checkout deletion, and fresh-install reset behavior.
+- [ ] Run `pnpm run check`, `pnpm run test`, and the daemon/browser verification flow before considering ADR-0012 implemented.

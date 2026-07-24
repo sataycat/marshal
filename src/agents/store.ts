@@ -10,9 +10,9 @@ import {
 } from "./types.js";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { resolve, relative } from "node:path";
 import { listRepositories } from "../repositories/store.js";
 import { openDb } from "../db/index.js";
+import { assertInstallationPath, assertTemporaryPath } from "../storage/layout.js";
 import type { AgentRemovalOperation, AgentRemovalReference } from "./types.js";
 import { deleteAgentCredentials } from "./credentials.js";
 
@@ -423,8 +423,13 @@ export function reconcileInstallationOperations(machineDir?: string): void {
     .prepare("SELECT * FROM installation_operations WHERE status = 'installing'")
     .all() as Record<string, unknown>[];
   for (const row of rows) {
-    const temporary = row.temporary_root ? String(row.temporary_root) : null;
-    const published = row.published_root ? String(row.published_root) : null;
+    const storageRoot = machineDir ?? getGlobalDir();
+    const temporary = row.temporary_root
+      ? assertTemporaryPath(storageRoot, String(row.temporary_root))
+      : null;
+    const published = row.published_root
+      ? assertInstallationPath(storageRoot, String(row.published_root))
+      : null;
     const manifest = published && existsSync(`${published}/manifest.json`);
     if (manifest) {
       try {
@@ -870,9 +875,7 @@ export function executeAgentRemoval(
   }
   try {
     const root = String(row.installation_root ?? "");
-    const base = resolve(machineDir ?? getGlobalDir(), "agents");
-    if (root && (resolve(root) === base || relative(base, root).startsWith("..")))
-      throw new Error("Installation payload is outside Marshal's owned agents directory");
+    if (root) assertInstallationPath(machineDir ?? getGlobalDir(), root);
     if (root) rmSync(root, { recursive: true, force: true });
     deleteAgentCredentials(op.installation_id, machineDir);
     db.transaction(() => {

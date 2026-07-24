@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { getGlobalDir } from "../daemon/config.js";
 import { openMachineDb } from "../storage/machine.js";
+import { ensureStorageLayout, STORAGE_FILE_MODE, type StorageLayout } from "../storage/layout.js";
 
 export interface CredentialBinding {
   installation_id: string;
@@ -21,9 +21,11 @@ export interface CredentialStore {
 
 export class ExternalFileCredentialStore implements CredentialStore {
   private readonly directory: string;
+  private readonly layout: StorageLayout;
 
   constructor(machineDir = getGlobalDir()) {
-    this.directory = resolve(machineDir, "credentials");
+    this.layout = ensureStorageLayout(machineDir);
+    this.directory = this.layout.credentialsDirectory;
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
   }
 
@@ -31,24 +33,32 @@ export class ExternalFileCredentialStore implements CredentialStore {
     const reference = existingRef ?? `file:${randomUUID()}`;
     const id = reference.startsWith("file:") ? reference.slice(5) : "";
     if (!/^[a-f0-9-]+$/i.test(id)) throw new Error("Credential reference is invalid");
-    writeFileSync(resolve(this.directory, id), value, { encoding: "utf8", mode: 0o600, flag: "w" });
+    const path = this.filePath(id);
+    writeFileSync(path, value, { encoding: "utf8", mode: STORAGE_FILE_MODE, flag: "w" });
+    chmodSync(path, STORAGE_FILE_MODE);
     return reference;
   }
 
   get(reference: string): string {
     const id = reference.startsWith("file:") ? reference.slice(5) : "";
     if (!/^[a-f0-9-]+$/i.test(id)) throw new Error("Credential reference is invalid");
-    return readFileSync(resolve(this.directory, id), "utf8");
+    return readFileSync(this.filePath(id), "utf8");
   }
 
   delete(reference: string): void {
     const id = reference.startsWith("file:") ? reference.slice(5) : "";
     if (!/^[a-f0-9-]+$/i.test(id)) return;
     try {
-      rmSync(resolve(this.directory, id), { force: true });
+      rmSync(this.filePath(id), { force: true });
     } catch {
       /* best effort cleanup */
     }
+  }
+
+  private filePath(id: string): string {
+    // The reference grammar above is deliberately narrower than the general
+    // namespace grammar.  The layout still owns the final path resolution.
+    return this.layout.credentialFile(id);
   }
 }
 

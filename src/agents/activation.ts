@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { probeAgent } from "../acp/probe.js";
 import type { EventBus } from "../daemon/bus.js";
 import { publishInstallationOperationUpdated } from "../daemon/bus.js";
+import { getGlobalDir } from "../daemon/config.js";
 import {
   getInstallationByIdentity,
   getInstallationOperation,
@@ -15,6 +15,7 @@ import {
 import type { InstalledAgent, InstallationOperation } from "./types.js";
 import type { StructuredAcpError } from "../acp/errors.js";
 import { launchWithResolvedEnvironment } from "./launch-environment.js";
+import { createStorageTemporaryDirectory, assertTemporaryPath } from "../storage/layout.js";
 
 const activeActivations = new Map<string, Promise<InstalledAgent>>();
 
@@ -96,7 +97,7 @@ async function runActivation(
       raw_initialize: installed.raw_initialize,
       probed_at: started,
     }, machineDir, installed.installation_id);
-    probeWorkspace = mkdtempSync(resolve(tmpdir(), "marshal-probe-"));
+    probeWorkspace = createStorageTemporaryDirectory("probe", machineDir);
     const result = await probeAgent(probeWorkspace, launchWithResolvedEnvironment(installed, machineDir));
     const agent = setAgentReadiness(installed.id, installed.version, {
       readiness_status: result.status,
@@ -142,7 +143,7 @@ async function runActivation(
     }
     return agent;
   } finally {
-    if (probeWorkspace) rmSync(probeWorkspace, { recursive: true, force: true });
+    if (probeWorkspace) rmSync(assertTemporaryPath(machineDir ?? getGlobalDir(), probeWorkspace), { recursive: true, force: true });
   }
 }
 

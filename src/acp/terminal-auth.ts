@@ -1,14 +1,14 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { rmSync } from "node:fs";
 import type { WebSocket } from "ws";
 import { activateInstalledAgent } from "../agents/activation.js";
 import { launchWithResolvedEnvironment } from "../agents/launch-environment.js";
 import { finishAgentAuthentication, getAgentAuthenticationOperation, getInstalledAgent, updateTerminalAuthentication } from "../agents/store.js";
 import type { AgentAuthenticationOperation, AgentAuthMethod, InstalledAgent } from "../agents/types.js";
 import type { EventBus } from "../daemon/bus.js";
+import { getGlobalDir } from "../daemon/config.js";
+import { createStorageTemporaryDirectory, assertTemporaryPath } from "../storage/layout.js";
 
 export const TERMINAL_AUTH_MAX_INPUT_BYTES = 8 * 1024;
 export const TERMINAL_AUTH_MAX_OUTPUT_BYTES = 256 * 1024;
@@ -76,7 +76,7 @@ export class TerminalAuthManager {
   start(operation: AgentAuthenticationOperation, installation: InstalledAgent, method: AgentAuthMethod): TerminalAuthSnapshot {
     if (method.type !== "terminal") throw new Error("Only advertised terminal authentication methods can start a setup terminal");
     if (operation.agent_id !== installation.id || operation.version !== installation.version || operation.installation_id !== installation.installation_id || operation.method_id !== method.id) throw new Error("Terminal authentication identity mismatch");
-    const workspace = mkdtempSync(resolve(tmpdir(), "marshal-terminal-auth-"));
+    const workspace = createStorageTemporaryDirectory("terminal-auth", this.machineDir);
     const launch = launchWithResolvedEnvironment(installation, this.machineDir, { additionalEnv: method.env });
     let process: IPty;
     try {
@@ -88,7 +88,7 @@ export class TerminalAuthManager {
         rows: 30,
       });
     } catch (error) {
-      rmSync(workspace, { recursive: true, force: true });
+      rmSync(assertTemporaryPath(this.machineDir ?? getGlobalDir(), workspace), { recursive: true, force: true });
       const message = error instanceof Error ? error.message : String(error);
       finishAgentAuthentication(operation.id, "failed", message, this.machineDir, { kind: "process_start_failed", message, protocol_code: null, data: null });
       updateTerminalAuthentication(operation.id, { diagnostic: { code: "terminal_start_failed", message: "The agent setup terminal could not be started.", action: "Review the installed command and retry setup." } }, this.machineDir);
@@ -218,7 +218,7 @@ export class TerminalAuthManager {
     const expires = setTimeout(() => this.retained.delete(terminal.operationId), this.retainMs);
     expires.unref();
     this.retained.set(terminal.operationId, { output: terminal.output, truncated: terminal.truncated, expires });
-    rmSync(terminal.workspace, { recursive: true, force: true });
+    rmSync(assertTemporaryPath(this.machineDir ?? getGlobalDir(), terminal.workspace), { recursive: true, force: true });
     this.live.delete(terminal.operationId);
   }
 

@@ -3,6 +3,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { getGlobalDir, getRepoStateDir } from "../daemon/config.js";
+import { storageLayout } from "../storage/layout.js";
 import { logger } from "../logger.js";
 import { loadGlobalConfig, loadMarshalJson } from "./config.js";
 import { copyWorktreeIncludes } from "./include.js";
@@ -61,7 +62,7 @@ export class WorktreeManager {
     const root =
       options.worktreeRoot ??
       loadGlobalConfig().worktree?.root ??
-      resolve(getGlobalDir(), "worktrees");
+      storageLayout(getGlobalDir()).legacyWorktreesDirectory;
     const repoHash = createHash("sha256").update(repoRoot).digest("hex").slice(0, 8);
     this.sourcePath = repoRoot;
     this.worktreeRoot = resolve(root, repoHash);

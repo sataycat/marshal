@@ -1,7 +1,6 @@
 import {
   mkdirSync,
   writeFileSync,
-  mkdtempSync,
   rmSync,
   readFileSync,
   chmodSync,
@@ -11,9 +10,15 @@ import {
 import { randomUUID, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { resolve, dirname, relative } from "node:path";
-import { tmpdir } from "node:os";
 import { extractArchive } from "./archive.js";
 import { getGlobalDir } from "../daemon/config.js";
+import {
+  assertInstallationPath,
+  assertTemporaryPath,
+  createStorageTemporaryDirectory,
+  ensureStorageLayout,
+  type StorageLayout,
+} from "../storage/layout.js";
 import { getRegistryCatalog } from "../registry/store.js";
 import type { RegistryAgent } from "../registry/types.js";
 import type { RegistryDistribution } from "../registry/types.js";
@@ -214,6 +219,10 @@ export interface BinaryInstallOptions {
 }
 const installationRoots = new Map<string, string>();
 
+function installationLayout(machineDir: string): StorageLayout {
+  return ensureStorageLayout(machineDir);
+}
+
 async function downloadBinary(
   url: string,
   fetchImpl: typeof fetch,
@@ -299,8 +308,8 @@ export async function installBinary(
       publishInstallationOperationUpdated(bus, getInstallationOperation(operationId, machineDir));
   };
   const operation = getInstallationOperation(operationId, machineDir)!;
-  const root = operation.published_root!;
-  const temp = operation.temporary_root!;
+  const root = assertInstallationPath(machineDir, operation.published_root!);
+  const temp = assertTemporaryPath(machineDir, operation.temporary_root!);
   try {
     if (distribution.kind !== "binary") throw new Error("not a binary distribution");
     if (!distribution.archive_url || !distribution.executable)
@@ -445,9 +454,9 @@ export async function startInstallation(
       return duplicate;
     }
     const operationId = randomUUID();
-    const root = resolve(machineDir, "agents", agent.id, agent.version, randomUUID());
-    mkdirSync(resolve(machineDir, "agents"), { recursive: true });
-    const temp = mkdtempSync(resolve(machineDir, "agents", `.tmp-${randomUUID()}-`));
+    const layout = installationLayout(machineDir);
+    const root = layout.installationDirectory(agent.id, agent.version, randomUUID());
+    const temp = createStorageTemporaryDirectory(`install-${operationId}`, machineDir);
     const integrity = distribution.checksum ? "unknown" : "unverified";
     const operation = createInstallation(
       {
@@ -533,9 +542,9 @@ export async function startInstallation(
   );
   if (running?.status === "installing") return running;
   const operationId = randomUUID();
-  mkdirSync(resolve(machineDir, "agents"), { recursive: true });
-  const installationRoot = resolve(machineDir, "agents", agent.id, agent.version, randomUUID());
-  const temporaryRoot = mkdtempSync(resolve(machineDir, "agents", ".tmp-package-"));
+  const layout = installationLayout(machineDir);
+  const installationRoot = layout.installationDirectory(agent.id, agent.version, randomUUID());
+  const temporaryRoot = createStorageTemporaryDirectory(`install-${operationId}`, machineDir);
   installationRoots.set(operationId, temporaryRoot);
   const launch =
     distribution.kind === "npx"
@@ -655,7 +664,7 @@ export function cancelInstallationOperation(
   if (!operation) throw new Error("installation operation not found");
   if (operation.status !== "installing") return operation;
   const temp = installationRoots.get(operationId) ?? operation.temporary_root;
-  if (temp) rmSync(temp, { recursive: true, force: true });
+  if (temp) rmSync(assertTemporaryPath(machineDir, temp), { recursive: true, force: true });
   const cancelled = cancelInstallation(operationId, machineDir);
   if (bus) publishInstallationOperationUpdated(bus, cancelled);
   return cancelled;

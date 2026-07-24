@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { getGlobalDir } from "../daemon/config.js";
+import { storageLayout } from "../storage/layout.js";
 import { logger } from "../logger.js";
 import type { AgentCommand, AgentId } from "../agent/types.js";
 
@@ -62,7 +63,7 @@ export function loadMarshalJson(repoRoot: string): MarshalJson {
 }
 
 export function loadGlobalConfig(): GlobalConfig {
-  const path = process.env.MARSHAL_GLOBAL_CONFIG ?? resolve(getGlobalDir(), "config.json");
+  const path = process.env.MARSHAL_GLOBAL_CONFIG ?? storageLayout(getGlobalDir()).configPath;
   try {
     const raw = readFileSync(path, "utf8");
     return JSON.parse(raw) as GlobalConfig;

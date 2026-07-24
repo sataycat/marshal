@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { initGlobalConfig, initRepoState, getRepoStateDir } from "../daemon/config.js";
 import { openDb } from "../db/index.js";
 import { AGENT_COMMAND_DEFAULTS, isAgentCommand, type GlobalConfig } from "../worktree/config.js";
+import { createStorageTemporaryDirectory } from "../storage/layout.js";
 import {
   checkDirectAgent,
   checkSystemPrerequisites,
@@ -189,5 +189,5 @@ export async function runDoctor(options: InitOptions = {}): Promise<{ ok: boolea
 }
 
 function initTmpDir(): string {
-  return mkdtempSync(join(tmpdir(), "marshal-doctor-"));
+  return createStorageTemporaryDirectory("doctor");
 }
