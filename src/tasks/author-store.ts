@@ -111,7 +111,7 @@ export function appendSpecAuthorOperation(first: string, second: string, third: 
   const failure = scoped ? seventh : sixth;
   const db = scoped ? openRepositoryDb(repositoryId!, machineDir) : openDb(machineDir);
   const info = db.prepare(scoped ? "INSERT INTO spec_author_operations (repository_id, author_session_id, operation, status, diagnostic, failure) VALUES (?, ?, ?, ?, ?, ?)" : "INSERT INTO spec_author_operations (author_session_id, operation, status, diagnostic, failure) VALUES (?, ?, ?, ?, ?)").run(...(scoped ? [repositoryId, sessionId, operation, status, diagnostic, failure ? JSON.stringify(failure) : null] : [sessionId, operation, status, diagnostic, failure ? JSON.stringify(failure) : null]));
-  return mapOperation(db.prepare("SELECT * FROM spec_author_operations WHERE id = ?").get(Number(info.lastInsertRowid)) as Record<string, unknown>);
+  return mapOperation(db.prepare(scoped ? "SELECT * FROM spec_author_operations WHERE id = ? AND repository_id = ?" : "SELECT * FROM spec_author_operations WHERE id = ?").get(...(scoped ? [Number(info.lastInsertRowid), repositoryId] : [Number(info.lastInsertRowid)])) as Record<string, unknown>);
 }
 
 export function listSpecAuthorOperations(repositoryId: string, sessionId: string, machineDir?: string): SpecAuthorOperation[];

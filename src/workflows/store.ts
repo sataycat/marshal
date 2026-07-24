@@ -309,7 +309,7 @@ export function deleteWorkflowProfile(
     const result = database
       .prepare("DELETE FROM workflow_profiles WHERE repository_id = ? AND id = ?")
       .run(repositoryId, id);
-    database.prepare("DELETE FROM agent_assignments WHERE profile_id = ?").run(id);
+    database.prepare("DELETE FROM agent_assignments WHERE repository_id = ? AND profile_id = ?").run(repositoryId, id);
     return result.changes > 0;
   })();
 }

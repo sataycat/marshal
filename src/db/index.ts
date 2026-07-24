@@ -15,9 +15,14 @@ export function openDb(machineDir?: string): Database.Database {
 }
 
 function storageRoot(candidate?: string): string {
-  // A checkout is execution input, never a daemon storage root. The explicit
-  // argument is retained only for daemon-owned MARSHAL_HOME test seams.
+  // A checkout is execution input, never a daemon storage root. Explicit
+  // arguments are daemon-owned MARSHAL_HOME test seams and intentionally win
+  // over the process environment so independent lifecycle tests cannot share
+  // state accidentally.
   if (!candidate || process.env.MARSHAL_HOME) return getGlobalDir();
+  // Legacy call sites sometimes still pass a source checkout while the
+  // repository-ID migration is being completed. Never create daemon state in
+  // that checkout; resolve it to the controlled home instead.
   if (existsSync(join(candidate, ".git"))) return getGlobalDir();
   return candidate;
 }

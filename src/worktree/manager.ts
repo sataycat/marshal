@@ -308,7 +308,7 @@ export class WorktreeManager {
       )
       .run(id, this.repositoryId, slug, branch, descriptor, this.sourcePath, worktreePath);
 
-    const record = (): WorktreeRow => this.db().prepare("SELECT * FROM worktrees WHERE id = ?").get(id) as WorktreeRow;
+    const record = (): WorktreeRow => this.db().prepare("SELECT * FROM worktrees WHERE id = ? AND repository_id = ?").get(id, this.repositoryId) as WorktreeRow;
     try {
       this.execGit(["worktree", "add", "-b", branch, worktreePath, "HEAD"]);
       try {

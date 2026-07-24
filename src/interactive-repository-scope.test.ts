@@ -7,6 +7,7 @@ import { createChatAttachment, getChatAttachment, listChatAttachments } from "./
 import { createChatThread } from "./chat/store.js";
 import { createPermissionRequest, getPermissionRequest, listPermissionRequests } from "./acp/permission-store.js";
 import { appendEvent, createPrompt, createSession, getSession, listSessionEvents } from "./acp/supervisor-store.js";
+import { openDatabase } from "./db/index.js";
 
 const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
@@ -33,5 +34,15 @@ describe("interactive repository ownership", () => {
     expect(listSessionEvents(second.id, session.id, machineDir)).toEqual([]);
     expect(getPermissionRequest(second.id, permission.id, machineDir)).toBeUndefined();
     expect(listPermissionRequests(second.id, thread.id, machineDir)).toEqual([]);
+  });
+
+  it("rejects cross-repository inserts enforced by composite foreign keys", () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "marshal-fk-machine-"));
+    const first = repo(machineDir);
+    const second = repo(machineDir);
+    const thread = createChatThread(first.id, { agentId: "agent", agentVersion: "1" }, machineDir);
+    const db = openDatabase(machineDir);
+    expect(() => db.prepare("INSERT INTO chat_messages (repository_id, thread_id, role, content) VALUES (?, ?, 'user', 'bad')").run(second.id, thread.id)).toThrow();
+    expect(() => db.prepare("INSERT INTO tasks (repository_id, slug, title, workflow_profile_id) VALUES (?, 'bad', 'bad', NULL)").run("missing-repository")).toThrow();
   });
 });

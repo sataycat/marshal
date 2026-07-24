@@ -188,16 +188,19 @@ export class RunLog {
   }
 
   setSupervisorEvidence(runId: number, input: { sessionId?: string | null; capabilities?: unknown }): void {
+    if (!this.getRun(runId)) throw new RunNotFoundError(runId);
     this.db.prepare("UPDATE runs SET supervisor_session_id = COALESCE(?, supervisor_session_id), capabilities = COALESCE(?, capabilities) WHERE id = ?").run(input.sessionId ?? null, input.capabilities === undefined ? null : JSON.stringify(input.capabilities), runId);
   }
 
   setVerification(runId: number, status: "pass" | "fail", output: string): void {
+    if (!this.getRun(runId)) throw new RunNotFoundError(runId);
     this.db.prepare("UPDATE runs SET verification_status = ?, verification_output = ? WHERE id = ?").run(status, output, runId);
   }
 
   insertEvent(runId: number, seq: number, event: AgentEvent): void {
     const ownerRepositoryId = this.repositoryId ?? (this.db.prepare("SELECT repository_id FROM runs WHERE id = ?").get(runId) as { repository_id: string } | undefined)?.repository_id;
     if (!ownerRepositoryId) throw new Error(`Run not found: ${runId}`);
+    if (this.repositoryId && !this.getRun(runId)) throw new RunNotFoundError(runId);
     this.db
       .prepare("INSERT INTO run_events (repository_id, run_id, seq, type, payload) VALUES (?, ?, ?, ?, ?)")
       .run(ownerRepositoryId, runId, seq, event.type, JSON.stringify(event));
@@ -205,6 +208,7 @@ export class RunLog {
   }
 
   finishRun(runId: number, status: "done" | "error" | "authentication_required", opts: FinishRunOptions = {}): void {
+    if (!this.getRun(runId)) throw new RunNotFoundError(runId);
     if (opts.commitSha !== undefined) {
       this.db
         .prepare(
@@ -220,7 +224,7 @@ export class RunLog {
         .prepare("UPDATE runs SET status = ?, failure = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(status, opts.failure ? JSON.stringify(opts.failure) : null, runId);
     }
-    this.db.prepare("UPDATE run_operations SET status = ?, diagnostic = ?, ended_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status = 'running'").run(status === "done" ? "succeeded" : status, opts.error ?? null, runId);
+    this.db.prepare("UPDATE run_operations SET status = ?, diagnostic = ?, ended_at = CURRENT_TIMESTAMP WHERE run_id = ? AND (? IS NULL OR repository_id = ?) AND status = 'running'").run(status === "done" ? "succeeded" : status, opts.error ?? null, runId, this.repositoryId ?? null, this.repositoryId ?? null);
     if (this.bus) {
       const run = this.getRun(runId);
       if (run) publishRunFinished(this.bus, toRunPayload(run));
@@ -234,15 +238,15 @@ export class RunLog {
 
   getLastRunForTask(taskId: number): RunRecord | undefined {
     const row = this.db
-      .prepare("SELECT * FROM runs WHERE task_id = ? ORDER BY started_at DESC, id DESC LIMIT 1")
-      .get(taskId) as RunRow | undefined;
+      .prepare("SELECT * FROM runs WHERE task_id = ? AND (? IS NULL OR repository_id = ?) ORDER BY started_at DESC, id DESC LIMIT 1")
+      .get(taskId, this.repositoryId ?? null, this.repositoryId ?? null) as RunRow | undefined;
     return row ? rowToRun(row) : undefined;
   }
 
   listRunsForTask(taskId: number): RunRecord[] {
     const rows = this.db
-      .prepare("SELECT * FROM runs WHERE task_id = ? ORDER BY started_at DESC, id DESC")
-      .all(taskId) as RunRow[];
+      .prepare("SELECT * FROM runs WHERE task_id = ? AND (? IS NULL OR repository_id = ?) ORDER BY started_at DESC, id DESC")
+      .all(taskId, this.repositoryId ?? null, this.repositoryId ?? null) as RunRow[];
     return rows.map(rowToRun);
   }
 
@@ -252,12 +256,15 @@ export class RunLog {
     const afterSeq = opts.afterSeq ?? -1;
     const limit = opts.limit ?? DEFAULT_RUN_EVENTS_LIMIT;
     const rows = this.db
-      .prepare("SELECT * FROM run_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?")
-      .all(runId, afterSeq, limit) as RunEventRow[];
+      .prepare("SELECT * FROM run_events WHERE run_id = ? AND seq > ? AND (? IS NULL OR repository_id = ?) ORDER BY seq LIMIT ?")
+      .all(runId, afterSeq, this.repositoryId ?? null, this.repositoryId ?? null, limit) as RunEventRow[];
     return rows.map(rowToRunEvent);
   }
   resolveAuthenticationRequired(runId: number): RunRecord { return this.db.transaction(() => { const run = this.getRun(runId); if (!run) throw new RunNotFoundError(runId); if (run.status !== "authentication_required" || run.authRecoveryResolvedAt || run.supersededByRunId) throw new Error("Authentication recovery is stale or already resolved"); const task = this.db.prepare("SELECT status FROM tasks WHERE id = ?").get(run.taskId) as { status: string } | undefined; if (!task) throw new Error("Owning task no longer exists"); const expected = run.role === "builder" ? "building" : "validating"; const dispatchable = run.role === "builder" ? "ready" : "validating"; if (task.status !== expected) throw new Error(`Owning task is ${task.status}; expected ${expected}`); this.db.prepare("UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = ?").run(dispatchable, run.taskId, expected); this.db.prepare("UPDATE runs SET auth_recovery_resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'authentication_required' AND auth_recovery_resolved_at IS NULL").run(runId); return this.getRun(runId)!; })(); }
-  linkSupersedingRun(runId: number, supersedingRunId: number): void { this.db.prepare("UPDATE runs SET superseded_by_run_id = ? WHERE id = ? AND status = 'authentication_required'").run(supersedingRunId, runId); }
+  linkSupersedingRun(runId: number, supersedingRunId: number): void {
+    if (!this.getRun(runId) || (this.repositoryId && !this.getRun(supersedingRunId))) throw new RunNotFoundError(runId);
+    this.db.prepare("UPDATE runs SET superseded_by_run_id = ? WHERE id = ? AND (? IS NULL OR repository_id = ?) AND status = 'authentication_required'").run(supersedingRunId, runId, this.repositoryId ?? null, this.repositoryId ?? null);
+  }
 }
 
 function toRunPayload(run: RunRecord): RunPayload {

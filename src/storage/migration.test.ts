@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,9 @@ describe("consolidated database migrations", () => {
     const db = openDatabase(home);
     expect(existsSync(join(home, "marshal.db"))).toBe(true);
     expect(db.prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations").get()).toEqual({ count: 4 });
+    expect(readdirSync(home).filter((name) => name === "marshal.db")).toHaveLength(1);
+    expect(readdirSync(home).filter((name) => name === "machine.db")).toHaveLength(0);
+    expect(readdirSync(home).filter((name) => name === "state.db")).toHaveLength(0);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'repositories'").get()).toBeTruthy();
     expect(db.pragma("integrity_check")).toEqual([{ integrity_check: "ok" }]);
     expect(db.pragma("foreign_key_check")).toEqual([]);
